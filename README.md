@@ -28,7 +28,8 @@ npm run typecheck
 | **Library** | 17 rows. Six carry note data; the rest are placeholders — see [Rights](#rights). |
 | **Tutorial** | Static. Explains the nut, the finger numbers, your own tape colours, and how to read each vision. |
 | **Practice sheet** | A/B loop by bar, tempo 40–120 %, fingering blackout, tape overlay, cue density. |
-| **Play** | Three visions — Tab, Score, Highway — over a fixed fingerboard panel and cents rail. |
+| **Play** | Three visions — Tab, Score, Highway — over a fixed fingerboard panel and cents rail, with the backing sounding underneath. |
+| **Import** | Bring your own MIDI; the app fingers the cello line and makes a backing from the rest. |
 | **Tuner** | Open strings, off the same pitch engine the play screens use. |
 | **My tapes** | The tape colours and positions on *your* fingerboard. Everything else follows them. |
 
@@ -290,6 +291,89 @@ None of this is required by the app. If `java` regains network access, drop the
 `eas build --platform android --profile preview` builds on Expo's
 infrastructure and hands back a download link, which avoids the toolchain
 entirely. It needs an Expo account (`eas login`) and `eas.json`.
+
+---
+
+## Backing tracks
+
+Every piece can sound underneath you while you play. Four listen modes, chosen
+because they are the four things you actually want at different stages:
+
+| Mode | What sounds |
+| --- | --- |
+| **Off** | Nothing. You are the only thing making sound. |
+| **Backing** | Everything except the cello line — play the solo over the top. |
+| **Cello** | The written cello part alone, so you can hear what you are aiming at. |
+| **Both** | The whole thing. Good for learning a piece, less so for testing yourself. |
+
+### Where the accompaniment comes from
+
+Bundled pieces have no accompaniment file, so one is **generated from the score
+itself** — which means it works for every piece in the library, including
+anything you import later, and involves nobody else's material:
+
+- **Drone** — a sustained tonic and fifth, and deliberately no third. The
+  oldest intonation tool there is: against a fixed drone a note four cents out
+  starts to beat, and you hear it long before a tuner shows it.
+- **Chords** — one triad per bar, inferred from the notes in that bar. The
+  inference weights the root and third heavily and adds a large bonus when a
+  candidate root matches the **lowest sounding note**, which is why the opening
+  of the Bach reads as G major rather than B minor: B and D each sound six
+  times against a G that sounds twice, but that G is the bass.
+- **Pulse** — the same chords re-struck on every beat, beat one accented.
+
+Imported files skip all of that and use their own tracks.
+
+### How it plays
+
+There is no MIDI playback on either platform, so the accompaniment is
+synthesised to PCM up front and played as audio. **The buffer is the loop** —
+it holds exactly the bars being practised at exactly the chosen tempo, and the
+player repeats it. That removes the whole category of drift and seek problems a
+scheduler would introduce: the audio cannot fall out of step with the playhead
+because there is nothing to keep in step, only one buffer that ends where it
+began. Changing the loop or the tempo re-renders it, debounced.
+
+`src/audio/synth.ts` is additive, reading from wavetables built one per octave
+band. Summing harmonics per sample would mean tens of millions of `Math.sin`
+calls for a few bars; a table per band turns each sample into two array reads
+and a lerp, and band-limiting stops a high note's upper partials folding back
+down the spectrum and ringing out of tune.
+
+Web plays the sample buffer directly through an `AudioBufferSourceNode` with
+`loop = true`, which repeats gaplessly. Native has no such API, so the buffer is
+encoded as a WAV, written to the cache and played by `expo-audio`.
+
+---
+
+## Importing your own music
+
+**Library → Import a MIDI file.** Pick a file, say which track is the cello, and
+the app runs the same ergonomic solver the offline converter uses to finger that
+line — then turns every other track into the backing. You get a piece readable
+in all three visions *and* playable along to, from a file the app never shipped.
+
+The original MIDI is kept (a few tens of kilobytes, capped at 512 KB) and the
+score is rebuilt from it on demand rather than stored, so a later improvement to
+the fingering solver applies to everything already imported.
+
+Notes above the cello's range are moved down an octave rather than dropped —
+silently losing the melody is worse than moving it.
+
+### Rights
+
+**The app ships no third party's music, and that includes MIDI transcriptions.**
+A MIDI file of a song is a copy of the composition; where it was downloaded from
+does not change that. So the game, film, television and band material that would
+be obvious candidates here are not bundled, and will not be.
+
+What is bundled is original studies written for this app and public-domain
+classical work. What you import is your own business — the app is built to make
+that easy, and nothing you add ever leaves the device.
+
+For public-domain classical repertoire with MIDI alongside the scores, the
+[Mutopia Project](https://www.mutopiaproject.org/) is the best starting point;
+it carries all six Bach cello suites among about a hundred cello works.
 
 ---
 

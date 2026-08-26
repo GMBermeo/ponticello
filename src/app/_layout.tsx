@@ -8,6 +8,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { DeviceCanvas } from '@/components/DeviceCanvas';
+import { ImportedLibraryProvider } from '@/state/library';
 import { SessionProvider } from '@/state/session';
 import { SettingsProvider } from '@/state/settings';
 import { ThemeProvider } from '@/theme/ThemeProvider';
@@ -35,7 +36,8 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <SettingsProvider>
           <SessionProvider>
-            <DeviceCanvas>
+            <ImportedLibraryProvider>
+              <DeviceCanvas>
               <ThemeProvider chrome="paper">
                 <Stack
                   screenOptions={{
@@ -45,7 +47,8 @@ export default function RootLayout() {
                   }}
                 />
               </ThemeProvider>
-            </DeviceCanvas>
+              </DeviceCanvas>
+            </ImportedLibraryProvider>
           </SessionProvider>
         </SettingsProvider>
       </SafeAreaProvider>

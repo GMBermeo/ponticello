@@ -182,3 +182,245 @@ export const STUDIES: CelloSongScore[] = [
   C_MAJOR_TWO_STRINGS,
   THUMB_POSITION_LADDER,
 ];
+
+import { BackingTrack, BackingPart } from '@/domain/backing';
+
+function makePulsePart(id: string, totalMs: number, beatMs: number): BackingPart {
+  const notes = [];
+  const beats = Math.floor(totalMs / beatMs);
+  for (let i = 0; i < beats; i++) {
+    notes.push({
+      midiNumber: 42, // Hi-hat / click
+      startTimeMs: i * beatMs,
+      durationMs: Math.min(80, beatMs * 0.4),
+      velocity: i % 4 === 0 ? 0.6 : 0.35,
+    });
+  }
+  return {
+    id: `${id}-pulse`,
+    name: 'Rhythm Pulse',
+    instrument: 'percussion',
+    role: 'accompaniment',
+    gain: 0.45,
+    muted: false,
+    notes,
+  };
+}
+
+export const OPEN_STRINGS_BACKING: BackingTrack = {
+  id: 'open-strings',
+  name: 'Four Open Strings',
+  source: 'imported',
+  durationMs: 32000,
+  bpm: 60,
+  parts: [
+    {
+      id: 'open-strings-harmony',
+      name: 'Acoustic Guitar & Piano',
+      instrument: 'piano',
+      role: 'accompaniment',
+      gain: 0.55,
+      muted: false,
+      notes: [
+        // Bar 1 & 5: C major (0-4000ms, 16000-20000ms)
+        ...[0, 16000].flatMap((t) => [
+          { midiNumber: 48, startTimeMs: t, durationMs: 3800, velocity: 0.55 },
+          { midiNumber: 52, startTimeMs: t, durationMs: 3800, velocity: 0.5 },
+          { midiNumber: 55, startTimeMs: t, durationMs: 3800, velocity: 0.5 },
+          { midiNumber: 60, startTimeMs: t, durationMs: 3800, velocity: 0.5 },
+        ]),
+        // Bar 2 & 6: G major (4000-8000ms, 20000-24000ms)
+        ...[4000, 20000].flatMap((t) => [
+          { midiNumber: 43, startTimeMs: t, durationMs: 3800, velocity: 0.55 },
+          { midiNumber: 50, startTimeMs: t, durationMs: 3800, velocity: 0.5 },
+          { midiNumber: 55, startTimeMs: t, durationMs: 3800, velocity: 0.5 },
+          { midiNumber: 59, startTimeMs: t, durationMs: 3800, velocity: 0.5 },
+        ]),
+        // Bar 3 & 7: D major (8000-12000ms, 24000-28000ms)
+        ...[8000, 24000].flatMap((t) => [
+          { midiNumber: 50, startTimeMs: t, durationMs: 3800, velocity: 0.55 },
+          { midiNumber: 57, startTimeMs: t, durationMs: 3800, velocity: 0.5 },
+          { midiNumber: 62, startTimeMs: t, durationMs: 3800, velocity: 0.5 },
+          { midiNumber: 66, startTimeMs: t, durationMs: 3800, velocity: 0.5 },
+        ]),
+        // Bar 4 & 8: A major (12000-16000ms, 28000-32000ms)
+        ...[12000, 28000].flatMap((t) => [
+          { midiNumber: 45, startTimeMs: t, durationMs: 3800, velocity: 0.55 },
+          { midiNumber: 52, startTimeMs: t, durationMs: 3800, velocity: 0.5 },
+          { midiNumber: 57, startTimeMs: t, durationMs: 3800, velocity: 0.5 },
+          { midiNumber: 61, startTimeMs: t, durationMs: 3800, velocity: 0.5 },
+        ]),
+      ],
+    },
+    {
+      id: 'open-strings-bass',
+      name: 'Acoustic Bass',
+      instrument: 'bass',
+      role: 'accompaniment',
+      gain: 0.6,
+      muted: false,
+      notes: [
+        ...[0, 16000].map((t) => ({ midiNumber: 36, startTimeMs: t, durationMs: 3800, velocity: 0.6 })),
+        ...[4000, 20000].map((t) => ({ midiNumber: 43, startTimeMs: t, durationMs: 3800, velocity: 0.6 })),
+        ...[8000, 24000].map((t) => ({ midiNumber: 38, startTimeMs: t, durationMs: 3800, velocity: 0.6 })),
+        ...[12000, 28000].map((t) => ({ midiNumber: 45, startTimeMs: t, durationMs: 3800, velocity: 0.6 })),
+      ],
+    },
+    makePulsePart('open-strings', 32000, 1000),
+  ],
+};
+
+export const FIRST_POSITION_LADDER_BACKING: BackingTrack = {
+  id: 'first-position-ladder',
+  name: 'First Position Ladder',
+  source: 'imported',
+  durationMs: 32000,
+  bpm: 60,
+  parts: [
+    {
+      id: 'first-position-ladder-chords',
+      name: 'Piano Chords',
+      instrument: 'piano',
+      role: 'accompaniment',
+      gain: 0.5,
+      muted: false,
+      notes: [
+        // C string: C - G7 (0-8000ms)
+        { midiNumber: 48, startTimeMs: 0, durationMs: 3800, velocity: 0.5 },
+        { midiNumber: 52, startTimeMs: 0, durationMs: 3800, velocity: 0.45 },
+        { midiNumber: 55, startTimeMs: 0, durationMs: 3800, velocity: 0.45 },
+        { midiNumber: 47, startTimeMs: 4000, durationMs: 3800, velocity: 0.5 },
+        { midiNumber: 53, startTimeMs: 4000, durationMs: 3800, velocity: 0.45 },
+        { midiNumber: 55, startTimeMs: 4000, durationMs: 3800, velocity: 0.45 },
+        // G string: G - D7 (8000-16000ms)
+        { midiNumber: 43, startTimeMs: 8000, durationMs: 3800, velocity: 0.5 },
+        { midiNumber: 50, startTimeMs: 8000, durationMs: 3800, velocity: 0.45 },
+        { midiNumber: 55, startTimeMs: 8000, durationMs: 3800, velocity: 0.45 },
+        { midiNumber: 50, startTimeMs: 12000, durationMs: 3800, velocity: 0.5 },
+        { midiNumber: 54, startTimeMs: 12000, durationMs: 3800, velocity: 0.45 },
+        { midiNumber: 57, startTimeMs: 12000, durationMs: 3800, velocity: 0.45 },
+        // D string: D - A7 (16000-24000ms)
+        { midiNumber: 50, startTimeMs: 16000, durationMs: 3800, velocity: 0.5 },
+        { midiNumber: 54, startTimeMs: 16000, durationMs: 3800, velocity: 0.45 },
+        { midiNumber: 57, startTimeMs: 16000, durationMs: 3800, velocity: 0.45 },
+        { midiNumber: 45, startTimeMs: 20000, durationMs: 3800, velocity: 0.5 },
+        { midiNumber: 52, startTimeMs: 20000, durationMs: 3800, velocity: 0.45 },
+        { midiNumber: 57, startTimeMs: 20000, durationMs: 3800, velocity: 0.45 },
+        // A string: A - E7 (24000-32000ms)
+        { midiNumber: 45, startTimeMs: 24000, durationMs: 3800, velocity: 0.5 },
+        { midiNumber: 52, startTimeMs: 24000, durationMs: 3800, velocity: 0.45 },
+        { midiNumber: 57, startTimeMs: 24000, durationMs: 3800, velocity: 0.45 },
+        { midiNumber: 52, startTimeMs: 28000, durationMs: 3800, velocity: 0.5 },
+        { midiNumber: 56, startTimeMs: 28000, durationMs: 3800, velocity: 0.45 },
+        { midiNumber: 59, startTimeMs: 28000, durationMs: 3800, velocity: 0.45 },
+      ],
+    },
+    makePulsePart('first-position-ladder', 32000, 1000),
+  ],
+};
+
+export const D_MAJOR_TWO_STRINGS_BACKING: BackingTrack = {
+  id: 'd-major-two-strings',
+  name: 'D Major, Two Strings',
+  source: 'imported',
+  durationMs: 14545,
+  bpm: 66,
+  parts: [
+    {
+      id: 'd-major-chords',
+      name: 'Acoustic Guitar',
+      instrument: 'pluck',
+      role: 'accompaniment',
+      gain: 0.52,
+      muted: false,
+      notes: [
+        // Bar 1: D major
+        { midiNumber: 50, startTimeMs: 0, durationMs: 3500, velocity: 0.5 },
+        { midiNumber: 57, startTimeMs: 0, durationMs: 3500, velocity: 0.45 },
+        { midiNumber: 62, startTimeMs: 0, durationMs: 3500, velocity: 0.45 },
+        // Bar 2: G major
+        { midiNumber: 43, startTimeMs: 3636, durationMs: 3500, velocity: 0.5 },
+        { midiNumber: 50, startTimeMs: 3636, durationMs: 3500, velocity: 0.45 },
+        { midiNumber: 55, startTimeMs: 3636, durationMs: 3500, velocity: 0.45 },
+        // Bar 3: A7
+        { midiNumber: 45, startTimeMs: 7272, durationMs: 3500, velocity: 0.5 },
+        { midiNumber: 52, startTimeMs: 7272, durationMs: 3500, velocity: 0.45 },
+        { midiNumber: 57, startTimeMs: 7272, durationMs: 3500, velocity: 0.45 },
+        // Bar 4: D major
+        { midiNumber: 50, startTimeMs: 10908, durationMs: 3500, velocity: 0.5 },
+        { midiNumber: 57, startTimeMs: 10908, durationMs: 3500, velocity: 0.45 },
+        { midiNumber: 62, startTimeMs: 10908, durationMs: 3500, velocity: 0.45 },
+      ],
+    },
+    makePulsePart('d-major', 14545, 909),
+  ],
+};
+
+export const C_MAJOR_TWO_STRINGS_BACKING: BackingTrack = {
+  id: 'c-major-two-strings',
+  name: 'C Major, Two Strings',
+  source: 'imported',
+  durationMs: 14545,
+  bpm: 66,
+  parts: [
+    {
+      id: 'c-major-chords',
+      name: 'Acoustic Guitar',
+      instrument: 'pluck',
+      role: 'accompaniment',
+      gain: 0.52,
+      muted: false,
+      notes: [
+        // Bar 1: C major
+        { midiNumber: 48, startTimeMs: 0, durationMs: 3500, velocity: 0.5 },
+        { midiNumber: 52, startTimeMs: 0, durationMs: 3500, velocity: 0.45 },
+        { midiNumber: 55, startTimeMs: 0, durationMs: 3500, velocity: 0.45 },
+        // Bar 2: F major
+        { midiNumber: 41, startTimeMs: 3636, durationMs: 3500, velocity: 0.5 },
+        { midiNumber: 48, startTimeMs: 3636, durationMs: 3500, velocity: 0.45 },
+        { midiNumber: 53, startTimeMs: 3636, durationMs: 3500, velocity: 0.45 },
+        // Bar 3: G7
+        { midiNumber: 43, startTimeMs: 7272, durationMs: 3500, velocity: 0.5 },
+        { midiNumber: 50, startTimeMs: 7272, durationMs: 3500, velocity: 0.45 },
+        { midiNumber: 53, startTimeMs: 7272, durationMs: 3500, velocity: 0.45 },
+        // Bar 4: C major
+        { midiNumber: 48, startTimeMs: 10908, durationMs: 3500, velocity: 0.5 },
+        { midiNumber: 52, startTimeMs: 10908, durationMs: 3500, velocity: 0.45 },
+        { midiNumber: 55, startTimeMs: 10908, durationMs: 3500, velocity: 0.45 },
+      ],
+    },
+    makePulsePart('c-major', 14545, 909),
+  ],
+};
+
+export const THUMB_POSITION_LADDER_BACKING: BackingTrack = {
+  id: 'thumb-position-ladder',
+  name: 'Thumb Position Ladder',
+  source: 'imported',
+  durationMs: 17142,
+  bpm: 56,
+  parts: [
+    {
+      id: 'thumb-ladder-drone',
+      name: 'Ambient Drone Pad',
+      instrument: 'drone',
+      role: 'accompaniment',
+      gain: 0.5,
+      muted: false,
+      notes: [
+        { midiNumber: 50, startTimeMs: 0, durationMs: 17142, velocity: 0.5 },
+        { midiNumber: 57, startTimeMs: 0, durationMs: 17142, velocity: 0.45 },
+      ],
+    },
+    makePulsePart('thumb-ladder', 17142, 1071),
+  ],
+};
+
+export const STUDIES_BACKINGS: Record<string, BackingTrack> = {
+  'open-strings': OPEN_STRINGS_BACKING,
+  'first-position-ladder': FIRST_POSITION_LADDER_BACKING,
+  'd-major-two-strings': D_MAJOR_TWO_STRINGS_BACKING,
+  'c-major-two-strings': C_MAJOR_TWO_STRINGS_BACKING,
+  'thumb-position-ladder': THUMB_POSITION_LADDER_BACKING,
+};
+

@@ -3,7 +3,9 @@ import React, {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
 } from 'react';
 
+import { AccompanimentStyle } from '@/domain/backing';
 import { DEFAULT_TAPE_SETS, TapeSet } from '@/domain/tapes';
+import { ListenMode } from '@/audio/backing/types';
 import { ChromeName } from '@/theme/tokens';
 
 export type VisionName = 'tab' | 'score' | 'highway';
@@ -20,8 +22,13 @@ export interface Settings {
   /** Draw the tapes behind the notes on the highway and the fingerboard panel. */
   showTapes: boolean;
   metronome: boolean;
-  drone: boolean;
   countInBars: number;
+  /** What to sound while you play: nothing, the backing, the cello line, or both. */
+  listenMode: ListenMode;
+  /** How to build an accompaniment for pieces that did not come with one. */
+  accompaniment: AccompanimentStyle;
+  /** Backing level, 0–1. Deliberately below the cello you are producing. */
+  backingVolume: number;
 }
 
 const DEFAULTS: Settings = {
@@ -32,8 +39,10 @@ const DEFAULTS: Settings = {
   tapeSets: DEFAULT_TAPE_SETS,
   showTapes: true,
   metronome: true,
-  drone: false,
   countInBars: 2,
+  listenMode: 'off',
+  accompaniment: 'drone',
+  backingVolume: 0.7,
 };
 
 const STORAGE_KEY = 'ponticello:settings:v1';

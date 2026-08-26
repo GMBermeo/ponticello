@@ -314,3 +314,115 @@ export class CentsSmoother {
     this.value = 0;
   }
 }
+
+export interface TunerSmoothedReading {
+  frequency: number;
+  cents: number;
+  nearestMidi: number;
+  voiced: boolean;
+  stability: number;
+}
+
+/**
+ * Rolling median and outlier-rejection smoother designed for digital tuners.
+ *
+ * Implements digital instrument tuner best practices:
+ * - 1-second rolling history window to filter bow transients and noise spikes.
+ * - Median frequency and cents calculation to ignore harmonic/octave errors.
+ * - Gentle hold duration between bow changes so the pitch readout remains stable.
+ * - Instant reset when switching to a different string/note.
+ */
+export class TunerPitchSmoother {
+  private readonly windowMs: number;
+  private readonly holdMs: number;
+  private samples: Array<{ time: number; frequency: number; cents: number; midi: number }> = [];
+  private lastVoicedTime = 0;
+  private currentMidi: number | null = null;
+  private smoothedCents = 0;
+
+  constructor(windowMs = 1000, holdMs = 400) {
+    this.windowMs = windowMs;
+    this.holdMs = holdMs;
+  }
+
+  push(frequency: number, rawCents: number, nowMs = Date.now()): TunerSmoothedReading {
+    if (frequency <= 0) {
+      if (this.samples.length > 0 && nowMs - this.lastVoicedTime < this.holdMs) {
+        return this.computeMedian(nowMs, false);
+      }
+      this.reset();
+      return { frequency: 0, cents: 0, nearestMidi: 0, voiced: false, stability: 0 };
+    }
+
+    this.lastVoicedTime = nowMs;
+    const midi = Math.round(69 + 12 * Math.log2(frequency / 440));
+
+    // If note changed to a different pitch (> 1.5 semitones), reset window for instant response
+    if (this.currentMidi !== null && Math.abs(midi - this.currentMidi) >= 2) {
+      this.samples = [];
+      this.smoothedCents = rawCents;
+    }
+    this.currentMidi = midi;
+
+    this.samples.push({ time: nowMs, frequency, cents: rawCents, midi });
+
+    const cutoff = nowMs - this.windowMs;
+    while (this.samples.length > 0 && this.samples[0].time < cutoff) {
+      this.samples.shift();
+    }
+
+    return this.computeMedian(nowMs, true);
+  }
+
+  private computeMedian(nowMs: number, activelyVoiced: boolean): TunerSmoothedReading {
+    if (this.samples.length === 0) {
+      return { frequency: 0, cents: 0, nearestMidi: 0, voiced: false, stability: 0 };
+    }
+
+    // Dominant note in window (rejects octave jumps / transient false harmonics)
+    const midiCounts = new Map<number, number>();
+    for (const s of this.samples) {
+      midiCounts.set(s.midi, (midiCounts.get(s.midi) ?? 0) + 1);
+    }
+    let dominantMidi = this.samples[this.samples.length - 1].midi;
+    let maxCount = 0;
+    for (const [m, count] of midiCounts.entries()) {
+      if (count > maxCount) {
+        maxCount = count;
+        dominantMidi = m;
+      }
+    }
+
+    const relevant = this.samples.filter((s) => s.midi === dominantMidi);
+    const valid = relevant.length > 0 ? relevant : this.samples;
+
+    const freqs = valid.map((s) => s.frequency).sort((a, b) => a - b);
+    const centsArr = valid.map((s) => s.cents).sort((a, b) => a - b);
+
+    const midIdx = Math.floor(freqs.length / 2);
+    const medianFreq = freqs.length % 2 === 0 ? (freqs[midIdx - 1] + freqs[midIdx]) / 2 : freqs[midIdx];
+    const medianCents = centsArr.length % 2 === 0 ? (centsArr[midIdx - 1] + centsArr[midIdx]) / 2 : centsArr[midIdx];
+
+    // Smooth cents for fluid needle movement without sudden jumps
+    this.smoothedCents += 0.3 * (medianCents - this.smoothedCents);
+
+    const stability = Math.min(1, valid.length / Math.max(4, this.samples.length));
+    const voiced = activelyVoiced || (nowMs - this.lastVoicedTime < this.holdMs);
+
+    return {
+      frequency: medianFreq,
+      cents: this.smoothedCents,
+      nearestMidi: dominantMidi,
+      voiced,
+      stability,
+    };
+  }
+
+  reset(): void {
+    this.samples = [];
+    this.currentMidi = null;
+    this.lastVoicedTime = 0;
+    this.smoothedCents = 0;
+  }
+}
+

@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
-import { View } from 'react-native';
+import { Pressable, TextInput, View } from 'react-native';
 
 import { Fingerboard, FingerboardScaleNote } from '@/components/Fingerboard';
 import { Button, PressableRow, Segmented } from '@/components/ui/controls';
@@ -8,19 +8,28 @@ import {
   Body, Grow, Kicker, Label, Num, Row, Rule, Stack, TapeChip, Title,
 } from '@/components/ui/primitives';
 import { Screen } from '@/components/ui/Screen';
-import { TAPE_COLOR_LABEL } from '@/theme/tokens';
+import { FONT, TAPE_COLOR_LABEL } from '@/theme/tokens';
 import { APP_NAME, APP_TAGLINE } from '@/brand';
 import { LIBRARY_ROWS, LibraryRow } from '@/scores';
+import { useImportedRows } from '@/state/usePiece';
 import { useSettings } from '@/state/settings';
 import { useTheme } from '@/theme/ThemeProvider';
 
-type Filter = 'ALL' | 'Beginner' | 'Intermediate' | 'Advanced';
+type CategoryFilter = 'ALL' | 'study' | 'song' | 'imported';
+type DifficultyFilter = 'ALL' | 'Beginner' | 'Intermediate' | 'Advanced';
 
-const FILTERS = [
-  { value: 'ALL' as const, label: 'ALL' },
-  { value: 'Beginner' as const, label: 'BEGINNER' },
-  { value: 'Intermediate' as const, label: 'INTER' , hint: 'Intermediate' },
-  { value: 'Advanced' as const, label: 'ADVANCED' },
+const CATEGORY_TABS = [
+  { value: 'ALL' as const, label: 'ALL', hint: 'All pieces' },
+  { value: 'study' as const, label: 'STUDIES', hint: 'Training studies & etudes' },
+  { value: 'song' as const, label: 'SONGS', hint: 'Rock, metal, soundtracks & classical' },
+  { value: 'imported' as const, label: 'IMPORTED', hint: 'Your imported files' },
+];
+
+const DIFFICULTY_FILTERS = [
+  { value: 'ALL' as const, label: 'ALL LVLS' },
+  { value: 'Beginner' as const, label: 'BEG' },
+  { value: 'Intermediate' as const, label: 'INT' },
+  { value: 'Advanced' as const, label: 'ADV' },
 ];
 
 /**
@@ -35,25 +44,110 @@ export default function LibraryScreen() {
   const theme = useTheme();
   const router = useRouter();
   const { settings } = useSettings();
-  const [filter, setFilter] = useState<Filter>('ALL');
+  const imported = useImportedRows();
+  const [category, setCategory] = useState<CategoryFilter>('ALL');
+  const [difficulty, setDifficulty] = useState<DifficultyFilter>('ALL');
+  const [search, setSearch] = useState('');
 
-  const rows = useMemo(
-    () => (filter === 'ALL' ? LIBRARY_ROWS : LIBRARY_ROWS.filter((r) => r.difficulty === filter)),
-    [filter],
-  );
+  // Imported pieces come first when not filtered
+  const allRows = useMemo(() => [...imported, ...LIBRARY_ROWS], [imported]);
+
+  const rows = useMemo(() => {
+    let list = allRows;
+
+    if (category === 'imported') {
+      list = imported;
+    } else if (category === 'study') {
+      list = list.filter((r) => r.category === 'study');
+    } else if (category === 'song') {
+      list = list.filter((r) => r.category === 'song' || r.category === 'classical');
+    }
+
+    if (difficulty !== 'ALL') {
+      list = list.filter((r) => r.difficulty === difficulty);
+    }
+
+    if (search.trim()) {
+      const q = search.toLowerCase().trim();
+      list = list.filter((r) =>
+        r.title.toLowerCase().includes(q)
+        || r.composer.toLowerCase().includes(q)
+        || r.origin.toLowerCase().includes(q)
+        || r.keySignature.toLowerCase().includes(q),
+      );
+    }
+
+    return list;
+  }, [allRows, imported, category, difficulty, search]);
 
   const wide = !theme.scale.compact;
 
   const header = (
     <>
       <Stack padX={20} padY={14} gap={2}>
-        <Kicker size={10}>{`${LIBRARY_ROWS.length} PIECES · EMBEDDED · OFFLINE`}</Kicker>
+        <Kicker size={10}>
+          {search.trim()
+            ? `${rows.length} MATCHES OF ${allRows.length} PIECES · OFFLINE`
+            : `${allRows.length} PIECES · ${imported.length} IMPORTED · OFFLINE`}
+        </Kicker>
         <Title size={34}>{APP_NAME}</Title>
         <Label size={11} style={{ textTransform: 'none' }}>{APP_TAGLINE}</Label>
       </Stack>
       <Rule weight={2} />
-      <View style={{ paddingHorizontal: theme.s(20), paddingVertical: theme.s(10) }}>
-        <Segmented segments={FILTERS} value={filter} onChange={setFilter} grow compact />
+
+      {/* Search bar */}
+      <View style={{ paddingHorizontal: theme.s(20), paddingTop: theme.s(10), paddingBottom: theme.s(6) }}>
+        <Row
+          gap={8}
+          style={{
+            borderWidth: theme.rule(1),
+            borderColor: search.trim() ? theme.chrome.accent : theme.chrome.line,
+            backgroundColor: theme.chrome.surface,
+            paddingHorizontal: theme.s(12),
+            height: theme.s(38),
+            alignItems: 'center',
+          }}
+        >
+          <Label size={11} color={search.trim() ? theme.chrome.accent : theme.chrome.dim}>
+            SEARCH
+          </Label>
+          <TextInput
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Search by title, artist, key..."
+            placeholderTextColor={theme.chrome.dim}
+            style={{
+              flex: 1,
+              color: theme.chrome.ink,
+              fontSize: theme.font(13),
+              fontFamily: FONT.regular,
+              padding: 0,
+            }}
+            autoCapitalize="none"
+            autoCorrect={false}
+            clearButtonMode="while-editing"
+          />
+          {search.length > 0 ? (
+            <Pressable
+              onPress={() => setSearch('')}
+              accessibilityRole="button"
+              accessibilityLabel="Clear search"
+              style={{ padding: theme.s(4) }}
+            >
+              <Label size={13} color={theme.chrome.dim}>✕</Label>
+            </Pressable>
+          ) : null}
+        </Row>
+      </View>
+
+      {/* Category Tabs */}
+      <View style={{ paddingHorizontal: theme.s(20), paddingTop: theme.s(6), paddingBottom: theme.s(6) }}>
+        <Segmented segments={CATEGORY_TABS} value={category} onChange={setCategory} grow compact />
+      </View>
+
+      {/* Difficulty Sub-filter */}
+      <View style={{ paddingHorizontal: theme.s(20), paddingBottom: theme.s(10) }}>
+        <Segmented segments={DIFFICULTY_FILTERS} value={difficulty} onChange={setDifficulty} grow compact />
       </View>
       <Rule weight={2} />
     </>
@@ -71,7 +165,11 @@ export default function LibraryScreen() {
       ))}
       {rows.length === 0 ? (
         <View style={{ padding: theme.s(24) }}>
-          <Body size={15} color={theme.chrome.dim}>Nothing at that level yet.</Body>
+          <Body size={15} color={theme.chrome.dim}>
+            {search.trim()
+              ? `No pieces found matching “${search}”.`
+              : 'Nothing in this category yet.'}
+          </Body>
         </View>
       ) : null}
     </>
@@ -82,6 +180,7 @@ export default function LibraryScreen() {
       onTutorial={() => router.push('/tutorial')}
       onTuner={() => router.push('/tuner')}
       onTapes={() => router.push('/settings/tapes')}
+      onImport={() => router.push('/settings/import')}
       tapeSets={settings.tapeSets}
       scroll={wide}
     />
@@ -171,11 +270,12 @@ function SongRow({
  * on this screen for someone three weeks into the instrument.
  */
 function StartHerePanel({
-  onTutorial, onTuner, onTapes, tapeSets, scroll,
+  onTutorial, onTuner, onTapes, onImport, tapeSets, scroll,
 }: {
   onTutorial: () => void;
   onTuner: () => void;
   onTapes: () => void;
+  onImport: () => void;
   tapeSets: ReturnType<typeof useSettings>['settings']['tapeSets'];
   /** False when the panel is inlined into a parent that already scrolls. */
   scroll: boolean;
@@ -193,6 +293,11 @@ function StartHerePanel({
           which mark on screen.
         </Body>
         <Button label="Tuner" hint="OPEN STRINGS" onPress={onTuner} />
+        <Button label="Import a MIDI file" hint="YOUR OWN MUSIC" onPress={onImport} />
+        <Body size={12} color={chrome.dim}>
+          Bring a file you have the right to use and the app will finger the cello line and turn
+          the rest into a backing track to play over.
+        </Body>
       </Stack>
 
       <Rule weight={2} />

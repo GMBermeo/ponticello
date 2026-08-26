@@ -1,21 +1,33 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
 
+import { ListenControl } from '@/components/play/ListenControl';
 import { Button, Segmented, Stepper, Toggle } from '@/components/ui/controls';
 import {
   Body, Grow, Kicker, Label, Num, Row, Rule, Stack, Title,
 } from '@/components/ui/primitives';
 import { Screen, ScreenHeader } from '@/components/ui/Screen';
-import { getScore, LIBRARY_ROWS } from '@/scores';
+import { LIBRARY_ROWS } from '@/scores';
+import { usePiece } from '@/state/usePiece';
 import { useSession } from '@/state/session';
+import { useBacking } from '@/audio/useBacking';
+import { AccompanimentStyle } from '@/domain/backing';
+import { ListenMode } from '@/audio/backing/types';
 import { useSettings, VisionName } from '@/state/settings';
 import { useTheme } from '@/theme/ThemeProvider';
+import { ChromeName } from '@/theme/tokens';
 
 const VISIONS = [
   { value: 'tab' as const, label: 'TAB' },
   { value: 'score' as const, label: 'SCORE' },
   { value: 'highway' as const, label: 'HIGHWAY' },
+];
+
+const CHROMES = [
+  { value: 'paper' as const, label: 'PAPER' },
+  { value: 'quiet' as const, label: 'QUIET' },
+  { value: 'neon' as const, label: 'NEON' },
 ];
 
 /**
@@ -32,15 +44,34 @@ export default function SongScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { settings, update } = useSettings();
   const { setup, update: updateSetup, openSong } = useSession();
+  // Preview lets you hear the accompaniment before committing to a session —
+  // choosing between a drone and a pulse is a listening decision.
+  //
+  // Stored as *which piece* is being previewed rather than a boolean, so that
+  // turning listening off or opening another piece stops the sound by
+  // derivation rather than by an effect that writes state back.
+  const [previewFor, setPreviewFor] = useState<string | null>(null);
+  const previewing = previewFor === id && settings.listenMode !== 'off';
 
-  const row = LIBRARY_ROWS.find((r) => r.id === id);
-  const score = getScore(id);
+  const { row, score, backing, imported } = usePiece(id);
   const barCount = score?.measures.length ?? 0;
   const index = LIBRARY_ROWS.findIndex((r) => r.id === id) + 1;
 
   useEffect(() => {
     if (id && barCount > 0) openSong(id, barCount);
   }, [id, barCount, openSong]);
+
+  const listen = useBacking({
+    score: score ?? null,
+    backing,
+    listenMode: settings.listenMode,
+    accompaniment: settings.accompaniment,
+    loopFromBar: setup.loopFromBar,
+    loopToBar: setup.loopToBar,
+    tempoPercent: setup.tempoPercent,
+    playing: previewing,
+    volume: settings.backingVolume,
+  });
 
   const meta = useMemo(() => {
     if (!row) return [];
@@ -221,6 +252,43 @@ export default function SongScreen() {
                 hint="every landmark and bracket, not just the loud ones"
                 value={settings.cueDensity === 'full'}
                 onChange={(full) => update({ cueDensity: full ? 'full' : 'essentials' })}
+              />
+            </Stack>
+
+            <Rule weight={2} />
+            <Stack padX={20} padY={16} gap={12}>
+              <ListenControl
+                mode={settings.listenMode}
+                onModeChange={(listenMode: ListenMode) => update({ listenMode })}
+                style={settings.accompaniment}
+                onStyleChange={(accompaniment: AccompanimentStyle) => update({ accompaniment })}
+                volume={settings.backingVolume}
+                onVolumeChange={(backingVolume) => update({ backingVolume })}
+                rendering={listen.rendering}
+                error={listen.error}
+                audibleParts={listen.audibleParts}
+                imported={imported}
+                hasSolo={listen.hasSolo}
+              />
+              {settings.listenMode === 'off' ? null : (
+                <Button
+                  label={previewing ? 'Stop preview' : 'Preview'}
+                  hint={listen.rendering ? 'PREPARING' : `${(listen.loopDurationMs / 1000).toFixed(1)}s LOOP`}
+                  onPress={() => setPreviewFor(previewing ? null : (id ?? null))}
+                  disabled={!listen.ready && !previewing}
+                />
+              )}
+            </Stack>
+
+            <Rule weight={2} />
+            <Stack padX={20} padY={16} gap={10}>
+              <Label size={11}>PLAY SCREEN CHROME</Label>
+              <Segmented
+                segments={CHROMES}
+                value={settings.chrome}
+                onChange={(chrome: ChromeName) => update({ chrome })}
+                grow
+                compact
               />
             </Stack>
 

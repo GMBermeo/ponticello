@@ -6,6 +6,7 @@ import { Platform, Pressable, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Fingerboard, FingerboardScaleNote, FingerboardStringLabels } from '@/components/Fingerboard';
+import { ListenChip } from '@/components/play/ListenControl';
 import { Highway } from '@/components/play/Highway';
 import { CentsRail, LevelMeter } from '@/components/play/Meters';
 import { ScoreVision } from '@/components/play/ScoreVision';
@@ -15,12 +16,13 @@ import { useMeasuredSize } from '@/components/useMeasuredSize';
 import { Segmented } from '@/components/ui/controls';
 import { Grow, Label, Row, Rule, Title } from '@/components/ui/primitives';
 import { usePitch } from '@/audio/usePitch';
+import { useBacking } from '@/audio/useBacking';
+import { ListenMode } from '@/audio/backing/types';
 import { OPEN_STRING_MIDI } from '@/domain/cello';
-import { getScore } from '@/scores';
+import { usePiece } from '@/state/usePiece';
 import { useSession } from '@/state/session';
 import { useSettings, VisionName } from '@/state/settings';
 import { ThemeProvider, useTheme } from '@/theme/ThemeProvider';
-import { ChromeName } from '@/theme/tokens';
 
 const VISION_SEGMENTS = [
   { value: 'tab' as const, label: 'TAB' },
@@ -28,10 +30,16 @@ const VISION_SEGMENTS = [
   { value: 'highway' as const, label: 'HWY', hint: 'Highway' },
 ];
 
-const CHROME_SEGMENTS = [
-  { value: 'paper' as const, label: 'PAPER' },
-  { value: 'quiet' as const, label: 'QUIET' },
-  { value: 'neon' as const, label: 'NEON' },
+/**
+ * Short labels: the play screen is landscape and this control sits beside the
+ * vision switcher, so it has to earn its width. The full wording lives on the
+ * practice sheet, where there is room to explain it.
+ */
+const LISTEN_SEGMENTS = [
+  { value: 'off' as const, label: 'OFF', hint: 'Listen: off' },
+  { value: 'backing' as const, label: 'BACK', hint: 'Listen: backing only' },
+  { value: 'solo' as const, label: 'CELLO', hint: 'Listen: written cello part' },
+  { value: 'both' as const, label: 'BOTH', hint: 'Listen: backing and cello' },
 ];
 
 const KEEP_AWAKE_TAG = 'ponticello-play';
@@ -88,7 +96,7 @@ function PlayScreen() {
     return () => { ScreenOrientation.unlockAsync().catch(() => {}); };
   }, []);
 
-  const score = getScore(id);
+  const { score, backing: importedBacking } = usePiece(id);
   const playhead = usePlayhead({
     score: score ?? EMPTY_SCORE,
     loopFromBar: setup.loopFromBar,
@@ -98,6 +106,18 @@ function PlayScreen() {
 
   const pitch = usePitch(true);
   const activeNote = score?.notes[playhead.activeIndex];
+
+  const backing = useBacking({
+    score: score ?? null,
+    backing: importedBacking,
+    listenMode: settings.listenMode,
+    accompaniment: settings.accompaniment,
+    loopFromBar: setup.loopFromBar,
+    loopToBar: setup.loopToBar,
+    tempoPercent: setup.tempoPercent,
+    playing: playhead.playing,
+    volume: settings.backingVolume,
+  });
 
   // Point the cents calculation at whatever the player is supposed to be on.
   useEffect(() => {
@@ -161,14 +181,14 @@ function PlayScreen() {
           compact
         />
 
-        <Grow />
-
         <Segmented
-          segments={CHROME_SEGMENTS}
-          value={settings.chrome}
-          onChange={(chrome: ChromeName) => update({ chrome })}
+          segments={LISTEN_SEGMENTS}
+          value={settings.listenMode}
+          onChange={(listenMode: ListenMode) => update({ listenMode })}
           compact
         />
+
+        <Grow />
 
         <Pressable
           onPress={playhead.restart}
@@ -295,6 +315,7 @@ function PlayScreen() {
         <StatusChip label={`${setup.tempoPercent}% TEMPO`} />
         <StatusChip label={settings.showFingerings ? 'FINGERINGS ON' : 'FINGERINGS HIDDEN'} />
         <StatusChip label={settings.showTapes ? 'TAPES ON' : 'TAPES OFF'} />
+        <ListenChip mode={settings.listenMode} rendering={backing.rendering} />
         {pitch.reading.voiced ? (
           <StatusChip label={`HEARD ${pitch.reading.heard} · ${pitch.reading.band.toUpperCase()} BAND`} />
         ) : null}

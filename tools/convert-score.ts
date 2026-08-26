@@ -25,7 +25,7 @@ import { detectShifts, RawNoteEvent, solveFingering } from '../src/domain/finger
 import {
   CelloMeasure, CelloNote, CelloSongScore, measureDurationMs, validateScore,
 } from '../src/domain/schema';
-import { monophonic, parseMidi } from './midi';
+import { monophonic, parseMidi } from '../src/domain/midi';
 
 interface Options {
   input: string;
@@ -78,7 +78,7 @@ function main() {
   const options = parseArgs(process.argv.slice(2));
 
   const bytes = new Uint8Array(readFileSync(options.input));
-  let midiNotes = parseMidi(bytes);
+  let midiNotes = parseMidi(bytes).notes;
   if (midiNotes.length === 0) throw new Error('no notes found in that MIDI file');
 
   if (options.track !== null) {

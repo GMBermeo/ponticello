@@ -25,6 +25,7 @@ export JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk@17}"
 export PATH="$JAVA_HOME/bin:$PATH"
 export ANDROID_HOME="${ANDROID_HOME:-/opt/homebrew/share/android-commandlinetools}"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
+export CMAKE_BUILD_PARALLEL_LEVEL=4
 
 if [ ! -d "$ANDROID_HOME/platforms" ]; then
   echo "No Android platforms in $ANDROID_HOME — run the sdkmanager install first." >&2

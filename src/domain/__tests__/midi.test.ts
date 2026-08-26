@@ -1,0 +1,177 @@
+import { describe, expect, it } from 'vitest';
+
+import { monophonic, parseMidi } from '../midi';
+
+interface WriteNote { midi: number; startTicks: number; durationTicks: number; track?: number }
+
+/** Minimal SMF writer, so the parser is tested against bytes rather than mocks. */
+function writeMidi(
+  notes: WriteNote[],
+  {
+    ticksPerQuarter = 480, microsecondsPerQuarter = 500000, runningStatus = false,
+    trackNames = {} as Record<number, string>, programs = {} as Record<number, number>,
+    channels = {} as Record<number, number>, timeSignature = null as [number, number] | null,
+  } = {},
+): Uint8Array {
+  const varInt = (value: number) => {
+    const buffer = [value & 0x7f];
+    let v = value >> 7;
+    while (v > 0) { buffer.unshift((v & 0x7f) | 0x80); v >>= 7; }
+    return buffer;
+  };
+
+  const trackCount = Math.max(1, ...notes.map((n) => (n.track ?? 0) + 1));
+  const bytes: number[] = [0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, trackCount > 1 ? 1 : 0];
+  bytes.push(0, trackCount, (ticksPerQuarter >> 8) & 0xff, ticksPerQuarter & 0xff);
+
+  for (let t = 0; t < trackCount; t++) {
+    const track: number[] = [];
+    if (t === 0) {
+      track.push(...varInt(0), 0xff, 0x51, 0x03,
+        (microsecondsPerQuarter >> 16) & 0xff,
+        (microsecondsPerQuarter >> 8) & 0xff,
+        microsecondsPerQuarter & 0xff);
+      if (timeSignature) {
+        track.push(...varInt(0), 0xff, 0x58, 0x04,
+          timeSignature[0], Math.log2(timeSignature[1]), 24, 8);
+      }
+    }
+    if (trackNames[t]) {
+      const text = [...trackNames[t]].map((c) => c.charCodeAt(0));
+      track.push(...varInt(0), 0xff, 0x03, ...varInt(text.length), ...text);
+    }
+    const channel = channels[t] ?? 0;
+    if (programs[t] !== undefined) {
+      track.push(...varInt(0), 0xc0 | channel, programs[t]);
+    }
+
+    const events = notes.filter((n) => (n.track ?? 0) === t)
+      .flatMap((n) => [
+        { tick: n.startTicks, on: true, midi: n.midi },
+        { tick: n.startTicks + n.durationTicks, on: false, midi: n.midi },
+      ])
+      .sort((a, b) => a.tick - b.tick || (a.on ? 1 : -1));
+
+    let lastTick = 0;
+    let lastStatus = -1;
+    for (const event of events) {
+      track.push(...varInt(event.tick - lastTick));
+      lastTick = event.tick;
+      const status = (runningStatus ? 0x90 : (event.on ? 0x90 : 0x80)) | channel;
+      if (!runningStatus || status !== lastStatus) { track.push(status); lastStatus = status; }
+      track.push(event.midi, event.on ? 0x64 : 0x00);
+    }
+    track.push(...varInt(0), 0xff, 0x2f, 0x00);
+
+    bytes.push(0x4d, 0x54, 0x72, 0x6b,
+      (track.length >> 24) & 0xff, (track.length >> 16) & 0xff,
+      (track.length >> 8) & 0xff, track.length & 0xff, ...track);
+  }
+
+  return new Uint8Array(bytes);
+}
+
+describe('parseMidi', () => {
+  it('reads notes with times in milliseconds', () => {
+    // 480 ticks per quarter at 120 bpm — one quarter note is 500 ms.
+    const { notes, bpm, durationMs } = parseMidi(writeMidi([
+      { midi: 50, startTicks: 0, durationTicks: 480 },
+      { midi: 52, startTicks: 480, durationTicks: 480 },
+      { midi: 54, startTicks: 960, durationTicks: 240 },
+    ]));
+
+    expect(notes.map((n) => n.midiNumber)).toEqual([50, 52, 54]);
+    expect(notes.map((n) => n.startTimeMs)).toEqual([0, 500, 1000]);
+    expect(notes.map((n) => n.durationMs)).toEqual([500, 500, 250]);
+    expect(bpm).toBe(120);
+    expect(durationMs).toBe(1250);
+  });
+
+  it('honours the tempo meta event', () => {
+    // 250000 µs per quarter = 240 bpm, so a quarter note is 250 ms.
+    const parsed = parseMidi(writeMidi(
+      [{ midi: 57, startTicks: 0, durationTicks: 480 }],
+      { microsecondsPerQuarter: 250000 },
+    ));
+    expect(parsed.notes[0].durationMs).toBe(250);
+    expect(parsed.bpm).toBe(240);
+  });
+
+  it('reads the time signature', () => {
+    const parsed = parseMidi(writeMidi(
+      [{ midi: 57, startTicks: 0, durationTicks: 480 }],
+      { timeSignature: [6, 8] },
+    ));
+    expect(parsed.timeSignature).toEqual([6, 8]);
+  });
+
+  it('handles running status and zero-velocity note-offs', () => {
+    const { notes } = parseMidi(writeMidi([
+      { midi: 50, startTicks: 0, durationTicks: 480 },
+      { midi: 55, startTicks: 480, durationTicks: 480 },
+    ], { runningStatus: true }));
+
+    expect(notes.map((n) => n.midiNumber)).toEqual([50, 55]);
+    expect(notes.map((n) => n.durationMs)).toEqual([500, 500]);
+  });
+
+  it('summarises each track with its name, instrument and range', () => {
+    const parsed = parseMidi(writeMidi(
+      [
+        { midi: 45, startTicks: 0, durationTicks: 480, track: 0 },
+        { midi: 60, startTicks: 0, durationTicks: 480, track: 1 },
+        { midi: 72, startTicks: 480, durationTicks: 480, track: 1 },
+      ],
+      { trackNames: { 0: 'Violoncello', 1: 'Piano' }, programs: { 0: 42, 1: 0 } },
+    ));
+
+    expect(parsed.tracks).toHaveLength(2);
+    expect(parsed.tracks[0].name).toBe('Violoncello');
+    expect(parsed.tracks[0].program).toBe(42);
+    expect(parsed.tracks[0].noteCount).toBe(1);
+    expect(parsed.tracks[1].name).toBe('Piano');
+    expect(parsed.tracks[1].lowestMidi).toBe(60);
+    expect(parsed.tracks[1].highestMidi).toBe(72);
+  });
+
+  it('flags a percussion track by its channel', () => {
+    const parsed = parseMidi(writeMidi(
+      [{ midi: 38, startTicks: 0, durationTicks: 120, track: 0 }],
+      { channels: { 0: 9 } },
+    ));
+    expect(parsed.tracks[0].isPercussion).toBe(true);
+  });
+
+  it('rejects a file that is not MIDI', () => {
+    expect(() => parseMidi(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8])))
+      .toThrow(/not a MIDI file/);
+  });
+
+  it('rejects SMPTE timing rather than reporting nonsense times', () => {
+    const bytes = writeMidi([{ midi: 60, startTicks: 0, durationTicks: 480 }]);
+    bytes[12] = 0xe7; // negative frames-per-second byte sets the SMPTE flag
+    expect(() => parseMidi(bytes)).toThrow(/SMPTE/);
+  });
+});
+
+describe('monophonic', () => {
+  const note = (midiNumber: number, startTimeMs: number, durationMs: number) =>
+    ({ midiNumber, startTimeMs, durationMs, track: 0, channel: 0, velocity: 100 });
+
+  it('keeps the top note of a chord and drops the rest', () => {
+    const line = monophonic([note(50, 0, 500), note(54, 0, 500), note(57, 0, 500)]);
+    expect(line).toHaveLength(1);
+    expect(line[0].midiNumber).toBe(57);
+  });
+
+  it('truncates a held note when a higher one starts under it', () => {
+    const line = monophonic([note(50, 0, 1000), note(62, 400, 400)]);
+    expect(line).toHaveLength(2);
+    expect(line[0].durationMs).toBe(400);
+  });
+
+  it('leaves a line that is already monophonic alone', () => {
+    expect(monophonic([note(50, 0, 500), note(51, 500, 500), note(52, 1000, 500)]))
+      .toHaveLength(3);
+  });
+});

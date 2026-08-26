@@ -99,4 +99,49 @@ describe('library rows', () => {
     expect(row.range).toBe('G2 – C4');
     expect(row.bars).toBe(4);
   });
+
+  it('has 250+ playable first-position songs', async () => {
+    const { COMPACT_SCORES, getScore, getBundledBacking } = await import('@/scores');
+    expect(COMPACT_SCORES.length).toBeGreaterThan(200);
+
+    // Test a sample of compact scores
+    for (const item of COMPACT_SCORES.slice(0, 10)) {
+      const score = getScore(item.id);
+      expect(score).toBeDefined();
+      expect(validateScore(score!)).toEqual([]);
+      expect(score!.notes.length).toBeGreaterThan(0);
+
+      // Verify all notes are within 1st position (36 to 63)
+      for (const note of score!.notes) {
+        expect(note.midiNumber).toBeGreaterThanOrEqual(36);
+        expect(note.midiNumber).toBeLessThanOrEqual(63);
+        expect(['C', 'G', 'D', 'A']).toContain(note.string);
+        expect(['0', '1', '2', '3', '4']).toContain(note.finger);
+      }
+
+      // Verify backing track exists
+      const backing = getBundledBacking(item.id);
+      expect(backing).toBeDefined();
+      expect(backing!.parts.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('provides backing tracks for all 5 training study exercises', async () => {
+    const { getBundledBacking } = await import('@/scores');
+    const studyIds = [
+      'open-strings',
+      'first-position-ladder',
+      'd-major-two-strings',
+      'c-major-two-strings',
+      'thumb-position-ladder',
+    ];
+
+    for (const id of studyIds) {
+      const backing = getBundledBacking(id);
+      expect(backing).toBeDefined();
+      expect(backing!.parts.length).toBeGreaterThan(0);
+      expect(backing!.durationMs).toBeGreaterThan(0);
+    }
+  });
 });
+

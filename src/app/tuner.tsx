@@ -26,7 +26,7 @@ const SPAN = 50;
 export default function TunerScreen() {
   const theme = useTheme();
   const { chrome } = theme;
-  const pitch = usePitch(true);
+  const pitch = usePitch(true, { tunerMode: true });
 
   // No target — report whatever is sounding, and let the player aim at it.
   useEffect(() => { pitch.setTarget(null); }, [pitch]);

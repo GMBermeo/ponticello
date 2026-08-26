@@ -41,3 +41,6 @@ example
 # generated native folders
 /ios
 /android
+
+# personal MIDI stash - see _MIDIS/README.md
+_MIDIS/

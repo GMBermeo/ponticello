@@ -4,7 +4,7 @@ import { SharedValue, useSharedValue } from 'react-native-reanimated';
 import {
   centsBetween, IntonationVerdict, judgeIntonation, midiToFrequency, midiToPitchName,
 } from '@/domain/cello';
-import { CentsSmoother, PitchEngine } from './PitchEngine';
+import { CentsSmoother, PitchEngine, TunerPitchSmoother } from './PitchEngine';
 import { MicSource } from './sources/types';
 import { useMicSource } from './sources/useMicSource';
 
@@ -17,10 +17,11 @@ export interface PitchReading {
   voiced: boolean;
   band: 'high' | 'low' | 'none';
   clarity: number;
+  stability?: number;
 }
 
 const SILENT: PitchReading = {
-  frequency: 0, heard: null, cents: 0, verdict: null, voiced: false, band: 'none', clarity: 0,
+  frequency: 0, heard: null, cents: 0, verdict: null, voiced: false, band: 'none', clarity: 0, stability: 0,
 };
 
 export interface LivePitch {
@@ -37,6 +38,11 @@ export interface LivePitch {
   setTarget: (midi: number | null) => void;
 }
 
+export interface UsePitchOptions {
+  /** When true, applies 1s rolling median filtering and hold time for digital tuner display. */
+  tunerMode?: boolean;
+}
+
 /**
  * How often the React-visible reading updates.
  *
@@ -47,8 +53,10 @@ export interface LivePitch {
  * and update every audio frame without touching React at all.
  */
 const READING_INTERVAL_MS = 80;
+const TUNER_READING_INTERVAL_MS = 100;
 
-export function usePitch(enabled: boolean): LivePitch {
+export function usePitch(enabled: boolean, options?: UsePitchOptions): LivePitch {
+  const tunerMode = !!options?.tunerMode;
   const cents = useSharedValue(0);
   const level = useSharedValue(0);
   const tracking = useSharedValue(0);
@@ -61,6 +69,7 @@ export function usePitch(enabled: boolean): LivePitch {
   // the engine can simply absorb.
   const engine = useMemo(() => new PitchEngine({ sampleRate: 48000 }), []);
   const smoother = useMemo(() => new CentsSmoother(90), []);
+  const tunerSmoother = useMemo(() => new TunerPitchSmoother(1000, 450), []);
 
   const target = useRef<number | null>(null);
   const lastPublish = useRef(0);
@@ -70,12 +79,14 @@ export function usePitch(enabled: boolean): LivePitch {
     if (target.current !== midi) {
       target.current = midi;
       smoother.reset();
+      tunerSmoother.reset();
     }
-  }, [smoother]);
+  }, [smoother, tunerSmoother]);
 
   const onSamples = useCallback((samples: Float32Array) => {
     engine.push(samples);
     const frame = engine.read();
+    const now = Date.now();
 
     // Elapsed audio time since the last frame, for the smoother's time constant.
     const deltaMs = ((frame.sampleTime - lastFrameSample.current) / engine.sampleRate) * 1000;
@@ -87,6 +98,44 @@ export function usePitch(enabled: boolean): LivePitch {
     level.set(Math.max(0, Math.min(1, (db + 60) / 54)));
     tracking.set(frame.voiced ? 1 : 0);
 
+    if (tunerMode) {
+      const rawMidi = frame.voiced && frame.frequency > 0
+        ? Math.round(69 + 12 * Math.log2(frame.frequency / 440))
+        : 0;
+      const targetMidi = target.current ?? rawMidi;
+      const targetHz = midiToFrequency(targetMidi);
+      const rawDeviation = (frame.voiced && frame.frequency > 0)
+        ? centsBetween(frame.frequency, targetHz)
+        : 0;
+
+      const smoothed = tunerSmoother.push(frame.voiced ? frame.frequency : 0, rawDeviation, now);
+
+      if (smoothed.voiced) {
+        cents.set(smoothed.cents);
+      }
+
+      const readingInterval = TUNER_READING_INTERVAL_MS;
+      if (now - lastPublish.current < readingInterval) return;
+      lastPublish.current = now;
+
+      if (!smoothed.voiced || smoothed.frequency <= 0) {
+        setHeard((current) => (current.voiced ? SILENT : current));
+        return;
+      }
+
+      setHeard({
+        frequency: smoothed.frequency,
+        heard: midiToPitchName(smoothed.nearestMidi),
+        cents: smoothed.cents,
+        verdict: judgeIntonation(smoothed.cents),
+        voiced: true,
+        band: frame.band,
+        clarity: frame.clarity,
+        stability: smoothed.stability,
+      });
+      return;
+    }
+
     if (frame.voiced && frame.frequency > 0) {
       const targetMidi = target.current;
       const targetHz = targetMidi === null
@@ -95,7 +144,6 @@ export function usePitch(enabled: boolean): LivePitch {
       cents.set(smoother.push(centsBetween(frame.frequency, targetHz), Math.max(deltaMs, 1)));
     }
 
-    const now = Date.now();
     if (now - lastPublish.current < READING_INTERVAL_MS) return;
     lastPublish.current = now;
 
@@ -119,7 +167,7 @@ export function usePitch(enabled: boolean): LivePitch {
       band: frame.band,
       clarity: frame.clarity,
     });
-  }, [engine, cents, level, tracking, smoother]);
+  }, [engine, cents, level, tracking, smoother, tunerSmoother, tunerMode]);
 
   const mic = useMicSource(onSamples, enabled);
 
@@ -133,10 +181,11 @@ export function usePitch(enabled: boolean): LivePitch {
     // the text reading is derived below rather than set.
     engine.reset();
     smoother.reset();
+    tunerSmoother.reset();
     cents.set(0);
     level.set(0);
     tracking.set(0);
-  }, [enabled, engine, smoother, cents, level, tracking]);
+  }, [enabled, engine, smoother, tunerSmoother, cents, level, tracking]);
 
   // Derived rather than stored: when the microphone is off there is nothing to
   // report, and that is a fact about `enabled`, not a state transition.
@@ -144,3 +193,4 @@ export function usePitch(enabled: boolean): LivePitch {
 
   return { cents, level, tracking, reading, mic, setTarget };
 }
+
