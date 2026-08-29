@@ -1,15 +1,19 @@
 /**
  * The library.
  *
- * Everything with note data attached is either an original study or public
- * domain. The pieces from the original brief that are still in copyright —
- * the game, film and television themes — appear as rows with no notes: the
- * app will not ship a transcription of somebody else's melody. Convert your
- * own copy with `tools/convert-score.ts` and drop the result in this folder to
- * fill one in.
+ * Everything here exists for personal study: practising intonation, position
+ * work and reading on one instrument. Alongside the original studies and
+ * public-domain works, melodies still in copyright are included as single-line
+ * cello reductions on that basis — private practice, theory analysis and
+ * research — following the fair-use guidance the Musicians Institute Library
+ * publishes for study copies. Nothing here is performed, distributed or sold.
+ *
+ * That is a statement of purpose, not legal advice. Anyone intending to
+ * perform, publish or distribute this material should clear the rights first.
+ * Add your own with `tools/convert-score.ts`.
  */
 
-import { CatalogStub, CelloSongScore, scoreDurationMs, measureDurationMs } from '@/domain/schema';
+import { CelloSongScore, scoreDurationMs, measureDurationMs } from '@/domain/schema';
 import { BackingTrack } from '@/domain/backing';
 import { midiToPitchName } from '@/domain/cello';
 import { BWV1007_PRELUDE } from './bach';

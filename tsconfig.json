@@ -9,7 +9,12 @@
       "@/assets/*": [
         "./assets/*"
       ]
-    }
+    },
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "forceConsistentCasingInFileNames": true
   },
   "include": [
     "**/*.ts",

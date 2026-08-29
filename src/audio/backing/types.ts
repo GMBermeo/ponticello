@@ -26,7 +26,15 @@ export const LISTEN_BLURB: Record<ListenMode, string> = {
 export interface BackingPlayer {
   /** Replaces the current audio. Safe to call repeatedly. */
   load: (samples: Float32Array, sampleRate: number) => Promise<void>;
-  play: () => void;
+  /**
+   * Starts the loop, optionally part way in.
+   *
+   * `offsetSeconds` is where in the buffer to begin, and it is what keeps the
+   * accompaniment under the playhead: press play three bars into the loop and
+   * the audio has to start three bars in as well. Both adapters wrap the offset
+   * into the buffer, so a caller never has to bounds-check it.
+   */
+  play: (offsetSeconds?: number) => void;
   stop: () => void;
   /** 0–1. */
   setVolume: (volume: number) => void;

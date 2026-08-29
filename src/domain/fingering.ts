@@ -228,24 +228,42 @@ export function solveFingering(
   const unreachable = trellis.findIndex((c) => c.length === 0);
   if (unreachable >= 0) {
     throw new Error(
-      `MIDI ${notes[unreachable].midiNumber} is not playable on a cello in standard tuning (note ${unreachable})`,
+      `MIDI ${notes[unreachable]?.midiNumber} is not playable on a cello in standard tuning (note ${unreachable})`,
     );
   }
 
-  let costs = trellis[0].map((s) => emissionCost(s, notes[0], w));
-  const backpointers: number[][] = [new Array(trellis[0].length).fill(-1)];
+  // Each column of the trellis and its note are bound once per step rather than
+  // indexed repeatedly. The guards cannot fire — `trellis` is built from `notes`
+  // and the empty-column case threw above — but binding them is how the
+  // compiler is told that, and it reads better than the index soup it replaces.
+  const firstColumn = trellis[0];
+  const firstNote = notes[0];
+  if (!firstColumn || !firstNote) return { states: [], totalCost: 0 };
+
+  let costs = firstColumn.map((s) => emissionCost(s, firstNote, w));
+  const backpointers: number[][] = [new Array(firstColumn.length).fill(-1)];
 
   for (let t = 1; t < notes.length; t++) {
-    const deltaT = notes[t].startTimeMs - notes[t - 1].startTimeMs;
-    const next = new Array<number>(trellis[t].length);
-    const back = new Array<number>(trellis[t].length);
+    const note = notes[t];
+    const previousNote = notes[t - 1];
+    const column = trellis[t];
+    const previousColumn = trellis[t - 1];
+    if (!note || !previousNote || !column || !previousColumn) continue;
 
-    for (let j = 0; j < trellis[t].length; j++) {
-      const emit = emissionCost(trellis[t][j], notes[t], w);
+    const deltaT = note.startTimeMs - previousNote.startTimeMs;
+    const next = new Array<number>(column.length);
+    const back = new Array<number>(column.length);
+
+    for (let j = 0; j < column.length; j++) {
+      const to = column[j];
+      if (!to) continue;
+      const emit = emissionCost(to, note, w);
       let best = Infinity;
       let bestIndex = -1;
-      for (let i = 0; i < trellis[t - 1].length; i++) {
-        const total = costs[i] + transitionCost(trellis[t - 1][i], trellis[t][j], deltaT, w) + emit;
+      for (let i = 0; i < previousColumn.length; i++) {
+        const from = previousColumn[i];
+        if (!from) continue;
+        const total = (costs[i] ?? Infinity) + transitionCost(from, to, deltaT, w) + emit;
         if (total < best) { best = total; bestIndex = i; }
       }
       next[j] = best;
@@ -256,13 +274,15 @@ export function solveFingering(
     backpointers.push(back);
   }
 
-  let index = costs.reduce((best, c, i) => (c < costs[best] ? i : best), 0);
-  const totalCost = costs[index];
+  let index = costs.reduce((best, c, i) => (c < (costs[best] ?? Infinity) ? i : best), 0);
+  const totalCost = costs[index] ?? 0;
 
   const states: CelloState[] = new Array(notes.length);
   for (let t = notes.length - 1; t >= 0; t--) {
-    states[t] = trellis[t][index];
-    index = backpointers[t][index];
+    const chosen = trellis[t]?.[index];
+    if (!chosen) break;
+    states[t] = chosen;
+    index = backpointers[t]?.[index] ?? 0;
   }
 
   return { states, totalCost };
@@ -289,6 +309,9 @@ export function detectShifts(
   for (let i = 1; i < states.length; i++) {
     const previous = states[i - 1];
     const current = states[i];
+    const note = notes[i];
+    const previousNote = notes[i - 1];
+    if (!previous || !current || !note || !previousNote) continue;
     // An open string is not a hand position — the hand has not moved yet.
     if (current.finger === '0' || previous.finger === '0') continue;
 
@@ -302,9 +325,64 @@ export function detectShifts(
       noteIndex: i,
       from: previous.position,
       to: current.position,
-      preparationMs: notes[i].startTimeMs - notes[i - 1].startTimeMs,
+      preparationMs: note.startTimeMs - previousNote.startTimeMs,
       direction: toBase > fromBase ? 'up' : 'down',
     });
   }
   return shifts;
+}
+
+// ─── Beginner mapping ────────────────────────────────────────────────────────
+
+/**
+ * Where a first-position player puts a note.
+ *
+ * The solver above chooses freely across the whole instrument. This does not:
+ * it is the fixed mapping the bundled library is written against, where every
+ * piece stays in first position and each string covers a fixed span. Given a
+ * pitch it answers with the one place a beginner would take it.
+ *
+ * It lives here rather than in the build tool because it is instrument
+ * knowledge, not build mechanics — and because it used to live in three places
+ * at once (the tool, the tool's emit template, and the generated file), so a
+ * single-line fix to the top of its range had to be made three times and was
+ * wrong once.
+ *
+ * Throws above D#4. The caller is expected to have transposed into range, and a
+ * plausible-looking unplayable fingering is worse than a stopped build.
+ */
+export function firstPositionFingering(midi: number): CelloState {
+  const closed: Record<number, { finger: CelloFinger; position: CelloPosition; base: number }> = {
+    0: { finger: '0', position: '1st', base: 2 },
+    1: { finger: '1', position: 'Half', base: 1 },
+    2: { finger: '1', position: '1st', base: 2 },
+    3: { finger: '2', position: '1st', base: 2 },
+    4: { finger: '3', position: '1st', base: 2 },
+    5: { finger: '4', position: '1st', base: 2 },
+  };
+
+  const string: CelloString = midi <= 42 ? 'C' : midi <= 49 ? 'G' : midi <= 56 ? 'D' : 'A';
+  const semitones = midi - OPEN_STRING_MIDI[string];
+
+  const seat = closed[semitones];
+  if (seat) {
+    return {
+      string,
+      position: seat.position,
+      finger: seat.finger,
+      extension: 'none',
+      baseSemitones: seat.base,
+    };
+  }
+
+  // A forward-extended fourth finger reaches one semitone past the closed frame
+  // and no further.
+  if (semitones === 6) {
+    return { string, position: '1st', finger: '4', extension: 'forward', baseSemitones: 2 };
+  }
+
+  throw new RangeError(
+    `MIDI ${midi} cannot be played in first position on the ${string} string. `
+    + 'Transpose the line into range before assigning fingerings.',
+  );
 }

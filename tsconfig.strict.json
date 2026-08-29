@@ -1,0 +1,30 @@
+{
+  // Indexed access, checked.
+  //
+  // `noUncheckedIndexedAccess` types `array[i]` as `T | undefined`, which is
+  // the truth. Turning it on across the whole project reports 113 findings in
+  // src/domain alone, and a good share of those are per-sample DSP loops where
+  // the index is bounded by the loop itself — there, a non-null assertion would
+  // add noise while removing no risk.
+  //
+  // So it is scoped to `src/domain` — the pure layer, where a wrong index is a
+  // wrong note rather than a dropped frame. That layer passes cleanly, all of
+  // it: the
+  // byte readers were made total at the source, the Viterbi columns are bound
+  // once per step instead of indexed repeatedly, and chord tones became a
+  // three-tuple rather than a `number[]` that happened to have three entries.
+  //
+  // The audio DSP and the React layer are deliberately outside it. There the
+  // index is bounded by the loop that produced it, and an assertion at every
+  // sample would add noise while removing no risk.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noUncheckedIndexedAccess": true
+  },
+  "include": [
+    "src/domain/**/*.ts",
+    "expo-env.d.ts"
+  ],
+  // Tests index their own fixtures, where the shape is stated three lines up.
+  "exclude": ["src/domain/__tests__/**"]
+}

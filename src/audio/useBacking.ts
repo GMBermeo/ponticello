@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   AccompanimentStyle, BackingPart, BackingTrack, generateAccompaniment, soloPartFromScore,
-  trackDurationMs,
 } from '@/domain/backing';
+import { clipToLoop, loopBudget, loopOffsetSeconds, PracticeLoop } from '@/domain/loop';
 import { CelloSongScore } from '@/domain/schema';
 import { fadeEdges, limit, renderParts } from './synth';
 import { ListenMode } from './backing/types';
@@ -15,8 +15,15 @@ import { useBackingPlayer } from './backing/useBackingPlayer';
  * The audio buffer *is* the loop: it holds exactly the bars being practised at
  * exactly the chosen tempo, and the player repeats it. That removes the whole
  * category of drift and seek problems a scheduler would introduce — the audio
- * cannot fall out of step with the playhead because there is nothing to keep
- * in step, only one buffer that ends where it began.
+ * cannot fall out of step with the playhead because there is nothing to keep in
+ * step, only one buffer that ends where it began.
+ *
+ * That was always the intent; it only became true here. Parts that arrived with
+ * the piece used to bypass the clip and be rendered end to end, so a four-bar
+ * loop was accompanied by an eleven-minute recording of the whole movement —
+ * megabytes of it, re-synthesised on every change, starting from its own
+ * beginning no matter where the playhead was. Both halves of that are fixed by
+ * the same thing: one loop module, consulted by everyone, applied to every part.
  */
 
 /**
@@ -35,12 +42,23 @@ export interface UseBackingOptions {
   backing: BackingTrack | null;
   listenMode: ListenMode;
   accompaniment: AccompanimentStyle;
-  loopFromBar: number;
-  loopToBar: number;
-  tempoPercent: number;
+  /**
+   * The loop being practised. The transport is driven from this same object,
+   * which is the whole point: there is no second derivation to disagree with.
+   */
+  loop: PracticeLoop;
   playing: boolean;
   /** 0–1. */
   volume: number;
+  /**
+   * The playhead's current score time, read at the instant playback starts.
+   *
+   * A function rather than a value: the playhead advances on the UI thread
+   * every frame and putting that in a dependency array would re-render the
+   * audio sixty times a second. This is only ever *called*, and only when the
+   * transport starts.
+   */
+  scoreTimeMs?: () => number;
 }
 
 export interface BackingState {
@@ -55,30 +73,9 @@ export interface BackingState {
   loopDurationMs: number;
 }
 
-/** Keeps notes overlapping a window and rebases them so the window starts at zero. */
-function sliceParts(parts: readonly BackingPart[], fromMs: number, toMs: number): BackingPart[] {
-  return parts.map((part) => ({
-    ...part,
-    notes: part.notes
-      .filter((n) => n.startTimeMs < toMs && n.startTimeMs + n.durationMs > fromMs)
-      .map((n) => {
-        const start = Math.max(n.startTimeMs, fromMs);
-        return {
-          ...n,
-          startTimeMs: start - fromMs,
-          // Truncate a note that runs past the loop rather than letting it
-          // bleed over the loop point on repeat.
-          durationMs: Math.min(n.startTimeMs + n.durationMs, toMs) - start,
-        };
-      })
-      .filter((n) => n.durationMs > 10),
-  }));
-}
-
 export function useBacking(options: UseBackingOptions): BackingState {
   const {
-    score, backing, listenMode, accompaniment, loopFromBar, loopToBar,
-    tempoPercent, playing, volume,
+    score, backing, listenMode, accompaniment, loop, playing, volume, scoreTimeMs,
   } = options;
 
   const enabled = listenMode !== 'off';
@@ -88,31 +85,28 @@ export function useBacking(options: UseBackingOptions): BackingState {
   const [renderError, setRenderError] = useState<string | null>(null);
   const [renderedDurationMs, setRenderedDurationMs] = useState(0);
 
-  /** Loop window in score time. */
-  const window = useMemo(() => {
-    if (!score || score.measures.length === 0) return { fromMs: 0, toMs: 0 };
-    const first = score.measures[Math.max(0, Math.min(score.measures.length - 1, loopFromBar - 1))];
-    const last = score.measures[Math.max(0, Math.min(score.measures.length - 1, loopToBar - 1))];
-    return { fromMs: first.startBarTimeMs, toMs: last.startBarTimeMs + last.durationMs };
-  }, [score, loopFromBar, loopToBar]);
-
   const soloParts = useMemo<BackingPart[]>(() => {
+    // Imported parts are in score time and have to be clipped like anything
+    // else. Skipping this is what made an imported backing unusable.
     const imported = (backing?.parts ?? []).filter((p) => p.role === 'solo');
-    if (imported.length > 0) return imported;
+    if (imported.length > 0) return clipToLoop(imported, loop);
     if (!score) return [];
-    return sliceParts([soloPartFromScore(score)], window.fromMs, window.toMs);
-  }, [backing, score, window.fromMs, window.toMs]);
+    return clipToLoop([soloPartFromScore(score)], loop);
+  }, [backing, score, loop]);
 
   const accompanimentParts = useMemo<BackingPart[]>(() => {
     const imported = (backing?.parts ?? []).filter((p) => p.role === 'accompaniment');
-    if (imported.length > 0) return imported;
+    if (imported.length > 0) return clipToLoop(imported, loop);
     if (!score) return [];
+    // The generator is handed the window and returns notes already rebased to
+    // it, so it is clipped by construction — running it through `clipToLoop`
+    // again would measure loop-relative times against score-relative bounds.
     return generateAccompaniment(score, {
       style: accompaniment,
-      fromBar: loopFromBar,
-      toBar: loopToBar,
+      fromBar: loop.fromBar,
+      toBar: loop.toBar,
     });
-  }, [backing, score, accompaniment, loopFromBar, loopToBar]);
+  }, [backing, score, accompaniment, loop]);
 
   const audibleParts = useMemo(() => {
     switch (listenMode) {
@@ -123,11 +117,19 @@ export function useBacking(options: UseBackingOptions): BackingState {
     }
   }, [listenMode, soloParts, accompanimentParts]);
 
+  const budget = useMemo(() => loopBudget(loop), [loop]);
+
   // Re-render whenever what should be heard changes. Debounced, because the
   // tempo and loop steppers fire on every tap.
   const renderToken = useRef(0);
   useEffect(() => {
     if (!enabled || audibleParts.length === 0) return;
+
+    // Refuse rather than allocate: an hour-long window is not a practice loop,
+    // and trying to synthesise one is how the app used to run out of memory.
+    // Nothing is *set* here — the refusal is a fact about the current loop, so
+    // it is reported by derivation below rather than written into state.
+    if (!budget.withinBudget) return;
 
     const token = ++renderToken.current;
 
@@ -142,16 +144,14 @@ export function useBacking(options: UseBackingOptions): BackingState {
       setTimeout(async () => {
         if (renderToken.current !== token) return;
         try {
-          const tempoScale = Math.max(0.1, tempoPercent / 100);
-          const scoreDuration = backing
-            ? trackDurationMs(audibleParts)
-            : (window.toMs - window.fromMs) || trackDurationMs(audibleParts);
-          const durationMs = scoreDuration / tempoScale;
+          // One duration, from the loop. Not re-derived, and no longer
+          // different depending on where the parts came from.
+          const durationMs = loop.realDurationMs;
 
           const samples = renderParts(audibleParts, {
             sampleRate: RENDER_SAMPLE_RATE,
             durationMs,
-            tempoScale,
+            tempoScale: loop.tempoScale,
           });
           fadeEdges(limit(samples), RENDER_SAMPLE_RATE);
 
@@ -174,26 +174,51 @@ export function useBacking(options: UseBackingOptions): BackingState {
     // `player` is a stable set of callbacks; including it would re-render audio
     // on every parent render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, audibleParts, tempoPercent, window.fromMs, window.toMs, backing]);
+  }, [enabled, audibleParts, loop, budget]);
 
   useEffect(() => { player.setVolume(volume); }, [player, volume]);
 
-  const start = useCallback(() => player.play(), [player]);
+  /**
+   * Starts the accompaniment *where the playhead already is*.
+   *
+   * Without the offset the buffer always began at its own first sample, so
+   * pressing play half way through a phrase put the backing a half-phrase
+   * ahead and it stayed there for the rest of the session. The offset is read
+   * at this instant rather than tracked, because the two clocks only need
+   * introducing once — after that they are the same length and stay together.
+   */
+  const start = useCallback(() => {
+    const now = scoreTimeMs?.() ?? loop.fromMs;
+    player.play(loopOffsetSeconds(loop, now));
+  }, [player, loop, scoreTimeMs]);
+
   const halt = useCallback(() => player.stop(), [player]);
 
   useEffect(() => {
-    if (playing && enabled && player.ready && !rendering) start();
+    // `budget.withinBudget` belongs here as well as in the render: refusing to
+    // synthesise an over-long loop leaves the *previous* buffer loaded, and
+    // playing that would be worse than silence — it is a different passage.
+    if (playing && enabled && player.ready && !rendering && budget.withinBudget) start();
     else halt();
-  }, [playing, enabled, player.ready, rendering, start, halt]);
+  }, [playing, enabled, player.ready, rendering, budget.withinBudget, start, halt]);
 
   // Derived, not stored: with nothing to sound there is no loop, and that is a
   // fact about the current mode rather than a state transition.
-  const loopDurationMs = enabled && audibleParts.length > 0 ? renderedDurationMs : 0;
+  const wouldSound = enabled && audibleParts.length > 0;
+  const loopDurationMs = wouldSound ? renderedDurationMs : 0;
+
+  // An over-long loop is likewise a property of the current window, not an
+  // event that happened, so it is derived here instead of being pushed into
+  // state from inside the render effect. It outranks a stale render error:
+  // it is the reason there is no sound *now*.
+  const error = (wouldSound && !budget.withinBudget ? budget.message : null)
+    ?? renderError
+    ?? player.error;
 
   return {
     ready: player.ready,
     rendering,
-    error: renderError ?? player.error,
+    error,
     audibleParts,
     hasSolo: soloParts.length > 0,
     hasAccompaniment: accompanimentParts.length > 0,

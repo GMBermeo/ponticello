@@ -62,7 +62,7 @@ export function importScore(parsed: ParsedMidi, options: ImportScoreOptions): Im
     throw new Error('That track has no notes in it — pick a different one.');
   }
 
-  const origin = soloNotes[0].startTimeMs;
+  const origin = soloNotes[0]?.startTimeMs ?? 0;
   const limitMs = options.maxBars === undefined ? Infinity : options.maxBars * barDurationMs;
 
   const events: RawNoteEvent[] = [];
@@ -101,6 +101,11 @@ export function importScore(parsed: ParsedMidi, options: ImportScoreOptions): Im
 
   const notes: CelloNote[] = events.map((event, i) => {
     const state = states[i];
+    if (!state) {
+      // The solver returns one state per event; a mismatch is a bug in it
+      // rather than bad input, and should not reach the score.
+      throw new Error(`No fingering was found for note ${i + 1}.`);
+    }
     return {
       id: `${id}-${i + 1}`,
       startTimeMs: Math.round(event.startTimeMs),

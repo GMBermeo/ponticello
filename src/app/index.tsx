@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Pressable, TextInput, View } from 'react-native';
 
 import { Fingerboard, FingerboardScaleNote } from '@/components/Fingerboard';

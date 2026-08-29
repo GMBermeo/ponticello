@@ -1,51 +1,11 @@
 import { readdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseMidi, monophonic } from '../src/domain/midi';
-import { suggestSoloTrack } from '../src/domain/importScore';
-import { instrumentForProgram, BackingTrack, BackingPart } from '../src/domain/backing';
-import { OPEN_STRING_MIDI, midiToPitchName, midiToFrequency } from '../src/domain/cello';
-import { CelloNote, CelloMeasure, CelloSongScore, measureDurationMs, validateScore } from '../src/domain/schema';
-import { CelloState } from '../src/domain/fingering';
+import { chooseMelodyTrack, bestOctaveShift } from '../src/domain/melody';
+import { instrumentForProgram } from '../src/domain/backing';
+// Note: the emitted template references @/domain/cello, @/domain/schema and
+// @/domain/fingering. Those are imports in the *generated* file, not here.
 
-function firstPositionState(midi: number): CelloState {
-  if (midi <= 42) {
-    const diff = midi - 36;
-    if (diff === 0) return { string: 'C', position: '1st', finger: '0', extension: 'none', baseSemitones: 2 };
-    if (diff === 1) return { string: 'C', position: 'Half', finger: '1', extension: 'none', baseSemitones: 1 };
-    if (diff === 2) return { string: 'C', position: '1st', finger: '1', extension: 'none', baseSemitones: 2 };
-    if (diff === 3) return { string: 'C', position: '1st', finger: '2', extension: 'none', baseSemitones: 2 };
-    if (diff === 4) return { string: 'C', position: '1st', finger: '3', extension: 'none', baseSemitones: 2 };
-    if (diff === 5) return { string: 'C', position: '1st', finger: '4', extension: 'none', baseSemitones: 2 };
-    return { string: 'C', position: '1st', finger: '4', extension: 'forward', baseSemitones: 2 };
-  } else if (midi <= 49) {
-    const diff = midi - 43;
-    if (diff === 0) return { string: 'G', position: '1st', finger: '0', extension: 'none', baseSemitones: 2 };
-    if (diff === 1) return { string: 'G', position: 'Half', finger: '1', extension: 'none', baseSemitones: 1 };
-    if (diff === 2) return { string: 'G', position: '1st', finger: '1', extension: 'none', baseSemitones: 2 };
-    if (diff === 3) return { string: 'G', position: '1st', finger: '2', extension: 'none', baseSemitones: 2 };
-    if (diff === 4) return { string: 'G', position: '1st', finger: '3', extension: 'none', baseSemitones: 2 };
-    if (diff === 5) return { string: 'G', position: '1st', finger: '4', extension: 'none', baseSemitones: 2 };
-    return { string: 'G', position: '1st', finger: '4', extension: 'forward', baseSemitones: 2 };
-  } else if (midi <= 56) {
-    const diff = midi - 50;
-    if (diff === 0) return { string: 'D', position: '1st', finger: '0', extension: 'none', baseSemitones: 2 };
-    if (diff === 1) return { string: 'D', position: 'Half', finger: '1', extension: 'none', baseSemitones: 1 };
-    if (diff === 2) return { string: 'D', position: '1st', finger: '1', extension: 'none', baseSemitones: 2 };
-    if (diff === 3) return { string: 'D', position: '1st', finger: '2', extension: 'none', baseSemitones: 2 };
-    if (diff === 4) return { string: 'D', position: '1st', finger: '3', extension: 'none', baseSemitones: 2 };
-    if (diff === 5) return { string: 'D', position: '1st', finger: '4', extension: 'none', baseSemitones: 2 };
-    return { string: 'D', position: '1st', finger: '4', extension: 'forward', baseSemitones: 2 };
-  } else {
-    const diff = midi - 57;
-    if (diff === 0) return { string: 'A', position: '1st', finger: '0', extension: 'none', baseSemitones: 2 };
-    if (diff === 1) return { string: 'A', position: 'Half', finger: '1', extension: 'none', baseSemitones: 1 };
-    if (diff === 2) return { string: 'A', position: '1st', finger: '1', extension: 'none', baseSemitones: 2 };
-    if (diff === 3) return { string: 'A', position: '1st', finger: '2', extension: 'none', baseSemitones: 2 };
-    if (diff === 4) return { string: 'A', position: '1st', finger: '3', extension: 'none', baseSemitones: 2 };
-    if (diff === 5) return { string: 'A', position: '1st', finger: '4', extension: 'none', baseSemitones: 2 };
-    return { string: 'A', position: '1st', finger: '4', extension: 'forward', baseSemitones: 2 };
-  }
-}
 
 function parseSongInfo(filename: string, category: 'study' | 'classical' | 'song') {
   const stem = filename.replace(/\.midi?$/i, '');
@@ -123,6 +83,7 @@ const categories: { dir: string; cat: 'study' | 'classical' | 'song' }[] = [
 ];
 
 const compactList: CompactScoreData[] = [];
+const quality: { id: string; track: number; trackName: string; distinct: number; movement: number; shift: number; foldedPct: number }[] = [];
 
 for (const { dir, cat } of categories) {
   if (!existsSync(dir)) continue;
@@ -133,7 +94,11 @@ for (const { dir, cat } of categories) {
     const parsed = parseMidi(bytes);
     if (parsed.notes.length === 0) continue;
 
-    let soloTrack = suggestSoloTrack(parsed);
+    // Which track is the tune. Judged from what the notes do — movement,
+    // variety, register — rather than from the track's name, which is how the
+    // bass pedal under Lateralus used to win by being played by a Chancellor.
+    const choice = chooseMelodyTrack(parsed);
+    let soloTrack = choice?.track ?? null;
     if (soloTrack === null || !parsed.tracks.find(t => t.index === soloTrack && t.noteCount > 0)) {
       const trackWithNotes = parsed.tracks.find(t => t.noteCount > 0);
       if (trackWithNotes) soloTrack = trackWithNotes.index;
@@ -149,23 +114,40 @@ for (const { dir, cat } of categories) {
     const bpm = parsed.bpm || 80;
     const originTime = soloNotes[0].startTimeMs;
 
+    // One shift for the whole line, chosen to land as much of it as possible
+    // inside first position. Displacing the line bodily keeps the tune intact;
+    // the previous per-note fold moved individual notes an octave whenever they
+    // crossed the boundary, which broke the contour in the middle of a phrase.
     const midis = soloNotes.map(n => n.midiNumber);
-    const avgMidi = midis.reduce((a, b) => a + b, 0) / midis.length;
-    let octaveShift = 0;
-    if (avgMidi > 62) {
-      octaveShift = -12 * Math.round((avgMidi - 49) / 12);
-    } else if (avgMidi < 36) {
-      octaveShift = 12 * Math.ceil((36 - avgMidi) / 12);
-    }
+    const { shift: octaveShift } = bestOctaveShift(midis);
 
+    let folded = 0;
     const compactNotes: [number, number, number][] = [];
     for (const note of soloNotes) {
       const startTimeMs = Math.round(note.startTimeMs - originTime);
-      let m = note.midiNumber + octaveShift;
+      const shifted = note.midiNumber + octaveShift;
+      let m = shifted;
+      // Whatever still will not fit gets folded, because the schema cannot hold
+      // it — but it is counted, so a badly-fitting arrangement is visible
+      // rather than silently mangled.
       while (m > 63) m -= 12;
       while (m < 36) m += 12;
+      if (m !== shifted) folded++;
       compactNotes.push([m, startTimeMs, Math.max(1, Math.round(note.durationMs))]);
     }
+    const foldedPct = Math.round((100 * folded) / compactNotes.length);
+
+    // Quality signals for the run report. A song that had to fold many notes,
+    // or whose chosen track barely moves, is one to look at by ear.
+    quality.push({
+      id: info.id,
+      track: soloTrack,
+      trackName: (parsed.tracks.find(t => t.index === soloTrack)?.name ?? '-').slice(0, 24),
+      distinct: choice?.metrics.distinctPitches ?? 0,
+      movement: Math.round((choice?.metrics.movement ?? 0) * 100),
+      shift: octaveShift,
+      foldedPct,
+    });
 
     const span = Math.max(...compactNotes.map(n => n[0])) - Math.min(...compactNotes.map(n => n[0]));
     const difficulty = (span <= 12 && bpm <= 80) ? 'Beginner' : (span <= 19 && bpm <= 120) ? 'Intermediate' : 'Advanced';
@@ -212,7 +194,7 @@ console.log(`Writing ${compactList.length} compact scores to src/scores/bundledS
 writeFileSync('src/scores/bundledSongs.json', JSON.stringify(compactList));
 
 const outTs = `/**
- * Bundled Release 1.1 Scores and Backing Tracks.
+ * Bundled Release 1.2 Scores and Backing Tracks.
  * Auto-generated by tools/build-library.ts from _MIDIS.
  * All songs adapted to Cello First Position (C2 to D#4) across C, G, D, A strings.
  */
@@ -220,48 +202,9 @@ const outTs = `/**
 import { CelloSongScore, CelloNote, CelloMeasure, measureDurationMs } from '@/domain/schema';
 import { BackingTrack, BackingPart, InstrumentName, PartRole } from '@/domain/backing';
 import { midiToPitchName, midiToFrequency } from '@/domain/cello';
-import { CelloState } from '@/domain/fingering';
+import { firstPositionFingering } from '@/domain/fingering';
 import rawData from './bundledSongs.json';
 
-function firstPositionState(midi: number): CelloState {
-  if (midi <= 42) {
-    const diff = midi - 36;
-    if (diff === 0) return { string: 'C', position: '1st', finger: '0', extension: 'none', baseSemitones: 2 };
-    if (diff === 1) return { string: 'C', position: 'Half', finger: '1', extension: 'none', baseSemitones: 1 };
-    if (diff === 2) return { string: 'C', position: '1st', finger: '1', extension: 'none', baseSemitones: 2 };
-    if (diff === 3) return { string: 'C', position: '1st', finger: '2', extension: 'none', baseSemitones: 2 };
-    if (diff === 4) return { string: 'C', position: '1st', finger: '3', extension: 'none', baseSemitones: 2 };
-    if (diff === 5) return { string: 'C', position: '1st', finger: '4', extension: 'none', baseSemitones: 2 };
-    return { string: 'C', position: '1st', finger: '4', extension: 'forward', baseSemitones: 2 };
-  } else if (midi <= 49) {
-    const diff = midi - 43;
-    if (diff === 0) return { string: 'G', position: '1st', finger: '0', extension: 'none', baseSemitones: 2 };
-    if (diff === 1) return { string: 'G', position: 'Half', finger: '1', extension: 'none', baseSemitones: 1 };
-    if (diff === 2) return { string: 'G', position: '1st', finger: '1', extension: 'none', baseSemitones: 2 };
-    if (diff === 3) return { string: 'G', position: '1st', finger: '2', extension: 'none', baseSemitones: 2 };
-    if (diff === 4) return { string: 'G', position: '1st', finger: '3', extension: 'none', baseSemitones: 2 };
-    if (diff === 5) return { string: 'G', position: '1st', finger: '4', extension: 'none', baseSemitones: 2 };
-    return { string: 'G', position: '1st', finger: '4', extension: 'forward', baseSemitones: 2 };
-  } else if (midi <= 56) {
-    const diff = midi - 50;
-    if (diff === 0) return { string: 'D', position: '1st', finger: '0', extension: 'none', baseSemitones: 2 };
-    if (diff === 1) return { string: 'D', position: 'Half', finger: '1', extension: 'none', baseSemitones: 1 };
-    if (diff === 2) return { string: 'D', position: '1st', finger: '1', extension: 'none', baseSemitones: 2 };
-    if (diff === 3) return { string: 'D', position: '1st', finger: '2', extension: 'none', baseSemitones: 2 };
-    if (diff === 4) return { string: 'D', position: '1st', finger: '3', extension: 'none', baseSemitones: 2 };
-    if (diff === 5) return { string: 'D', position: '1st', finger: '4', extension: 'none', baseSemitones: 2 };
-    return { string: 'D', position: '1st', finger: '4', extension: 'forward', baseSemitones: 2 };
-  } else {
-    const diff = midi - 57;
-    if (diff === 0) return { string: 'A', position: '1st', finger: '0', extension: 'none', baseSemitones: 2 };
-    if (diff === 1) return { string: 'A', position: 'Half', finger: '1', extension: 'none', baseSemitones: 1 };
-    if (diff === 2) return { string: 'A', position: '1st', finger: '1', extension: 'none', baseSemitones: 2 };
-    if (diff === 3) return { string: 'A', position: '1st', finger: '2', extension: 'none', baseSemitones: 2 };
-    if (diff === 4) return { string: 'A', position: '1st', finger: '3', extension: 'none', baseSemitones: 2 };
-    if (diff === 5) return { string: 'A', position: '1st', finger: '4', extension: 'none', baseSemitones: 2 };
-    return { string: 'A', position: '1st', finger: '4', extension: 'forward', baseSemitones: 2 };
-  }
-}
 
 export interface CompactScoreDef {
   id: string;
@@ -292,7 +235,7 @@ export function inflateScore(raw: CompactScoreDef): CelloSongScore {
   }));
 
   const notes: CelloNote[] = raw.notes.map(([midiNumber, startTimeMs, durationMs], i) => {
-    const state = firstPositionState(midiNumber);
+    const state = firstPositionFingering(midiNumber);
     const measureIndex = Math.min(barCount - 1, Math.floor(startTimeMs / barDurationMs));
     return {
       id: \`\${raw.id}-\${i + 1}\`,
@@ -325,7 +268,7 @@ export function inflateScore(raw: CompactScoreDef): CelloSongScore {
       difficulty: raw.difficulty,
       tonic: 'C',
       teaches: 'Arranged for cello first position. Playable across C, G, D, A strings.',
-      rights: raw.category === 'classical' ? 'Public domain' : raw.category === 'study' ? 'Original study' : 'Arranged for Ponticello practice',
+      rights: raw.category === 'classical' ? 'Public domain' : raw.category === 'study' ? 'Original study' : 'Study reduction \u2014 personal practice, analysis and research',
     },
     measures,
     notes,
@@ -366,3 +309,17 @@ export function inflateBacking(raw: CompactScoreDef): BackingTrack {
 
 writeFileSync('src/scores/bundledSongs.ts', outTs);
 console.log('Done writing compact bundledSongs.ts and bundledSongs.json!');
+
+// ── Run report ───────────────────────────────────────────────────────────────
+const dull = quality.filter(q => q.distinct < 7 || q.movement < 25);
+const mangled = quality.filter(q => q.foldedPct > 15);
+console.log(`\nsongs built: ${quality.length}`);
+console.log(`octave-shifted into range: ${quality.filter(q => q.shift !== 0).length}`);
+console.log(`\nDULL (few pitches or barely moves): ${dull.length}`);
+for (const q of dull.slice(0, 15)) {
+  console.log(`  ${q.id.slice(0, 40).padEnd(42)} tr${q.track} "${q.trackName}" distinct=${q.distinct} move=${q.movement}%`);
+}
+console.log(`\nMANGLED (>15% of notes octave-folded): ${mangled.length}`);
+for (const q of mangled.slice(0, 15)) {
+  console.log(`  ${q.id.slice(0, 40).padEnd(42)} folded=${q.foldedPct}% shift=${q.shift}`);
+}

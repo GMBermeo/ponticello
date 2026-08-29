@@ -1,15 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFrameCallback, useSharedValue } from 'react-native-reanimated';
 
+import { PracticeLoop } from '@/domain/loop';
 import { activeNoteIndex, CelloSongScore, measureAt } from '@/domain/schema';
 
 export interface PlayheadOptions {
   score: CelloSongScore;
-  /** 1-based, inclusive. */
-  loopFromBar: number;
-  loopToBar: number;
-  /** Percentage of the written tempo. */
-  tempoPercent: number;
+  /**
+   * The loop being practised — the same object the accompaniment is rendered
+   * from. Passing it in rather than re-deriving it from bar numbers is what
+   * makes "the audio and the playhead disagree" unrepresentable.
+   */
+  loop: PracticeLoop;
 }
 
 export interface Playhead {
@@ -20,6 +22,11 @@ export interface Playhead {
   pause: () => void;
   toggle: () => void;
   restart: () => void;
+  /**
+   * Reads the clock from JS. The accompaniment calls this once, when it
+   * starts, to work out where in the loop to begin.
+   */
+  scoreTimeMs: () => number;
   /** Index of the note currently sounding. Updated a few times a second. */
   activeIndex: number;
   measureIndex: number;
@@ -41,11 +48,9 @@ const INDEX_POLL_MS = 60;
  * is active, and only a dozen times a second: everything that has to be smooth
  * reads the shared value directly.
  */
-export function usePlayhead({
-  score, loopFromBar, loopToBar, tempoPercent,
-}: PlayheadOptions): Playhead {
+export function usePlayhead({ score, loop }: PlayheadOptions): Playhead {
   const timeMs = useSharedValue(0);
-  const rate = useSharedValue(tempoPercent / 100);
+  const rate = useSharedValue(loop.tempoScale);
   const loopStart = useSharedValue(0);
   const loopEnd = useSharedValue(0);
   const running = useSharedValue(0);
@@ -54,15 +59,7 @@ export function usePlayhead({
   const [activeIndex, setActiveIndex] = useState(0);
   const [measureIndex, setMeasureIndex] = useState(0);
 
-  const { loopStartMs, loopEndMs } = useMemo(() => {
-    const first = score.measures[Math.max(0, loopFromBar - 1)] ?? score.measures[0];
-    const last = score.measures[Math.min(score.measures.length - 1, loopToBar - 1)]
-      ?? score.measures[score.measures.length - 1];
-    return {
-      loopStartMs: first?.startBarTimeMs ?? 0,
-      loopEndMs: (last?.startBarTimeMs ?? 0) + (last?.durationMs ?? 0),
-    };
-  }, [score, loopFromBar, loopToBar]);
+  const { fromMs: loopStartMs, toMs: loopEndMs } = loop;
 
   useEffect(() => {
     loopStart.set(loopStartMs);
@@ -71,14 +68,27 @@ export function usePlayhead({
     if (timeMs.get() < loopStartMs || timeMs.get() > loopEndMs) timeMs.set(loopStartMs);
   }, [loopStartMs, loopEndMs, loopStart, loopEnd, timeMs]);
 
-  useEffect(() => { rate.set(tempoPercent / 100); }, [tempoPercent, rate]);
+  useEffect(() => { rate.set(loop.tempoScale); }, [loop.tempoScale, rate]);
 
   useFrameCallback((frame) => {
     'worklet';
     if (running.get() === 0) return;
     const deltaMs = frame.timeSincePreviousFrame ?? 16.67;
+    const start = loopStart.get();
+    const end = loopEnd.get();
+    const span = end - start;
     const next = timeMs.get() + deltaMs * rate.get();
-    timeMs.set(next >= loopEnd.get() ? loopStart.get() : next);
+
+    if (span <= 0) {
+      timeMs.set(start);
+      return;
+    }
+    // Carry the overshoot across the loop point instead of snapping to the
+    // start. A frame lands wherever it lands — up to about 16 ms past the end —
+    // and throwing that remainder away shortened every repeat by a fraction of
+    // a frame, so after a few minutes the playhead was visibly ahead of the
+    // accompaniment even though both were running at the right speed.
+    timeMs.set(next >= end ? start + ((next - start) % span) : next);
   }, true);
 
   // Poll the clock for the discrete state React needs. Reading a shared value
@@ -123,8 +133,10 @@ export function usePlayhead({
     setMeasureIndex(measureAt(score, loopStartMs)?.index ?? 0);
   }, [loopStartMs, score, timeMs]);
 
+  const scoreTimeMs = useCallback(() => timeMs.get(), [timeMs]);
+
   return {
-    timeMs, playing, play, pause, toggle, restart,
+    timeMs, playing, play, pause, toggle, restart, scoreTimeMs,
     activeIndex, measureIndex, loopStartMs, loopEndMs,
   };
 }

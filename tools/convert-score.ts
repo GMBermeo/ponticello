@@ -19,8 +19,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 
 import {
-  midiToFrequency, midiToPitchName, OPEN_STRING_MIDI, POSITION_BASE_SEMITONES,
-} from '../src/domain/cello';
+  midiToFrequency, midiToPitchName, OPEN_STRING_MIDI, } from '../src/domain/cello';
 import { detectShifts, RawNoteEvent, solveFingering } from '../src/domain/fingering';
 import {
   CelloMeasure, CelloNote, CelloSongScore, measureDurationMs, validateScore,

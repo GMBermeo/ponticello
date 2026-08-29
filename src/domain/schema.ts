@@ -116,7 +116,8 @@ export function activeNoteIndex(score: CelloSongScore, tMs: number): number {
   let best = 0;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
-    if (notes[mid].startTimeMs <= tMs) {
+    const candidate = notes[mid];
+    if (candidate && candidate.startTimeMs <= tMs) {
       best = mid;
       lo = mid + 1;
     } else {

@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
 
 import { ListenControl } from '@/components/play/ListenControl';
@@ -13,6 +13,7 @@ import { usePiece } from '@/state/usePiece';
 import { useSession } from '@/state/session';
 import { useBacking } from '@/audio/useBacking';
 import { AccompanimentStyle } from '@/domain/backing';
+import { practiceLoop } from '@/domain/loop';
 import { ListenMode } from '@/audio/backing/types';
 import { useSettings, VisionName } from '@/state/settings';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -61,14 +62,23 @@ export default function SongScreen() {
     if (id && barCount > 0) openSong(id, barCount);
   }, [id, barCount, openSong]);
 
+  // The same window the play screen will use, so the preview you audition here
+  // is the loop you get when the session starts.
+  const loop = useMemo(
+    () => practiceLoop(score ?? null, {
+      loopFromBar: setup.loopFromBar,
+      loopToBar: setup.loopToBar,
+      tempoPercent: setup.tempoPercent,
+    }),
+    [score, setup.loopFromBar, setup.loopToBar, setup.tempoPercent],
+  );
+
   const listen = useBacking({
     score: score ?? null,
     backing,
     listenMode: settings.listenMode,
     accompaniment: settings.accompaniment,
-    loopFromBar: setup.loopFromBar,
-    loopToBar: setup.loopToBar,
-    tempoPercent: setup.tempoPercent,
+    loop,
     playing: previewing,
     volume: settings.backingVolume,
   });

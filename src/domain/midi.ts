@@ -50,7 +50,15 @@ interface Reader {
   offset: number;
 }
 
-const u8 = (r: Reader) => r.data[r.offset++];
+/**
+ * One byte, or zero past the end.
+ *
+ * Reading past the end of a truncated file yields 0 rather than `undefined`,
+ * which keeps every arithmetic caller total. A malformed file then fails on the
+ * structure it produces — an unknown chunk id, a track length that overruns —
+ * rather than on `NaN` propagating silently through the tick arithmetic.
+ */
+const u8 = (r: Reader): number => r.data[r.offset++] ?? 0;
 const u16 = (r: Reader) => (u8(r) << 8) | u8(r);
 const u32 = (r: Reader) => ((u8(r) << 24) >>> 0) + (u8(r) << 16) + (u8(r) << 8) + u8(r);
 

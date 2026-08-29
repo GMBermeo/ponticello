@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { View } from 'react-native';
 import Animated, { SharedValue, useAnimatedStyle } from 'react-native-reanimated';
 
@@ -37,7 +37,7 @@ export function CentsRail({
   // with a label and a readout whose heights depend on the font metrics, and a
   // rail whose ticks disagree with its own box by even a few pixels reads as a
   // miscalibrated instrument.
-  const [railSize, onRailLayout] = useMeasuredSize();
+  const [railSize, onRailLayout, railRef] = useMeasuredSize();
   const railHeight = railSize.height;
   const color = verdict ? intonationColor(verdict, chrome) : chrome.dim;
 
@@ -71,6 +71,7 @@ export function CentsRail({
       </Num>
 
       <View
+        ref={railRef}
         onLayout={onRailLayout}
         style={{
           flex: 1,
@@ -122,7 +123,12 @@ export function CentsRail({
         ) : null}
       </View>
 
-      <Label size={10} color={listening ? color : chrome.dim} style={{ marginTop: theme.s(5) }}>
+      <Label
+        size={10}
+        color={listening ? color : chrome.dim}
+        numberOfLines={1}
+        style={{ marginTop: theme.s(5) }}
+      >
         {!listening ? 'NO INPUT' : verdictWord(verdict)}
       </Label>
     </View>

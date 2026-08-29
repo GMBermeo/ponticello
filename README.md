@@ -200,10 +200,15 @@ before practising them.
 
 ### Rights
 
-Only original studies and public-domain works ship with note data. The game,
-film and television themes from the original brief appear as library rows with
-no notes and a reason: the app will not ship a transcription of someone else's
-melody. Convert your own licensed copy to fill one in.
+Ponticello is a practice instrument. Everything bundled here is a single-line
+cello reduction kept for personal study — intonation, position work, reading —
+plus theory analysis and research. Copyrighted melodies are included on that
+basis, following the fair-use guidance the Musicians Institute Library publishes
+for study copies. Nothing is performed, distributed or sold from the app.
+
+That is the project's purpose, not legal advice: clear the rights yourself
+before performing or publishing any of it. Add your own with
+`tools/convert-score.ts`.
 
 | Bundled | |
 | --- | --- |

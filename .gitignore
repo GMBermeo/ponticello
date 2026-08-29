@@ -44,3 +44,10 @@ example
 
 # personal MIDI stash - see _MIDIS/README.md
 _MIDIS/
+
+# agent skills
+.agents/skills/*
+!.agents/skills/cello-scoring/
+.claude/
+.kiro/
+.idea

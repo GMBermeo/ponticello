@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { View } from 'react-native';
 
 import { pickMidi } from '@/audio/backing/pickMidi';
@@ -131,9 +131,9 @@ export default function ImportScreen() {
               <Label size={11}>WHERE TO FIND FILES</Label>
               <Body size={13} color={chrome.dim}>
                 For classical repertoire, the Mutopia Project publishes public-domain editions with
-                MIDI alongside them, including all six Bach cello suites. For anything still in
-                copyright, use a file you already own or have licensed — the app will not ship
-                other people&apos;s music, but it will happily play yours.
+                MIDI alongside them, including all six Bach cello suites. Anything you import stays
+                on this device and is yours to study — practice, analysis, reading. Clear the rights
+                yourself before performing or sharing what comes out.
               </Body>
             </Stack>
           </>

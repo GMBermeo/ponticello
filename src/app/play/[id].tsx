@@ -1,15 +1,15 @@
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
-import React, { useEffect, useMemo } from 'react';
-import { Platform, Pressable, View } from 'react-native';
+import { useEffect, useMemo } from 'react';
+import { Platform, Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Fingerboard, FingerboardScaleNote, FingerboardStringLabels } from '@/components/Fingerboard';
 import { ListenChip } from '@/components/play/ListenControl';
 import { Highway } from '@/components/play/Highway';
 import { CentsRail, LevelMeter } from '@/components/play/Meters';
-import { ScoreVision } from '@/components/play/ScoreVision';
+import { ScorePage } from '@/components/play/ScorePage';
 import { TabVision } from '@/components/play/TabVision';
 import { usePlayhead } from '@/components/play/usePlayhead';
 import { useMeasuredSize } from '@/components/useMeasuredSize';
@@ -19,6 +19,7 @@ import { usePitch } from '@/audio/usePitch';
 import { useBacking } from '@/audio/useBacking';
 import { ListenMode } from '@/audio/backing/types';
 import { OPEN_STRING_MIDI } from '@/domain/cello';
+import { practiceLoop } from '@/domain/loop';
 import { usePiece } from '@/state/usePiece';
 import { useSession } from '@/state/session';
 import { useSettings, VisionName } from '@/state/settings';
@@ -44,10 +45,21 @@ const LISTEN_SEGMENTS = [
 
 const KEEP_AWAKE_TAG = 'ponticello-play';
 
-/** Fixed columns of the play layout, in design units. */
+/**
+ * Columns of the play layout, in design units.
+ *
+ * Two sets, because the screen has to work held either way up. Landscape has
+ * room for the fingerboard panel at a size you can read at arm's length;
+ * portrait — an unfolded Fold held vertically, or any phone — has to buy that
+ * width back from somewhere, and the panels are the right place to buy it from
+ * because the vision in the middle is the thing being read.
+ */
 const FINGERBOARD_WIDTH = 152;
+const FINGERBOARD_WIDTH_TALL = 104;
 const CENTS_WIDTH = 96;
+const CENTS_WIDTH_TALL = 72;
 const TOP_BAR = 56;
+const CONTROL_BAR = 46;
 const STATUS_BAR = 36;
 
 export default function PlayRoute() {
@@ -76,8 +88,8 @@ function PlayScreen() {
   const { settings, update } = useSettings();
   const { setup } = useSession();
 
-  const [visionSize, onVisionLayout] = useMeasuredSize();
-  const [boardSize, onBoardLayout] = useMeasuredSize();
+  const [visionSize, onVisionLayout, visionRef] = useMeasuredSize();
+  const [boardSize, onBoardLayout, boardRef] = useMeasuredSize();
 
   // Practising is the one activity where the screen must not dim: the player's
   // hands are busy and nothing is touching the glass for minutes at a time.
@@ -89,20 +101,31 @@ function PlayScreen() {
     return () => { deactivateKeepAwake(KEEP_AWAKE_TAG).catch(() => {}); };
   }, []);
 
-  // The play screen is the only landscape screen; everything else is portrait.
+  // The play screen used to force landscape. It no longer does: an unfolded
+  // Fold is a tall screen that people hold vertically, and locking rotation
+  // meant either turning the device or reading the interface sideways. The
+  // layout below adapts instead, which is the only version of "works on that
+  // device" worth having.
   useEffect(() => {
     if (Platform.OS === 'web') return;
-    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
-    return () => { ScreenOrientation.unlockAsync().catch(() => {}); };
+    ScreenOrientation.unlockAsync().catch(() => {});
   }, []);
 
   const { score, backing: importedBacking } = usePiece(id);
-  const playhead = usePlayhead({
-    score: score ?? EMPTY_SCORE,
-    loopFromBar: setup.loopFromBar,
-    loopToBar: setup.loopToBar,
-    tempoPercent: setup.tempoPercent,
-  });
+
+  // Resolved once, here, and handed to both the transport and the
+  // accompaniment. They used to work the window out separately and disagree
+  // about it, which is why the backing never lined up with the notes.
+  const loop = useMemo(
+    () => practiceLoop(score ?? EMPTY_SCORE, {
+      loopFromBar: setup.loopFromBar,
+      loopToBar: setup.loopToBar,
+      tempoPercent: setup.tempoPercent,
+    }),
+    [score, setup.loopFromBar, setup.loopToBar, setup.tempoPercent],
+  );
+
+  const playhead = usePlayhead({ score: score ?? EMPTY_SCORE, loop });
 
   const pitch = usePitch(true);
   const activeNote = score?.notes[playhead.activeIndex];
@@ -112,11 +135,10 @@ function PlayScreen() {
     backing: importedBacking,
     listenMode: settings.listenMode,
     accompaniment: settings.accompaniment,
-    loopFromBar: setup.loopFromBar,
-    loopToBar: setup.loopToBar,
-    tempoPercent: setup.tempoPercent,
+    loop,
     playing: playhead.playing,
     volume: settings.backingVolume,
+    scoreTimeMs: playhead.scoreTimeMs,
   });
 
   // Point the cents calculation at whatever the player is supposed to be on.
@@ -145,6 +167,15 @@ function PlayScreen() {
     ? activeNote.midiNumber - OPEN_STRING_MIDI[activeNote.string]
     : 0;
 
+  /**
+   * True when the title row cannot also carry both switchers — a phone, or an
+   * unfolded Fold held vertically. Derived from the resolved scale rather than
+   * from a raw pixel width, so it means the same thing on every device.
+   */
+  const narrow = !theme.scale.landscape || theme.scale.compact;
+  const fingerboardWidth = narrow ? FINGERBOARD_WIDTH_TALL : FINGERBOARD_WIDTH;
+  const centsWidth = narrow ? CENTS_WIDTH_TALL : CENTS_WIDTH;
+
   return (
     <View
       style={{
@@ -167,28 +198,46 @@ function PlayScreen() {
           <Title size={22} color={theme.chrome.ink}>×</Title>
         </Pressable>
 
-        <View style={{ maxWidth: theme.s(210), minWidth: 0 }}>
+        {/*
+          Narrow: the title takes the slack, because there is no switcher row
+          beside it to compete with. Wide: it sizes to its content up to a cap,
+          and `<Grow />` below absorbs the slack instead — giving it `flex` there
+          shrinks it to whatever the switchers leave over, which truncates a
+          title that would otherwise have fitted.
+        */}
+        <View style={narrow
+          ? { flex: 1, minWidth: 0 }
+          : { minWidth: 0, maxWidth: theme.s(210) }}
+        >
           <Title size={15} numberOfLines={1}>{score.metadata.title}</Title>
-          <Label size={10}>
+          <Label size={10} numberOfLines={1}>
             {`m.${playhead.measureIndex + 1} · ${activeNote?.position ?? '1st'} pos · loop m.${setup.loopFromBar}–${setup.loopToBar}`}
           </Label>
         </View>
 
-        <Segmented
-          segments={VISION_SEGMENTS}
-          value={settings.vision}
-          onChange={(vision: VisionName) => update({ vision })}
-          compact
-        />
-
-        <Segmented
-          segments={LISTEN_SEGMENTS}
-          value={settings.listenMode}
-          onChange={(listenMode: ListenMode) => update({ listenMode })}
-          compact
-        />
-
-        <Grow />
+        {/*
+          On a wide screen the switchers ride in the title row. On a narrow one
+          they drop to their own row below: the transport is the control you
+          reach for mid-phrase, and it was being pushed off the right-hand edge
+          entirely, which made the screen unusable rather than merely cramped.
+        */}
+        {narrow ? null : (
+          <>
+            <Segmented
+              segments={VISION_SEGMENTS}
+              value={settings.vision}
+              onChange={(vision: VisionName) => update({ vision })}
+              compact
+            />
+            <Segmented
+              segments={LISTEN_SEGMENTS}
+              value={settings.listenMode}
+              onChange={(listenMode: ListenMode) => update({ listenMode })}
+              compact
+            />
+            <Grow />
+          </>
+        )}
 
         <Pressable
           onPress={playhead.restart}
@@ -209,19 +258,49 @@ function PlayScreen() {
       </Row>
       <Rule weight={2} />
 
+      {narrow ? (
+        <>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{
+              alignItems: 'center',
+              gap: theme.s(10),
+              paddingHorizontal: theme.s(10),
+            }}
+            style={{ height: theme.s(CONTROL_BAR), flexGrow: 0 }}
+          >
+            <Segmented
+              segments={VISION_SEGMENTS}
+              value={settings.vision}
+              onChange={(vision: VisionName) => update({ vision })}
+              compact
+            />
+            <Segmented
+              segments={LISTEN_SEGMENTS}
+              value={settings.listenMode}
+              onChange={(listenMode: ListenMode) => update({ listenMode })}
+              compact
+            />
+          </ScrollView>
+          <Rule weight={2} />
+        </>
+      ) : null}
+
       {/* Body */}
       <View style={{ flex: 1, flexDirection: 'row', minHeight: 0 }}>
         <View
           style={{
-            width: theme.s(FINGERBOARD_WIDTH),
+            width: theme.s(fingerboardWidth),
             paddingHorizontal: theme.s(8),
             paddingTop: theme.s(6),
             borderRightWidth: theme.rule(2),
             borderColor: theme.chrome.line,
           }}
         >
-          <Label size={10}>FINGERBOARD</Label>
-          <View style={{ flex: 1, marginTop: theme.s(6) }} onLayout={onBoardLayout}>
+          {/* The panel is narrower when the screen is; the label follows it. */}
+          <Label size={10} numberOfLines={1}>{narrow ? 'BOARD' : 'FINGERBOARD'}</Label>
+          <View ref={boardRef} style={{ flex: 1, marginTop: theme.s(6) }} onLayout={onBoardLayout}>
             <Fingerboard
               height={boardSize.height}
               maxMm={440}
@@ -242,6 +321,7 @@ function PlayScreen() {
         </View>
 
         <View
+          ref={visionRef}
           onLayout={onVisionLayout}
           style={{
             flex: 1,
@@ -274,13 +354,12 @@ function PlayScreen() {
                 />
               ) : null}
               {settings.vision === 'score' ? (
-                <ScoreVision
+                <ScorePage
                   score={score}
                   playhead={playhead}
                   height={visionSize.height - theme.s(12)}
                   width={visionSize.width - theme.s(20)}
-                  cents={pitch.cents}
-                  listening={pitch.mic.live && pitch.reading.voiced}
+                  showFingerings={settings.showFingerings}
                 />
               ) : null}
             </>
@@ -289,7 +368,7 @@ function PlayScreen() {
 
         <View
           style={{
-            width: theme.s(CENTS_WIDTH),
+            width: theme.s(centsWidth),
             paddingHorizontal: theme.s(8),
             paddingTop: theme.s(6),
             borderLeftWidth: theme.rule(2),
@@ -307,19 +386,30 @@ function PlayScreen() {
 
       {/* Status strip */}
       <Rule weight={2} />
-      <Row padX={10} gap={14} style={{ height: theme.s(STATUS_BAR) }}>
-        <StatusChip
-          label={pitch.mic.live ? `MIC LIVE · ${Math.round(pitch.mic.sampleRate / 1000)} kHz` : micLabel(pitch.mic.status)}
-          tone={pitch.mic.live ? 'accent' : 'dim'}
-        />
-        <StatusChip label={`${setup.tempoPercent}% TEMPO`} />
-        <StatusChip label={settings.showFingerings ? 'FINGERINGS ON' : 'FINGERINGS HIDDEN'} />
-        <StatusChip label={settings.showTapes ? 'TAPES ON' : 'TAPES OFF'} />
-        <ListenChip mode={settings.listenMode} rendering={backing.rendering} />
-        {pitch.reading.voiced ? (
-          <StatusChip label={`HEARD ${pitch.reading.heard} · ${pitch.reading.band.toUpperCase()} BAND`} />
-        ) : null}
-        <Grow />
+      <Row padX={10} gap={10} style={{ height: theme.s(STATUS_BAR) }}>
+        {/*
+          Scrolls rather than clips. These are readings, not controls, so losing
+          the tail off the right-hand edge was survivable — but it also silently
+          hid the one that says whether the accompaniment is still preparing.
+        */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ alignItems: 'center', gap: theme.s(14) }}
+          style={{ flex: 1 }}
+        >
+          <StatusChip
+            label={pitch.mic.live ? `MIC LIVE · ${Math.round(pitch.mic.sampleRate / 1000)} kHz` : micLabel(pitch.mic.status)}
+            tone={pitch.mic.live ? 'accent' : 'dim'}
+          />
+          <StatusChip label={`${setup.tempoPercent}% TEMPO`} />
+          <StatusChip label={settings.showFingerings ? 'FINGERINGS ON' : 'FINGERINGS HIDDEN'} />
+          <StatusChip label={settings.showTapes ? 'TAPES ON' : 'TAPES OFF'} />
+          <ListenChip mode={settings.listenMode} rendering={backing.rendering} />
+          {pitch.reading.voiced ? (
+            <StatusChip label={`HEARD ${pitch.reading.heard} · ${pitch.reading.band.toUpperCase()} BAND`} />
+          ) : null}
+        </ScrollView>
         <LevelMeter level={pitch.level} height={13} />
       </Row>
     </View>

@@ -64,7 +64,7 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
     }
   }, [context, stop]);
 
-  const play = useCallback(() => {
+  const play = useCallback((offsetSeconds = 0) => {
     const audio = context();
     const buffer = bufferRef.current;
     if (!audio || !buffer || !gainRef.current) return;
@@ -78,7 +78,16 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
     source.buffer = buffer;
     source.loop = true;
     source.connect(gainRef.current);
-    source.start();
+
+    // Wrapped here rather than trusted from the caller: an offset past the end
+    // makes `start` throw, which would take the whole play action down.
+    const offset = buffer.duration > 0
+      ? ((offsetSeconds % buffer.duration) + buffer.duration) % buffer.duration
+      : 0;
+    // With `loop` set, the second argument is where playback begins; it wraps
+    // to the buffer start from then on. That is the phase lock, and it costs a
+    // single argument.
+    source.start(0, offset);
     sourceRef.current = source;
   }, [context, stop]);
 

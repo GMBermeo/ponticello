@@ -121,9 +121,11 @@ const NOTE_TO_PITCH_CLASS: Record<string, number> = {
 export function tonicPitchClass(keySignature: string): number {
   const match = /^\s*([A-Ga-g])\s*([#b\u266f\u266d]?)/.exec(keySignature);
   if (!match) return 0;
-  const base = NOTE_TO_PITCH_CLASS[match[1].toUpperCase()] ?? 0;
-  const sharp = match[2] === '#' || match[2] === '\u266f';
-  const flat = match[2] === 'b' || match[2] === '\u266d';
+  const letter = match[1] ?? 'C';
+  const accidental = match[2] ?? '';
+  const base = NOTE_TO_PITCH_CLASS[letter.toUpperCase()] ?? 0;
+  const sharp = accidental === '#' || accidental === '\u266f';
+  const flat = accidental === 'b' || accidental === '\u266d';
   return (base + (sharp ? 1 : 0) - (flat ? 1 : 0) + 12) % 12;
 }
 
@@ -154,21 +156,27 @@ function lowestPitchClass(score: CelloSongScore, fromMs: number, toMs: number): 
 
 /** Weight of each pitch class in a time window, by how long it sounds. */
 function pitchClassWeights(score: CelloSongScore, fromMs: number, toMs: number): number[] {
-  const weights = new Array(12).fill(0);
+  const weights: number[] = new Array(12).fill(0);
   for (const note of score.notes) {
     const start = Math.max(note.startTimeMs, fromMs);
     const end = Math.min(note.startTimeMs + note.durationMs, toMs);
     if (end <= start) continue;
-    weights[note.midiNumber % 12] += end - start;
+    const slot = ((note.midiNumber % 12) + 12) % 12;
+    weights[slot] = (weights[slot] ?? 0) + (end - start);
   }
   return weights;
+}
+
+/** Total read of the twelve-slot pitch-class table. */
+function weightAt(weights: readonly number[], pitchClass: number): number {
+  return weights[((pitchClass % 12) + 12) % 12] ?? 0;
 }
 
 export interface InferredChord {
   root: number;
   minor: boolean;
-  /** Chord tones as pitch classes, root first. */
-  tones: number[];
+  /** Chord tones as pitch classes: root, third, fifth. Always exactly three. */
+  tones: [number, number, number];
   /** How much of the bar's weight the chord accounts for, 0–1. */
   confidence: number;
 }
@@ -189,11 +197,11 @@ export function inferChord(
   const total = weights.reduce((a, b) => a + b, 0);
   const bass = lowestPitchClass(score, fromMs, toMs);
   if (total === 0) {
-    const tones = fallbackMinor ? [0, 3, 7] : [0, 4, 7];
+    const [r, t, f] = fallbackMinor ? [0, 3, 7] : [0, 4, 7];
     return {
       root: fallbackRoot,
       minor: fallbackMinor,
-      tones: tones.map((t) => (fallbackRoot + t) % 12),
+      tones: [(fallbackRoot + r) % 12, (fallbackRoot + t) % 12, (fallbackRoot + f) % 12],
       confidence: 0,
     };
   }
@@ -205,7 +213,9 @@ export function inferChord(
       const fifth = (root + 7) % 12;
       // The root carries the most information about which chord this is, the
       // third decides its quality, and the fifth barely distinguishes anything.
-      let value = weights[root] * 1.6 + weights[third] * 1.2 + weights[fifth] * 0.6;
+      let value = weightAt(weights, root) * 1.6
+        + weightAt(weights, third) * 1.2
+        + weightAt(weights, fifth) * 0.6;
 
       // The lowest note is the single strongest cue for the root — it is why
       // figured bass works at all. Without this the opening of the Bach reads
@@ -223,7 +233,10 @@ export function inferChord(
     root: best.root,
     minor: best.minor,
     tones: [best.root, third, fifth],
-    confidence: Math.min(1, (weights[best.root] + weights[third] + weights[fifth]) / total),
+    confidence: Math.min(
+      1,
+      (weightAt(weights, best.root) + weightAt(weights, third) + weightAt(weights, fifth)) / total,
+    ),
   };
 }
 
@@ -252,7 +265,7 @@ export function generateAccompaniment(
   const measures = score.measures.slice(first - 1, last);
   if (measures.length === 0) return [];
 
-  const origin = measures[0].startBarTimeMs;
+  const origin = measures[0]?.startBarTimeMs ?? 0;
   const tonic = tonicPitchClass(score.metadata.keySignature);
   const minor = isMinorKey(score.metadata.keySignature);
 

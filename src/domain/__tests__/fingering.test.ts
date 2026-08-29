@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import { OPEN_STRING_MIDI } from '../cello';
 import {
-  candidateStates, detectShifts, emissionCost, RawNoteEvent, solveFingering, transitionCost,
+  candidateStates, detectShifts, emissionCost, firstPositionFingering, RawNoteEvent,
+  solveFingering, transitionCost,
 } from '../fingering';
 
 const at = (midiNumber: number, startTimeMs: number, durationMs = 400): RawNoteEvent =>
@@ -186,5 +187,46 @@ describe('detectShifts', () => {
       { string: 'D' as const, position: '1st' as const, finger: '0' as const, extension: 'none' as const },
     ];
     expect(detectShifts(notes, states)).toHaveLength(0);
+  });
+});
+
+describe('firstPositionFingering', () => {
+  it('puts every open string on its own string with no finger', () => {
+    for (const [string, midi] of Object.entries(OPEN_STRING_MIDI)) {
+      const state = firstPositionFingering(midi);
+      expect(state.string).toBe(string);
+      expect(state.finger).toBe('0');
+    }
+  });
+
+  it('spans a minor third across fingers 1 to 4', () => {
+    // The cello frame: one semitone per finger, 2..5 above the open string.
+    const fingers = [2, 3, 4, 5].map((n) => firstPositionFingering(OPEN_STRING_MIDI.D + n).finger);
+    expect(fingers).toEqual(['1', '2', '3', '4']);
+  });
+
+  it('drops to half position for the semitone above the open string', () => {
+    const state = firstPositionFingering(OPEN_STRING_MIDI.G + 1);
+    expect(state.position).toBe('Half');
+    expect(state.baseSemitones).toBe(1);
+  });
+
+  it('reaches one semitone further with a forward extension', () => {
+    const state = firstPositionFingering(OPEN_STRING_MIDI.A + 6);
+    expect(state.finger).toBe('4');
+    expect(state.extension).toBe('forward');
+  });
+
+  it('assigns every note the bundled library can contain', () => {
+    for (let midi = 36; midi <= 63; midi += 1) {
+      expect(() => firstPositionFingering(midi)).not.toThrow();
+    }
+  });
+
+  it('refuses a note above first position rather than inventing one', () => {
+    // D#4 is the ceiling. Anything higher used to come back as a forward-
+    // extended fourth finger, which looks plausible and is unplayable.
+    expect(() => firstPositionFingering(64)).toThrow(RangeError);
+    expect(() => firstPositionFingering(72)).toThrow(/Transpose/);
   });
 });
