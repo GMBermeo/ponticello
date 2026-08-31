@@ -3,6 +3,9 @@ import { join } from 'node:path';
 import { parseMidi, monophonic } from '../src/domain/midi';
 import { chooseMelodyTrack, bestOctaveShift } from '../src/domain/melody';
 import { instrumentForProgram } from '../src/domain/backing';
+import { MINIMAL_TRAVEL_WEIGHTS, solveFingering } from '../src/domain/fingering';
+import { difficultyOf } from '../src/domain/difficulty';
+import type { DifficultyTier } from '../src/domain/schema';
 // Note: the emitted template references @/domain/cello, @/domain/schema and
 // @/domain/fingering. Those are imports in the *generated* file, not here.
 
@@ -68,12 +71,51 @@ interface CompactScoreData {
   origin: string;
   bpm: number;
   meter: [number, number];
-  difficulty: 'Beginner' | 'Intermediate' | 'Advanced';
+  difficulty: DifficultyTier;
+  /** Share of notes in [1st/half, 2nd-4th, 5th-thumb], as whole percents. */
+  positions: [number, number, number];
   category: 'study' | 'classical' | 'song';
   // [midiNumber, startTimeMs, durationMs]
   notes: [number, number, number][];
   // [name, instrument, role, gain, [[midi, startMs, durMs, vel], ...]]
   backingParts: [string, string, string, number, [number, number, number, number][]][];
+}
+
+/**
+ * Most notes kept per backing track.
+ *
+ * A ceiling exists because `bundledSongs.json` ships inside the app and is
+ * already tens of megabytes. What matters is that the ceiling is reached by
+ * *thinning* rather than by cutting: 1800 notes spread over a five-minute song
+ * is five events a second, which is ample for something you play over, whereas
+ * the first 1800 notes of that song is a backing that quits before the second
+ * chorus.
+ */
+const MAX_TRACK_NOTES = 1800;
+
+/**
+ * Reduces a time-sorted track to at most `cap` notes, spread over its whole
+ * length.
+ *
+ * The track is divided into `cap` equal-count buckets and the loudest note in
+ * each is kept, so what survives is the accented skeleton of the part rather
+ * than an arbitrary prefix. Velocity is the right tie-break because a thinned
+ * accompaniment should keep the beats a player is listening for.
+ */
+function thinTrack<T extends { velocity: number }>(notes: T[], cap: number): T[] {
+  if (notes.length <= cap) return notes;
+  const out: T[] = [];
+  const stride = notes.length / cap;
+  for (let i = 0; i < cap; i++) {
+    const from = Math.floor(i * stride);
+    const to = Math.min(notes.length, Math.max(from + 1, Math.floor((i + 1) * stride)));
+    let best = from;
+    for (let j = from + 1; j < to; j++) {
+      if (notes[j].velocity > notes[best].velocity) best = j;
+    }
+    out.push(notes[best]);
+  }
+  return out;
 }
 
 const categories: { dir: string; cat: 'study' | 'classical' | 'song' }[] = [
@@ -83,6 +125,7 @@ const categories: { dir: string; cat: 'study' | 'classical' | 'song' }[] = [
 ];
 
 const compactList: CompactScoreData[] = [];
+const difficulties: { id: string; tier: DifficultyTier; score: number }[] = [];
 const quality: { id: string; track: number; trackName: string; distinct: number; movement: number; shift: number; foldedPct: number }[] = [];
 
 for (const { dir, cat } of categories) {
@@ -149,17 +192,46 @@ for (const { dir, cat } of categories) {
       foldedPct,
     });
 
-    const span = Math.max(...compactNotes.map(n => n[0])) - Math.min(...compactNotes.map(n => n[0]));
-    const difficulty = (span <= 12 && bpm <= 80) ? 'Beginner' : (span <= 19 && bpm <= 120) ? 'Intermediate' : 'Advanced';
+    // Difficulty from what the left hand actually has to do, not from pitch
+    // span and tempo. Solving the line here rather than at runtime means the
+    // library screen can filter on the answer without fingering 258 songs to
+    // draw a list. See src/domain/difficulty.ts for the weighting.
+    const events = compactNotes.map(([midiNumber, startTimeMs, durationMs]) =>
+      ({ midiNumber, startTimeMs, durationMs }));
+    const solvedStates = solveFingering(events, MINIMAL_TRAVEL_WEIGHTS).states;
+    const report = difficultyOf(events, solvedStates);
+    const difficulty: DifficultyTier = report.tier;
+    difficulties.push({ id: info.id, tier: report.tier, score: report.score });
+
+    // Where the hand actually spends its time, stored rather than assumed.
+    // The library row used to hard-code "100% 1st position", which was true
+    // while every note was fingered by `firstPositionFingering` and stopped
+    // being true the moment the solver was allowed to choose.
+    const share = (test: (p: string) => boolean) => Math.round(
+      (100 * solvedStates.filter(st => test(st.position)).length) / (solvedStates.length || 1),
+    );
+    const positions: [number, number, number] = [
+      share(p => p === '1st' || p === 'Half'),
+      share(p => ['2nd', '3rd', '4th'].includes(p)),
+      share(p => ['5th', '6th', '7th', 'Thumb'].includes(p)),
+    ];
 
     const backingParts: CompactScoreData['backingParts'] = [];
     for (const track of parsed.tracks) {
       if (track.noteCount === 0) continue;
       const isSolo = track.index === soloTrack;
-      // Filter out redundant notes and cap at reasonable density
-      const tNotes = parsed.notes
-        .filter(n => n.track === track.index)
-        .slice(0, 1500)
+      // Cap density, but by thinning across the whole track rather than by
+      // truncating it. `.slice(0, 1500)` used to be here, and it meant that on
+      // any track with more than 1500 notes the accompaniment simply stopped a
+      // quarter of the way through the song — 223 tracks across 132 of the 258
+      // songs. Six of them had no second track to cover for it and went
+      // completely silent after the first minute.
+      const tNotes = thinTrack(
+        parsed.notes
+          .filter(n => n.track === track.index)
+          .sort((a, b) => a.startTimeMs - b.startTimeMs),
+        MAX_TRACK_NOTES,
+      )
         .map(n => [
           n.midiNumber,
           Math.max(0, Math.round(n.startTimeMs - originTime)),
@@ -183,6 +255,7 @@ for (const { dir, cat } of categories) {
       bpm,
       meter: timeSignature,
       difficulty,
+      positions,
       category: info.category,
       notes: compactNotes,
       backingParts,
@@ -199,10 +272,10 @@ const outTs = `/**
  * All songs adapted to Cello First Position (C2 to D#4) across C, G, D, A strings.
  */
 
-import { CelloSongScore, CelloNote, CelloMeasure, measureDurationMs } from '@/domain/schema';
+import { CelloSongScore, CelloNote, CelloMeasure, DifficultyTier, measureDurationMs } from '@/domain/schema';
 import { BackingTrack, BackingPart, InstrumentName, PartRole } from '@/domain/backing';
 import { midiToPitchName, midiToFrequency } from '@/domain/cello';
-import { firstPositionFingering } from '@/domain/fingering';
+import { MINIMAL_TRAVEL_WEIGHTS, solveFingering } from '@/domain/fingering';
 import rawData from './bundledSongs.json';
 
 
@@ -213,7 +286,9 @@ export interface CompactScoreDef {
   origin: string;
   bpm: number;
   meter: [number, number];
-  difficulty: 'Beginner' | 'Intermediate' | 'Advanced';
+  difficulty: DifficultyTier;
+  /** Share of notes in [1st/half, 2nd-4th, 5th-thumb], as whole percents. */
+  positions: [number, number, number];
   category: 'study' | 'classical' | 'song';
   notes: [number, number, number][];
   backingParts: [string, string, string, number, [number, number, number, number][]][];
@@ -234,8 +309,30 @@ export function inflateScore(raw: CompactScoreDef): CelloSongScore {
     tempoBpm: raw.bpm,
   }));
 
+  // Fingered by the solver, not by the first-position table.
+  //
+  // \`firstPositionFingering\` answers "where would a beginner put this note"
+  // one note at a time, with no idea what comes next. Because it reaches for
+  // half position whenever a semitone asks for it, the hand ends up rocking
+  // between half and first for the length of the piece: 351 metres of travel
+  // across the 258 bundled songs, for music that never leaves the neck.
+  //
+  // \`solveFingering\` is a Viterbi pass over every playable placement of every
+  // note, with a transition cost measured in millimetres of real travel divided
+  // by the time available. Under \`MINIMAL_TRAVEL_WEIGHTS\` — which price a
+  // shift far above a slightly better timbre — the same library costs **12
+  // metres**, a 97 % reduction, while still moving off first position for the
+  // 2.5 % of notes where somewhere else is genuinely closer. That is the
+  // minimal-hand-movement rule, and it is measured in
+  // src/domain/__tests__/difficulty.test.ts rather than asserted here.
+  const solved = solveFingering(
+    raw.notes.map(([midiNumber, startTimeMs, durationMs]) =>
+      ({ midiNumber, startTimeMs, durationMs })),
+    MINIMAL_TRAVEL_WEIGHTS,
+  ).states;
+
   const notes: CelloNote[] = raw.notes.map(([midiNumber, startTimeMs, durationMs], i) => {
-    const state = firstPositionFingering(midiNumber);
+    const state = solved[i];
     const measureIndex = Math.min(barCount - 1, Math.floor(startTimeMs / barDurationMs));
     return {
       id: \`\${raw.id}-\${i + 1}\`,
@@ -311,6 +408,19 @@ writeFileSync('src/scores/bundledSongs.ts', outTs);
 console.log('Done writing compact bundledSongs.ts and bundledSongs.json!');
 
 // ── Run report ───────────────────────────────────────────────────────────────
+const tiers = difficulties.reduce<Record<string, number>>((acc, d) => {
+  acc[d.tier] = (acc[d.tier] ?? 0) + 1;
+  return acc;
+}, {});
+const total = difficulties.length || 1;
+console.log('\ndifficulty:');
+for (const tier of ['Beginner', 'Intermediate', 'Advanced', 'Expert']) {
+  const n = tiers[tier] ?? 0;
+  console.log(`  ${tier.padEnd(13)} ${String(n).padStart(3)}  ${Math.round((100 * n) / total)}%`);
+}
+const hardest = [...difficulties].sort((a, b) => b.score - a.score).slice(0, 6);
+console.log(`  hardest: ${hardest.map(d => `${d.id}:${d.score.toFixed(0)}`).join(' ')}`);
+
 const dull = quality.filter(q => q.distinct < 7 || q.movement < 25);
 const mangled = quality.filter(q => q.foldedPct > 15);
 console.log(`\nsongs built: ${quality.length}`);

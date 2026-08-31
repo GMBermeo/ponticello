@@ -140,6 +140,36 @@ export interface CostWeights {
   heelCrossing: number;
 }
 
+/**
+ * Weights for the bundled library, where staying put beats everything.
+ *
+ * `DEFAULT_WEIGHTS` balances shifting against the things that make a *phrase*
+ * sound good — not taking a long note on an open string it cannot vibrate, not
+ * stretching when the closed frame would do. That is the right trade for a
+ * player choosing a fingering.
+ *
+ * It is the wrong trade for this library. Every bundled arrangement is folded
+ * into MIDI 36–63, so the whole of it is reachable without leaving first
+ * position, and under the default weights the solver spends 487 metres of hand
+ * travel across the 258 songs where a first-position mapping spends 351 — it
+ * climbs to dodge an open string on a long note. For a beginner reading a
+ * scrolling highway, a hand that stays where it is beats a slightly better
+ * timbre every time.
+ *
+ * So shifting is weighted heavily enough here that the hand moves only when the
+ * alternative is genuinely unplayable, while the solver keeps everything else it
+ * is good at: choosing the finger, the string and the extension.
+ */
+export const MINIMAL_TRAVEL_WEIGHTS: CostWeights = {
+  openStringOnLongNote: 0.25,
+  longNoteMs: 300,
+  forwardExtension: 1.2,
+  backwardExtension: 0.7,
+  fourthFingerInThumb: 6,
+  shift: 26,
+  heelCrossing: 2.5,
+};
+
 export const DEFAULT_WEIGHTS: CostWeights = {
   openStringOnLongNote: 1.4,
   longNoteMs: 300,

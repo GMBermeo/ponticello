@@ -167,20 +167,27 @@ export function clipToLoop(
 }
 
 /**
- * The longest loop worth synthesising, in real seconds.
+ * The longest loop that can be accompanied, in real seconds.
  *
- * Rendering is a `Float32Array` of `seconds × sampleRate`, allocated on the JS
- * thread, and on native it is then encoded to a 16-bit WAV — so the working set
- * is about six bytes per sample. Ninety seconds at 22.05 kHz is roughly 12 MB,
- * which a phone absorbs; the eleven-minute pieces in the library came to over
- * 250 MB and a main thread blocked for seconds, which is what "the app freezes
- * and then plays everything at once" actually was.
+ * This used to be ninety seconds, and it was the single worst bug in the app.
+ * The accompaniment was synthesised into one `Float32Array` before a note could
+ * sound, so the ceiling was a memory and blocked-thread budget — and 219 of the
+ * 258 bundled songs are longer than ninety seconds, which meant the majority of
+ * the library played no backing at all and said nothing about why.
  *
- * Ninety seconds is also far longer than anything anyone loops deliberately.
- * Past it the loop is not a practice loop any more, and the honest thing is to
- * say so rather than to try.
+ * Nothing is rendered up front any more. Web schedules Web Audio voices inside
+ * a 1.6-second lookahead, so its only limit is the length of the note list.
+ * Native still writes a file, but in two-second slices straight into the WAV's
+ * bytes — about 44 KB of working set per slice and 2 MB of file per minute of
+ * audio.
+ *
+ * So the ceiling is now about *waiting*, not memory: twenty minutes of audio is
+ * a 53 MB file and a render the player would sit through. Fifteen minutes is
+ * comfortably longer than the longest song in the library (nine minutes) even
+ * slowed to 60 %, and short enough that the wait stays a progress bar rather
+ * than a hang.
  */
-export const MAX_RENDER_SECONDS = 90;
+export const MAX_RENDER_SECONDS = 900;
 
 export interface LoopBudget {
   withinBudget: boolean;

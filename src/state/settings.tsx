@@ -11,6 +11,28 @@ import { ChromeName } from '@/theme/tokens';
 export type VisionName = 'tab' | 'score' | 'highway';
 export type CueDensity = 'full' | 'essentials';
 
+/**
+ * Which way up the fingerboard panel is drawn.
+ *
+ * `player` puts the nut at the bottom and the bridge at the top, which is what
+ * a cellist sees looking down at their own left hand: the lowest note on a
+ * string is nearest them, and the hand climbs *upward* into the higher
+ * positions. `reader` is the old drawing — nut at the top, like a chord chart —
+ * kept because it matches how fingerboard diagrams are printed.
+ */
+export type BoardView = 'player' | 'reader';
+
+/**
+ * Which way the notes travel.
+ *
+ * Both visions can run either way, and neither axis is universally better: a
+ * falling highway matches the guitar-hero convention most people arrive with,
+ * a horizontal one matches Rocksmith and leaves room for four wide lanes on a
+ * short screen. Whichever axis is chosen, the *low* string is always at the
+ * bottom and time always runs towards the hit line.
+ */
+export type FlowAxis = 'vertical' | 'horizontal';
+
 export interface Settings {
   /** Chrome for the play screen only; menus are always paper. */
   chrome: ChromeName;
@@ -29,6 +51,27 @@ export interface Settings {
   accompaniment: AccompanimentStyle;
   /** Backing level, 0–1. Deliberately below the cello you are producing. */
   backingVolume: number;
+  /**
+   * Keep the microphone open while the transport is running.
+   *
+   * Off by default, and that default is a performance decision. The pitch
+   * engine publishes about 375 frames a second on the JS thread and pushes a
+   * React state update twelve times a second; because the whole play screen
+   * reads that state, every one of those updates used to re-render the note
+   * field. Combined with a field that drew every note in the song it was the
+   * largest single cause of playback stutter.
+   *
+   * It is a setting rather than a removal because intonation feedback is the
+   * point of the app — it is simply more useful when you are working a phrase
+   * with the transport stopped than when the backing is carrying you along.
+   */
+  micWhilePlaying: boolean;
+  /** Which way up the fingerboard panel is drawn. */
+  boardView: BoardView;
+  /** Which way notes travel on the highway. */
+  highwayAxis: FlowAxis;
+  /** Which way notes travel on the tab stave. */
+  tabAxis: FlowAxis;
 }
 
 const DEFAULTS: Settings = {
@@ -43,6 +86,10 @@ const DEFAULTS: Settings = {
   listenMode: 'off',
   accompaniment: 'drone',
   backingVolume: 0.7,
+  micWhilePlaying: false,
+  boardView: 'player',
+  highwayAxis: 'vertical',
+  tabAxis: 'horizontal',
 };
 
 const STORAGE_KEY = 'ponticello:settings:v1';

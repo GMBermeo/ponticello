@@ -19,7 +19,16 @@ const DEFAULTS: PracticeSetup = {
   songId: null,
   loopFromBar: 1,
   loopToBar: 4,
-  tempoPercent: 80,
+  /**
+   * Full tempo.
+   *
+   * This was 80 %, on the reasoning that a practice app should start you slow.
+   * It is the wrong default: opening a song and hearing it at four fifths speed
+   * reads as the app being broken rather than as a kindness, and the piece you
+   * are trying to recognise is the one at its written tempo. Slowing down is a
+   * deliberate act, and the stepper is right there for it.
+   */
+  tempoPercent: 100,
 };
 
 interface SessionContextValue {

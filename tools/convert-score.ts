@@ -21,6 +21,7 @@ import { basename } from 'node:path';
 import {
   midiToFrequency, midiToPitchName, OPEN_STRING_MIDI, } from '../src/domain/cello';
 import { detectShifts, RawNoteEvent, solveFingering } from '../src/domain/fingering';
+import type { DifficultyTier } from '../src/domain/schema';
 import {
   CelloMeasure, CelloNote, CelloSongScore, measureDurationMs, validateScore,
 } from '../src/domain/schema';
@@ -32,7 +33,7 @@ interface Options {
   composer: string;
   origin: string;
   key: string;
-  difficulty: 'Beginner' | 'Intermediate' | 'Advanced';
+  difficulty: DifficultyTier;
   bpm: number;
   timeSignature: [number, number];
   teaches: string;

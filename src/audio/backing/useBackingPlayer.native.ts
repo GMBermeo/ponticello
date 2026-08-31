@@ -2,47 +2,75 @@ import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-aud
 import { Directory, File, Paths } from 'expo-file-system';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { encodeWav } from '../wav';
+import { renderProgramInto } from '../synth';
+import { encodeWavInto, wavByteLength, writeWavHeader } from '../wav';
+import { BackingProgram } from './program';
 import { BackingPlayer } from './types';
 
 /**
  * Native backing playback.
  *
- * `expo-audio` plays files, not sample buffers, so the rendered accompaniment
- * is written to the cache as a WAV and played from there with `loop` set. The
- * file is rewritten under alternating names: replacing a URI the player is
- * currently holding open is unreliable on Android, and two names are enough to
- * guarantee the incoming file is never the one being released.
+ * `expo-audio` plays files, not note events, so this side still has to produce
+ * audio — but it no longer does it in one blocking call. The program is
+ * synthesised two seconds at a time straight into the WAV's byte array, with
+ * the event loop running between slices, so an eleven-minute song costs a
+ * progress bar instead of ten seconds of frozen UI. That freeze is why the old
+ * code capped the loop at ninety seconds and why most of the library played
+ * nothing at all.
  *
- * Every operation here is serialised behind a generation counter. Loading is
- * asynchronous — a file write and a player construction — and two loads that
- * overlap used to leave two `AudioPlayer`s alive, both looping, because the
- * second one replaced the ref before the first had finished building. Every
- * repeat of that piled another voice on top, which is exactly what "the backing
- * plays over itself in layers" was. A player built for a generation that has
- * already been superseded is now released instead of installed.
+ * Two things are unchanged because they were right. The file is written under
+ * alternating names, since replacing a URI the player is holding open is
+ * unreliable on Android and two names guarantee the incoming file is never the
+ * one being released. And every operation is serialised behind generation
+ * counters: loading is asynchronous, and two overlapping loads used to leave
+ * two `AudioPlayer`s alive and both looping, which is what "the backing plays
+ * over itself in layers" was.
  */
 const CACHE_DIRECTORY = 'backing';
+
+/**
+ * Sample rate for the rendered file.
+ *
+ * An accompaniment is a reference, not the recording. 22.05 kHz halves both the
+ * render time and the file, and the top octave it gives up is above anything a
+ * cello accompaniment puts there.
+ */
+const SAMPLE_RATE = 22050;
+
+/**
+ * Seconds of audio per slice.
+ *
+ * Two seconds is about 2 ms of synthesis on a laptop and 20 ms on a mid-range
+ * phone — one dropped frame per slice at worst, and only while preparing,
+ * never during playback. Larger slices amortise the loop overhead but start to
+ * be felt as a stutter in the UI; smaller ones spend more time in the event
+ * loop than in the synthesiser.
+ */
+const SLICE_SEC = 2;
+
+/** Yields to the event loop so the UI can paint between slices. */
+const yieldToLoop = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 export function useBackingPlayer(enabled: boolean): BackingPlayer {
   const playerRef = useRef<AudioPlayer | null>(null);
   const slotRef = useRef(0);
   const volumeRef = useRef(0.8);
+  const keyRef = useRef<string | null>(null);
   /**
    * Two counters, because loading and starting invalidate different things.
    * A `stop()` must cancel a seek without throwing away a render that is still
-   * being written to disk, and a new render must not be cancelled by the play
-   * that happens to arrive while it is in flight.
+   * being written, and a new render must not be cancelled by the play that
+   * happens to arrive while it is in flight.
    */
   const loadGenerationRef = useRef(0);
   const playGenerationRef = useRef(0);
 
   const [ready, setReady] = useState(false);
+  const [progress, setProgress] = useState(1);
   const [error, setError] = useState<string | null>(null);
 
-  // Practising happens with the phone on a stand and the mic already open, so
-  // the accompaniment must not duck when recording starts, and must keep
-  // playing when the screen locks.
+  // Practising happens with the phone on a stand, so the accompaniment must not
+  // duck when the microphone opens.
   useEffect(() => {
     setAudioModeAsync({
       playsInSilentMode: true,
@@ -54,16 +82,8 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
   /** Tears down one player. Never throws — a released player is the goal. */
   const dispose = useCallback((player: AudioPlayer | null) => {
     if (!player) return;
-    try {
-      player.pause();
-    } catch {
-      // Already stopped by the platform.
-    }
-    try {
-      player.remove();
-    } catch {
-      // Already released; nothing useful to do about it.
-    }
+    try { player.pause(); } catch { /* already stopped by the platform */ }
+    try { player.remove(); } catch { /* already released */ }
   }, []);
 
   const release = useCallback(() => {
@@ -72,18 +92,53 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
     dispose(player);
   }, [dispose]);
 
-  const load = useCallback(async (samples: Float32Array, sampleRate: number) => {
+  const load = useCallback(async (program: BackingProgram) => {
+    // Identical music must not be re-rendered. The loop and tempo steppers fire
+    // on every tap, and re-rendering is both slow and audible.
+    if (keyRef.current === program.key && playerRef.current) return;
+
     const generation = ++loadGenerationRef.current;
-    // Whatever was playing belongs to the outgoing buffer.
+    // Whatever is playing belongs to the outgoing program.
     playGenerationRef.current++;
 
-    // Silence the outgoing loop before spending time on the new one. Doing it
-    // first costs a short gap and removes any window in which the old audio and
-    // the new audio are both alive.
     release();
+    keyRef.current = program.key;
     setReady(false);
 
+    if (program.notes.length === 0 || program.durationSec <= 0) {
+      setProgress(1);
+      return;
+    }
+
+    setProgress(0);
+
     try {
+      const totalSamples = Math.max(1, Math.ceil(program.durationSec * SAMPLE_RATE));
+      const bytes = new Uint8Array(wavByteLength(totalSamples));
+      writeWavHeader(bytes, totalSamples, SAMPLE_RATE);
+
+      const sliceSamples = SLICE_SEC * SAMPLE_RATE;
+      const slice = new Float32Array(sliceSamples);
+
+      for (let from = 0; from < totalSamples; from += sliceSamples) {
+        const length = Math.min(sliceSamples, totalSamples - from);
+        const view = length === sliceSamples ? slice : slice.subarray(0, length);
+
+        renderProgramInto(view, program, from, SAMPLE_RATE);
+        // Fade the very first and very last few milliseconds, or the loop point
+        // clicks on every repeat.
+        if (from === 0) fadeIn(view, SAMPLE_RATE);
+        if (from + length >= totalSamples) fadeOut(view, SAMPLE_RATE);
+        encodeWavInto(bytes, view, from);
+
+        // Abandon a superseded render rather than finish it: the loop may have
+        // moved three times while this one was halfway through.
+        if (loadGenerationRef.current !== generation) return;
+        setProgress(Math.min(0.99, (from + length) / totalSamples));
+        await yieldToLoop();
+        if (loadGenerationRef.current !== generation) return;
+      }
+
       const directory = new Directory(Paths.cache, CACHE_DIRECTORY);
       if (!directory.exists) directory.create({ intermediates: true });
 
@@ -91,10 +146,8 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
       const file = new File(directory, `backing-${slotRef.current}.wav`);
       if (file.exists) file.delete();
       file.create();
-      file.write(encodeWav(samples, sampleRate));
+      file.write(bytes);
 
-      // Nothing above is instantaneous. If a newer load started while this one
-      // was writing, this player must never reach the ref.
       if (loadGenerationRef.current !== generation) return;
 
       const player = createAudioPlayer({ uri: file.uri });
@@ -107,11 +160,13 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
       }
 
       playerRef.current = player;
+      setProgress(1);
       setReady(true);
       setError(null);
     } catch (cause) {
       if (loadGenerationRef.current !== generation) return;
       setReady(false);
+      setProgress(1);
       setError(cause instanceof Error ? cause.message : String(cause));
     }
   }, [release, dispose]);
@@ -119,10 +174,10 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
   /**
    * Starts the loop at `offsetSeconds`.
    *
-   * The seek has to land before playback starts or the buffer begins at zero
-   * regardless, which is the drift this offset exists to remove — so `play` is
-   * chained onto it rather than fired alongside. The generation is re-checked
-   * after the await: a stop that arrives mid-seek must win, otherwise pausing
+   * The seek has to land before playback starts or the file begins at zero
+   * regardless, which is the drift the offset exists to remove — so `play` is
+   * chained onto the seek rather than fired alongside it. The generation is
+   * re-checked afterwards: a stop that arrives mid-seek must win, or pausing
    * during the seek window silently starts the audio a moment later.
    */
   const play = useCallback((offsetSeconds = 0) => {
@@ -152,11 +207,7 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
     // Invalidate any seek still in flight, so it cannot start playback after
     // the transport has been paused.
     playGenerationRef.current++;
-    try {
-      playerRef.current?.pause();
-    } catch {
-      // Player already gone.
-    }
+    try { playerRef.current?.pause(); } catch { /* player already gone */ }
   }, []);
 
   const setVolume = useCallback((volume: number) => {
@@ -170,5 +221,18 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
 
   useEffect(() => release, [release]);
 
-  return { load, play, stop, setVolume, ready, error };
+  return { load, play, stop, setVolume, ready, progress, error };
+}
+
+/** Fade lengths are in samples; 8 ms is short enough to be inaudible as a fade. */
+const FADE_MS = 8;
+
+function fadeIn(buffer: Float32Array, sampleRate: number): void {
+  const fade = Math.min(Math.floor((FADE_MS / 1000) * sampleRate), buffer.length);
+  for (let i = 0; i < fade; i++) buffer[i] *= i / fade;
+}
+
+function fadeOut(buffer: Float32Array, sampleRate: number): void {
+  const fade = Math.min(Math.floor((FADE_MS / 1000) * sampleRate), buffer.length);
+  for (let i = 0; i < fade; i++) buffer[buffer.length - 1 - i] *= i / fade;
 }

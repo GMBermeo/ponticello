@@ -15,7 +15,7 @@ import { useBacking } from '@/audio/useBacking';
 import { AccompanimentStyle } from '@/domain/backing';
 import { practiceLoop } from '@/domain/loop';
 import { ListenMode } from '@/audio/backing/types';
-import { useSettings, VisionName } from '@/state/settings';
+import { BoardView, FlowAxis, useSettings, VisionName } from '@/state/settings';
 import { useTheme } from '@/theme/ThemeProvider';
 import { ChromeName } from '@/theme/tokens';
 
@@ -23,6 +23,30 @@ const VISIONS = [
   { value: 'tab' as const, label: 'TAB' },
   { value: 'score' as const, label: 'SCORE' },
   { value: 'highway' as const, label: 'HIGHWAY' },
+];
+
+/**
+ * Orientation, offered per vision rather than as one global axis.
+ *
+ * They are genuinely different preferences: a falling highway is the
+ * convention most people arrive with, while a horizontal one matches
+ * Rocksmith and suits a short wide screen; and the tab stave is easiest to
+ * read as a stave until you want it to match the highway. Whichever is
+ * chosen, the low C string stays at the bottom or the left.
+ */
+const HIGHWAY_AXES = [
+  { value: 'vertical' as const, label: 'FALLING', hint: 'Notes fall from the top' },
+  { value: 'horizontal' as const, label: 'SIDEWAYS', hint: 'Notes arrive from the right' },
+];
+
+const TAB_AXES = [
+  { value: 'horizontal' as const, label: 'STAVE', hint: 'Four lines, time left to right' },
+  { value: 'vertical' as const, label: 'FALLING', hint: 'Four columns, notes fall from the top' },
+];
+
+const BOARD_VIEWS = [
+  { value: 'player' as const, label: 'PLAYER', hint: 'Nut at the bottom, as you see it' },
+  { value: 'reader' as const, label: 'DIAGRAM', hint: 'Nut at the top, as it is printed' },
 ];
 
 const CHROMES = [
@@ -199,6 +223,45 @@ export default function SongScreen() {
               <Body size={12} color={theme.chrome.dim}>
                 {VISION_BLURB[settings.vision]}
               </Body>
+
+              {/* Only the axis of the vision actually selected — offering all
+                  three at once is three controls for one decision. */}
+              {settings.vision === 'highway' ? (
+                <>
+                  <Rule />
+                  <Label size={10}>HIGHWAY DIRECTION</Label>
+                  <Segmented
+                    segments={HIGHWAY_AXES}
+                    value={settings.highwayAxis}
+                    onChange={(highwayAxis: FlowAxis) => update({ highwayAxis })}
+                    grow
+                    compact
+                  />
+                </>
+              ) : null}
+              {settings.vision === 'tab' ? (
+                <>
+                  <Rule />
+                  <Label size={10}>TAB DIRECTION</Label>
+                  <Segmented
+                    segments={TAB_AXES}
+                    value={settings.tabAxis}
+                    onChange={(tabAxis: FlowAxis) => update({ tabAxis })}
+                    grow
+                    compact
+                  />
+                </>
+              ) : null}
+
+              <Rule />
+              <Label size={10}>FINGERBOARD PANEL</Label>
+              <Segmented
+                segments={BOARD_VIEWS}
+                value={settings.boardView}
+                onChange={(boardView: BoardView) => update({ boardView })}
+                grow
+                compact
+              />
             </Stack>
             <Rule weight={2} />
 
@@ -262,6 +325,13 @@ export default function SongScreen() {
                 hint="every landmark and bracket, not just the loud ones"
                 value={settings.cueDensity === 'full'}
                 onChange={(full) => update({ cueDensity: full ? 'full' : 'essentials' })}
+              />
+              <Rule />
+              <Toggle
+                label="Listen to me while playing"
+                hint="off keeps playback smooth — intonation still reads when paused"
+                value={settings.micWhilePlaying}
+                onChange={(micWhilePlaying) => update({ micWhilePlaying })}
               />
             </Stack>
 
@@ -345,5 +415,5 @@ export default function SongScreen() {
 const VISION_BLURB: Record<VisionName, string> = {
   tab: 'Four lines, one per string, with finger numbers on them. Shows the hand rather than the pitch — the fastest read when you are still learning where notes live.',
   score: 'Bass clef notation with a live intonation trace over it. Read this when you want to practise reading, or to see how far under the note you are sitting.',
-  highway: 'Notes fall down four string lanes to a hit line. Best for rhythm and string crossings; the tape colour rides on each note as it arrives.',
+  highway: 'Notes travel down — or across — four string lanes to a hit line. Best for rhythm and string crossings; the tape colour rides on each note as it arrives.',
 };

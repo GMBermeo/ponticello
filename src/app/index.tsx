@@ -11,12 +11,13 @@ import { Screen } from '@/components/ui/Screen';
 import { FONT, TAPE_COLOR_LABEL } from '@/theme/tokens';
 import { APP_NAME, APP_TAGLINE } from '@/brand';
 import { LIBRARY_ROWS, LibraryRow } from '@/scores';
+import { DifficultyTier } from '@/domain/schema';
 import { useImportedRows } from '@/state/usePiece';
 import { useSettings } from '@/state/settings';
 import { useTheme } from '@/theme/ThemeProvider';
 
 type CategoryFilter = 'ALL' | 'study' | 'song' | 'imported';
-type DifficultyFilter = 'ALL' | 'Beginner' | 'Intermediate' | 'Advanced';
+type DifficultyFilter = 'ALL' | DifficultyTier;
 
 const CATEGORY_TABS = [
   { value: 'ALL' as const, label: 'ALL', hint: 'All pieces' },
@@ -30,6 +31,7 @@ const DIFFICULTY_FILTERS = [
   { value: 'Beginner' as const, label: 'BEG' },
   { value: 'Intermediate' as const, label: 'INT' },
   { value: 'Advanced' as const, label: 'ADV' },
+  { value: 'Expert' as const, label: 'EXP', hint: 'Expert' },
 ];
 
 /**
@@ -222,11 +224,17 @@ function SongRow({
   const theme = useTheme();
   const { chrome } = theme;
 
+  // Four steps, and the top one has to look like a step rather than a repeat:
+  // Advanced and Expert both filled in the accent would make the new tier
+  // invisible, which is the usual way a fourth category gets added and then
+  // ignored. Expert inverts to ink instead — the strongest thing the palette has.
   const badge = row.difficulty === 'Beginner'
     ? { bg: chrome.surface, fg: chrome.ink }
     : row.difficulty === 'Intermediate'
       ? { bg: chrome.accentWash, fg: chrome.ink }
-      : { bg: chrome.accent, fg: chrome.bg };
+      : row.difficulty === 'Advanced'
+        ? { bg: chrome.accent, fg: chrome.bg }
+        : { bg: chrome.ink, fg: chrome.bg };
 
   return (
     <>

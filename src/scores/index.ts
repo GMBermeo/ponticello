@@ -13,9 +13,10 @@
  * Add your own with `tools/convert-score.ts`.
  */
 
-import { CelloSongScore, scoreDurationMs, measureDurationMs } from '@/domain/schema';
+import { CelloSongScore, DifficultyTier, scoreDurationMs, measureDurationMs } from '@/domain/schema';
 import { BackingTrack } from '@/domain/backing';
 import { midiToPitchName } from '@/domain/cello';
+
 import { BWV1007_PRELUDE } from './bach';
 import { STUDIES, STUDIES_BACKINGS } from './studies';
 import { COMPACT_SCORES, inflateBacking, inflateScore, CompactScoreDef } from './bundledSongs';
@@ -70,7 +71,7 @@ export interface LibraryRow {
   keySignature: string;
   range: string;
   tempo: string;
-  difficulty: 'Beginner' | 'Intermediate' | 'Advanced';
+  difficulty: DifficultyTier;
   category: 'study' | 'classical' | 'song' | 'imported';
   bars: number | null;
   playable: boolean;
@@ -139,15 +140,21 @@ function toCompactRow(c: CompactScoreDef): LibraryRow {
     title: c.title,
     composer: c.composer,
     origin: c.origin,
-    keySignature: '1ST POS',
+    keySignature: c.positions[0] === 100 ? '1ST POS' : 'MIXED POS',
     range: `${midiToPitchName(minMidi)} – ${midiToPitchName(maxMidi)}`,
     tempo: `♩ ${c.bpm}`,
     difficulty: c.difficulty,
     category: c.category,
     bars,
     playable: true,
-    distribution: [['1st position', 100], ['2nd – 4th', 0], ['Thumb / upper', 0]],
-    note: 'Arranged for cello first position. Complete melody playable on 1st position tapes.',
+    distribution: [
+      ['1st position', c.positions[0]],
+      ['2nd – 4th', c.positions[1]],
+      ['Thumb / upper', c.positions[2]],
+    ],
+    note: c.positions[0] === 100
+      ? 'Arranged for cello first position. Complete melody playable on 1st position tapes.'
+      : `Arranged for minimal hand movement; ${c.positions[0]}% of it sits in first position.`,
   };
 }
 

@@ -1,0 +1,329 @@
+{
+  "version": 1,
+  "skills": {
+    "about": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/about/SKILL.md",
+      "computedHash": "5215fb7125c4f6d4f0adcac497b5d4f324a978be002216ac11754288168ea2b3"
+    },
+    "album-art-director": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/album-art-director/SKILL.md",
+      "computedHash": "9510389a5b92443838db4cd79b50545abb49e003864511216834cdde85c0fc8c"
+    },
+    "album-conceptualizer": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/album-conceptualizer/SKILL.md",
+      "computedHash": "f2fa2d5d7e36a7255e08951ec4e8e563e84d807043520877d32c30836aa5d45a"
+    },
+    "album-dashboard": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/album-dashboard/SKILL.md",
+      "computedHash": "e3729230f2dd7eed2e5efe00afd57ab9c353a7fa114b1784e6326f89383819fb"
+    },
+    "album-ideas": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/album-ideas/SKILL.md",
+      "computedHash": "1a0c1986fe8595ebc8a5f2e2823fdf6b1a621abc0292b38108d1b0058f28ff77"
+    },
+    "cli-anything-musescore": {
+      "source": "hkuds/cli-anything",
+      "sourceType": "github",
+      "skillPath": "skills/cli-anything-musescore/SKILL.md",
+      "computedHash": "961cdcb4bcd8e6d5cd24d683d80056f10cabd7937db5e36507e288d03bc54464"
+    },
+    "clipboard": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/clipboard/SKILL.md",
+      "computedHash": "36f1ea422baa5677c731eb01529de33a75e01386712bf4e4d6251127f9a5c3b6"
+    },
+    "cloud-uploader": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/cloud-uploader/SKILL.md",
+      "computedHash": "60b7b865876389918eb76d8be0fee1fe2b025082af2027ceac73176464cfa48a"
+    },
+    "configure": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/configure/SKILL.md",
+      "computedHash": "562cf8888702d96a46c777243bcff7f5163c45d4a00f23db535c806ad90308a0"
+    },
+    "document-hunter": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/document-hunter/SKILL.md",
+      "computedHash": "2e71f83bc1ab2a08cf7fe3984b05e7a69a624a3b6977dea37ed0becf9d469d38"
+    },
+    "explicit-checker": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/explicit-checker/SKILL.md",
+      "computedHash": "a66a1061a91e1452800fc19a3d61d81bbb5cdbb53a74fcc9a6283ff09bc05155"
+    },
+    "genre-creator": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/genre-creator/SKILL.md",
+      "computedHash": "966180266495eed715386dbd653de02a58af290cf53a684d77d3b9c7213af87b"
+    },
+    "health-check": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/health-check/SKILL.md",
+      "computedHash": "c453cacbccf27b9c9462e852d6e1e50612930badeee91ddae816c08ee9620141"
+    },
+    "help": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/help/SKILL.md",
+      "computedHash": "a735c5767a4c61e8af44dd498e28573be79799436120b57535acc1ccce6b8b6c"
+    },
+    "import-art": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/import-art/SKILL.md",
+      "computedHash": "a504d7cf1664d914355eba3a6550f07c2ffdee9993a22367c906c3ef97e2a87a"
+    },
+    "import-audio": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/import-audio/SKILL.md",
+      "computedHash": "62cd625731c32d2db1aba8d3155b3db555cb1cb533872e3ef5d42a2c053a326c"
+    },
+    "import-track": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/import-track/SKILL.md",
+      "computedHash": "5759f432a57aa944739d550d972636938a2cb9df21595dbea49b6e21670fff13"
+    },
+    "lyric-refiner": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/lyric-refiner/SKILL.md",
+      "computedHash": "f749acbcc5edb29607e527f1487fbb4b7fc88937bb8de79436435e971b4265ba"
+    },
+    "lyric-reviewer": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/lyric-reviewer/SKILL.md",
+      "computedHash": "24fa0865d292bfead610711d59e3e63cc38014aab945ddabce13ff1d6ed27010"
+    },
+    "lyric-writer": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/lyric-writer/SKILL.md",
+      "computedHash": "43619daf36ae21ca91840c0592ee5289169b5147f2e6046ed9ca1cb65f955c92"
+    },
+    "mastering-engineer": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/mastering-engineer/SKILL.md",
+      "computedHash": "ae13a20a65c9491c9440f1cfa8291d8bc984af5632340d08a9fe3cc809253121"
+    },
+    "mix-engineer": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/mix-engineer/SKILL.md",
+      "computedHash": "725185cfda4ead2d6816af6a5fafa7ec94e3e83f48d7895c65dad3c017c82a0d"
+    },
+    "new-album": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/new-album/SKILL.md",
+      "computedHash": "a1955ade1fee28d87a2cea86a36978489bad0dae2b13588d7e960d825e2cdb4a"
+    },
+    "next-step": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/next-step/SKILL.md",
+      "computedHash": "9e0cb486daca2adf3273e013c963736e6c63e09182444e7ceba12daaffddbc49"
+    },
+    "plagiarism-checker": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/plagiarism-checker/SKILL.md",
+      "computedHash": "5140aed5838326f045ba005efbdfd2342baba8f179953cf7b9cd4aa2d0e5fa67"
+    },
+    "pre-generation-check": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/pre-generation-check/SKILL.md",
+      "computedHash": "86c16048ce488818204791056174f981a0483df2917b1be94ca96b74bdce9016"
+    },
+    "promo-director": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/promo-director/SKILL.md",
+      "computedHash": "225ab5a9eb0321b40628219dd350b3d4b38aac520b4fe013c28abfb22dee02c4"
+    },
+    "promo-reviewer": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/promo-reviewer/SKILL.md",
+      "computedHash": "58b689341b9b6a115781deffb9101209a157f5f1248ccc151f7ab5a20a2a7596"
+    },
+    "promo-writer": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/promo-writer/SKILL.md",
+      "computedHash": "a1a125c416ba34f5a775ccab194b007f85a70c1a67ce2894317b27d68cffa4e8"
+    },
+    "promote-idea": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/promote-idea/SKILL.md",
+      "computedHash": "51a814165a0ded6d62443266d7949543c0081859bfde116d662c4b7b8d99fdaa"
+    },
+    "pronunciation-specialist": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/pronunciation-specialist/SKILL.md",
+      "computedHash": "126ca7e6c84e178f4ee8c0cdddf57a81a9a1c9c330a725cc125dbd040e46841e"
+    },
+    "release-director": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/release-director/SKILL.md",
+      "computedHash": "c848f2145e3d36d766ffd0474d899c7e360fe46979f2164caa475d5d01913eee"
+    },
+    "rename": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/rename/SKILL.md",
+      "computedHash": "5f8eabe6dbb47a632e3f7940b534e125679a9d2b4691bc854f4fe76c5a92c505"
+    },
+    "researcher": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/researcher/SKILL.md",
+      "computedHash": "0cb82940bd1c4f89fedf5cb47f53623150079338044e5d9465b572303393689b"
+    },
+    "researchers-biographical": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/researchers-biographical/SKILL.md",
+      "computedHash": "fa47f7daf49939aa159633c9dad22e1b3be36b85f3c7d0bce9003d4950f866ff"
+    },
+    "researchers-financial": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/researchers-financial/SKILL.md",
+      "computedHash": "38714776d90a83f08b19063acdd38642d99403e769cae990570b37162e2e955d"
+    },
+    "researchers-gov": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/researchers-gov/SKILL.md",
+      "computedHash": "20c2764eefc99d0a762516f99ce6887121b22383d6c24100f7c41389ab4ec0ce"
+    },
+    "researchers-historical": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/researchers-historical/SKILL.md",
+      "computedHash": "afb6457deab5484c41c426eafaf55aa7ad7dc5dce20f9b167c9b7699c376601c"
+    },
+    "researchers-journalism": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/researchers-journalism/SKILL.md",
+      "computedHash": "7990d08196292c58e08ce3fc184cd3cda515fe688aae55e847896538c89cc54b"
+    },
+    "researchers-legal": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/researchers-legal/SKILL.md",
+      "computedHash": "97d850d28251fccc0322dc187c3bef3cf41166c85330cf635a6340dacd613c77"
+    },
+    "researchers-primary-source": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/researchers-primary-source/SKILL.md",
+      "computedHash": "8b4441ce4df38187ea5cd25b865730d5f5b5f2a0ff93fd62597b52a257b57b99"
+    },
+    "researchers-security": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/researchers-security/SKILL.md",
+      "computedHash": "7135afee6894ad8ca42e6771f69765f947ffbfb84749c25c5d7b0e2a64fc2ecb"
+    },
+    "researchers-tech": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/researchers-tech/SKILL.md",
+      "computedHash": "379733e42f792484f728f1a6f60e1b264ab69d581703ef5544bf770842ec3360"
+    },
+    "researchers-verifier": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/researchers-verifier/SKILL.md",
+      "computedHash": "8eafdd84a3587082bb9840b12d38089665a02a126eb980ae541d0de128cf002f"
+    },
+    "resume": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/resume/SKILL.md",
+      "computedHash": "66b5a611abdf8acd87b5fde66071a644e1c1baa9c8a7ee6ece6cfbb88bac994c"
+    },
+    "session-start": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/session-start/SKILL.md",
+      "computedHash": "84ee04c61e821d6182383c06320a997abd3fcad9bdffe89cfad80274c97d5652"
+    },
+    "setup": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/setup/SKILL.md",
+      "computedHash": "cf46cdddcb26af173c41497ba60865047aaa5a4af49e10e14376e8e3487efafe"
+    },
+    "sheet-music-publisher": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/sheet-music-publisher/SKILL.md",
+      "computedHash": "c67a6827d64df4e3957ffb1f7670db343d49ba0914d549ae5155fb9f65f1fb91"
+    },
+    "suno-engineer": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/suno-engineer/SKILL.md",
+      "computedHash": "20f30fcefb0227b31a3231d608c57302f1d5a978dc95d41ce2aff2493b54bae9"
+    },
+    "test": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/test/SKILL.md",
+      "computedHash": "c2295af1a4d0c1d06da1cbb11aa318a6b5c1efe8a3bfd7a79a33693cf3423250"
+    },
+    "tutorial": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/tutorial/SKILL.md",
+      "computedHash": "c5e111ae11d90890cc47d6c36f494b52359bf0419465802d65206036a0e4e5d0"
+    },
+    "validate-album": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/validate-album/SKILL.md",
+      "computedHash": "ff9a2045aa180c8ce6276fb20c047b8ff2323ba5d33571ac16ec7b0e1a8e0c4d"
+    },
+    "verify-sources": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/verify-sources/SKILL.md",
+      "computedHash": "be5397e7fac5b286d433d5f8c61e6bdd2e37f9b16b14dbf1ddc0aaaa1f41d926"
+    },
+    "voice-checker": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/voice-checker/SKILL.md",
+      "computedHash": "7ce6cb76ea02e73121f02bb6103f43676abbfe70b7d7ebd6334eb2d580915f21"
+    }
+  }
+}

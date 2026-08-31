@@ -127,7 +127,23 @@ function PlayScreen() {
 
   const playhead = usePlayhead({ score: score ?? EMPTY_SCORE, loop });
 
-  const pitch = usePitch(true);
+  /**
+   * The microphone is closed while the transport runs, unless the player has
+   * asked otherwise in Settings.
+   *
+   * This is the fix the user proposed for the stutter, and it is the right one.
+   * The pitch engine runs on the JS thread — about 375 analysis frames a second
+   * — and publishes a React state update twelve times a second. Because that
+   * state is read here, at the top of the play screen, every one of those
+   * updates re-rendered the entire screen including the note field. With the
+   * field windowed that is no longer catastrophic, but it is still twelve
+   * renders a second bought for a reading nobody can act on mid-phrase: while
+   * the backing is carrying you along you are watching the notes, not the
+   * needle. Intonation feedback is where it is useful — stopped on a bar,
+   * working the pitch.
+   */
+  const micActive = settings.micWhilePlaying || !playhead.playing;
+  const pitch = usePitch(micActive);
   const activeNote = score?.notes[playhead.activeIndex];
 
   const backing = useBacking({
@@ -309,6 +325,7 @@ function PlayScreen() {
               showLandmarks={settings.cueDensity === 'full'}
               gutter={46}
               compact
+              invert={settings.boardView === 'player'}
               active={activeNote ? {
                 string: activeNote.string,
                 semitones: activeSemitones,
@@ -341,6 +358,7 @@ function PlayScreen() {
                   showFingerings={settings.showFingerings}
                   height={visionSize.height - theme.s(12)}
                   width={visionSize.width - theme.s(20)}
+                  axis={settings.highwayAxis}
                 />
               ) : null}
               {settings.vision === 'tab' ? (
@@ -351,6 +369,7 @@ function PlayScreen() {
                   showFingerings={settings.showFingerings}
                   height={visionSize.height - theme.s(12)}
                   width={visionSize.width - theme.s(20)}
+                  axis={settings.tabAxis}
                 />
               ) : null}
               {settings.vision === 'score' ? (
@@ -399,7 +418,9 @@ function PlayScreen() {
           style={{ flex: 1 }}
         >
           <StatusChip
-            label={pitch.mic.live ? `MIC LIVE · ${Math.round(pitch.mic.sampleRate / 1000)} kHz` : micLabel(pitch.mic.status)}
+            label={pitch.mic.live
+              ? `MIC LIVE · ${Math.round(pitch.mic.sampleRate / 1000)} kHz`
+              : (micActive ? micLabel(pitch.mic.status) : 'MIC PAUSED WHILE PLAYING')}
             tone={pitch.mic.live ? 'accent' : 'dim'}
           />
           <StatusChip label={`${setup.tempoPercent}% TEMPO`} />

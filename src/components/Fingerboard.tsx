@@ -19,8 +19,18 @@ import { Label, Num } from './ui/primitives';
  * compression is the single most useful thing a beginner can internalise about
  * the upper positions, and evenly-spaced "frets" would teach the opposite.
  *
- * The nut is at the top and the bridge is off the bottom, matching the view a
- * cellist has looking down at their own left hand.
+ * ## Which way up
+ *
+ * By default the nut is at the **bottom** and the string climbs upward, which
+ * is what a cellist actually sees looking down at their own left hand: the open
+ * string — the lowest note — is nearest them, and the hand travels away from
+ * them into the higher positions. The drawing used to be the other way up,
+ * inherited from how fingerboard diagrams are *printed*, and that put the low
+ * notes at the top of the panel while the highway beside it put them at the
+ * bottom. Two axes disagreeing about which way "higher" goes is worse than
+ * either convention on its own.
+ *
+ * `invert={false}` restores the printed-diagram orientation.
  */
 
 export interface FingerboardProps {
@@ -39,11 +49,17 @@ export interface FingerboardProps {
   /** Width of the left gutter that holds landmark labels, in design units. */
   gutter?: number;
   compact?: boolean;
+  /**
+   * Nut at the bottom, hand climbing upward — the player's own view. Default.
+   * Pass `false` for the printed-diagram orientation, nut at the top.
+   */
+  invert?: boolean;
 }
 
 export function Fingerboard({
   height, maxMm = 400, tapeSets, showTapes = true, showLandmarks = true,
   showNoteNames = false, active = null, gutter = 46, compact = false,
+  invert = true,
 }: FingerboardProps) {
   const theme = useTheme();
   const { chrome } = theme;
@@ -51,11 +67,20 @@ export function Fingerboard({
   const layout = useMemo(() => {
     const drawHeight = height;
     const gutterWidth = theme.s(gutter);
-    /** Millimetres from the nut → vertical offset in dp. */
-    const y = (mm: number) => (mm / maxMm) * drawHeight;
+    /**
+     * Millimetres from the nut → vertical offset in dp.
+     *
+     * One function, so every layer of the drawing — rails, tapes, landmarks,
+     * the active note, the note names — flips together. Flipping them
+     * individually is how a diagram ends up with its labels upside down
+     * relative to its rules.
+     */
+    const y = (mm: number) => (invert
+      ? drawHeight - (mm / maxMm) * drawHeight
+      : (mm / maxMm) * drawHeight);
 
     return { drawHeight, gutterWidth, y };
-  }, [theme, height, gutter, maxMm]);
+  }, [theme, height, gutter, maxMm, invert]);
 
   const tapes = useMemo(
     () => tapeGeometry(tapeSets).filter((t) => t.mm <= maxMm),

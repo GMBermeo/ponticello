@@ -8,6 +8,16 @@
 
 import { CelloFinger, CelloPosition, CelloString } from './cello';
 
+/**
+ * How hard a piece is.
+ *
+ * Defined here, with the rest of the score's metadata, rather than alongside
+ * the scorer in `difficulty.ts` — that module imports `fingering.ts`, which
+ * imports this one, so owning the type there would close a cycle for no gain.
+ * `difficulty.ts` re-exports it, and is where the four tiers are decided.
+ */
+export type DifficultyTier = 'Beginner' | 'Intermediate' | 'Advanced' | 'Expert';
+
 export type CelloExtension = 'none' | 'forward' | 'backward';
 
 export type CelloArticulation =
@@ -50,7 +60,7 @@ export interface CelloSongMetadata {
   keySignature: string;
   timeSignature: string;
   bpm: number;
-  difficulty: 'Beginner' | 'Intermediate' | 'Advanced';
+  difficulty: DifficultyTier;
   /** Tonic for the practice drone. */
   tonic: string;
   /** Prose note shown on the practice sheet — what this piece is *for*. */

@@ -5,9 +5,11 @@ import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { OPEN_STRING_MIDI, STRING_ORDER } from '@/domain/cello';
 import { CelloNote, CelloSongScore } from '@/domain/schema';
 import { TapeSet, tapeForSemitones } from '@/domain/tapes';
+import { FlowAxis } from '@/state/settings';
 import { Theme, useTheme } from '@/theme/ThemeProvider';
 import { alpha } from '@/theme/tokens';
 import { Label, Num } from '../ui/primitives';
+import { flowWindow, laneGeometry, visibleSlice } from './flow';
 import { Playhead } from './usePlayhead';
 
 /**
@@ -16,16 +18,36 @@ import { Playhead } from './usePlayhead';
  * than the pitch: a beginner reading "3 on the D line" has an instruction they
  * can act on, where a notehead on a bass clef still needs translating.
  *
- * Time runs left to right and the playhead sits a quarter of the way in, not
- * in the middle. That is a latency decision, not an aesthetic one — feedback
- * on a low C arrives up to 60 ms after the bow, so the display has to show
- * more of what is coming than of what has gone.
+ * The playhead sits a quarter of the way in rather than in the middle. That is a
+ * latency decision, not an aesthetic one — feedback on a low C arrives up to
+ * 60 ms after the bow, so the display has to show more of what is coming than of
+ * what has gone.
+ *
+ * ## Two axes
+ *
+ * `horizontal` is the stave: time runs left to right, the low C string is the
+ * bottom line, and the music travels leftward under a fixed playhead.
+ * `vertical` turns the stave on its side — the four strings become columns with
+ * C on the left, and the notes fall from the top onto a playhead near the
+ * bottom, matching the highway. Both keep the same invariant as the fingerboard
+ * panel beside them: the pitch axis points up, or right.
+ *
+ * ## Why only some notes are drawn
+ *
+ * This laid out every note, every bar line and every position bracket in the
+ * piece, from the first frame. On `les-miserables-theme` — 519 seconds — that is
+ * thousands of mounted views for the two seconds of them that are on screen, and
+ * it was a major cause of playback stutter. Everything below is now windowed to
+ * what is nearly visible.
  */
 
 const ROW_HEIGHT = 38;
 const PX_PER_MS = 0.2;
 const PLAYHEAD_FRACTION = 0.25;
+/** Falling: the playhead sits low, so most of the box is what is coming. */
+const PLAYHEAD_FRACTION_VERTICAL = 0.72;
 const BADGE = { width: 32, height: 27 };
+const LANE_GAP = 12;
 
 export interface TabVisionProps {
   score: CelloSongScore;
@@ -34,158 +56,277 @@ export interface TabVisionProps {
   showFingerings: boolean;
   height: number;
   width: number;
+  axis?: FlowAxis;
 }
 
 export function TabVision({
-  score, playhead, tapeSets, showFingerings, height, width,
+  score, playhead, tapeSets, showFingerings, height, width, axis = 'horizontal',
 }: TabVisionProps) {
   const theme = useTheme();
   const { chrome } = theme;
 
-  const drawHeight = height;
-  const drawWidth = width;
+  const vertical = axis === 'vertical';
   const pxPerMs = theme.s(PX_PER_MS);
-  const playheadX = drawWidth * PLAYHEAD_FRACTION;
 
-  // The four lines open out to fill the box rather than sitting in a fixed
-  // block at the top: on the Fold 5's tall play area a phone-sized stave
-  // leaves two thirds of the screen empty and every badge smaller than it
-  // needs to be.
-  const rowHeight = Math.max(theme.s(30), Math.min(theme.s(76), drawHeight * 0.15));
+  /** Extent along the time axis, and across the four strings. */
+  const timeExtent = vertical ? height : width;
+  const crossExtent = vertical ? width : height;
+
+  const hitAt = timeExtent * (vertical ? PLAYHEAD_FRACTION_VERTICAL : PLAYHEAD_FRACTION);
+
+  // Horizontal keeps the hand-tuned stave metrics: the four lines open out to
+  // fill the box rather than sitting in a fixed block at the top, because on the
+  // Fold's tall play area a phone-sized stave leaves two thirds of the screen
+  // empty and every badge smaller than it needs to be. Vertical hands the cross
+  // axis to `laneGeometry` instead, so it agrees with the highway by construction.
+  const rowHeight = Math.max(theme.s(30), Math.min(theme.s(76), crossExtent * 0.15));
   const staveHeight = rowHeight * 3;
-  const staveTop = Math.max(theme.s(64), (drawHeight - staveHeight) / 2);
-  const bracketY = staveTop - theme.s(42);
-  const bracketLabelY = staveTop - theme.s(54);
-  const barLabelY = staveTop - theme.s(24);
+  const staveTop = Math.max(theme.s(64), (crossExtent - staveHeight) / 2);
 
-  const rowY = (index: number) => staveTop + index * rowHeight;
+  const lanes = laneGeometry('vertical', crossExtent, theme.s(LANE_GAP));
 
-  const laid = useMemo(() => score.notes.map((note, index) => ({
-    note,
-    index,
-    x: playheadX + note.startTimeMs * pxPerMs,
-    y: staveTop + (3 - Math.max(0, STRING_ORDER.indexOf(note.string))) * rowHeight,
-    tapeColor: tapeColorFor(note, tapeSets, theme),
-  })), [score, playheadX, pxPerMs, tapeSets, theme, staveTop, rowHeight]);
+  /** Cross-axis offset of a string's line or column. */
+  const laneAt = (string: string) => (vertical
+    ? lanes.laneAt(string as never) + lanes.laneSize / 2
+    // Horizontal: index 0 is the C string and has to be the *bottom* line.
+    : staveTop + (3 - Math.max(0, STRING_ORDER.indexOf(string as never))) * rowHeight);
 
-  const bars = useMemo(() => score.measures.map((measure) => ({
-    index: measure.index,
-    x: playheadX + measure.startBarTimeMs * pxPerMs,
-  })), [score, playheadX, pxPerMs]);
+  /** Time-axis offset of a score time, at time zero. */
+  const alongAt = (ms: number) => (vertical ? hitAt - ms * pxPerMs : hitAt + ms * pxPerMs);
 
-  /** Runs of consecutive notes in one position, drawn as a bracket above. */
-  const brackets = useMemo(() => {
-    const out: { key: string; from: number; to: number; label: string; shift: boolean }[] = [];
+  /** Labels and rules that sit just off the stave, on the cross axis. */
+  const bracketOffset = vertical ? theme.s(30) : theme.s(42);
+  const barLabelOffset = vertical ? theme.s(14) : theme.s(24);
+
+  const anchorMs = score.notes[playhead.activeIndex]?.startTimeMs ?? playhead.loopStartMs;
+  const visibleMs = timeExtent / pxPerMs;
+  const window = useMemo(
+    () => flowWindow(
+      anchorMs,
+      Math.max(visibleMs, 2000),
+      vertical ? PLAYHEAD_FRACTION_VERTICAL : 1 - PLAYHEAD_FRACTION,
+    ),
+    [anchorMs, visibleMs, vertical],
+  );
+
+  const laid = useMemo(() => {
+    const { from, to } = visibleSlice(score.notes, window);
+    const out = [];
+    for (let index = from; index < to; index++) {
+      const note = score.notes[index];
+      out.push({
+        note,
+        index,
+        along: alongAt(note.startTimeMs),
+        lane: laneAt(note.string),
+        tapeColor: tapeColorFor(note, tapeSets, theme),
+      });
+    }
+    return out;
+    // `alongAt` and `laneAt` are closures over the geometry already listed here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [score, window, hitAt, pxPerMs, tapeSets, theme, vertical, staveTop, rowHeight, lanes]);
+
+  /** Bar lines, windowed the same way as the notes. */
+  const bars = useMemo(() => score.measures
+    .filter((m) => m.startBarTimeMs + m.durationMs >= window.fromMs
+      && m.startBarTimeMs <= window.toMs)
+    .map((measure) => ({ index: measure.index, along: alongAt(measure.startBarTimeMs) })),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [score, window, hitAt, pxPerMs, vertical]);
+
+  /**
+   * Runs of consecutive notes in one position, drawn as a bracket.
+   *
+   * Computed over the *whole* score rather than the window, because a run's
+   * label has to say which position the hand is in even when the run started
+   * off screen — then filtered to what overlaps. The scan is O(notes) once per
+   * score, memoised on the score alone, so it does not repeat as the window
+   * moves.
+   */
+  const runs = useMemo(() => {
+    const out: { key: string; fromMs: number; toMs: number; label: string; shift: boolean }[] = [];
     let start = 0;
     for (let i = 1; i <= score.notes.length; i++) {
-      const ended = i === score.notes.length || score.notes[i].position !== score.notes[start].position;
+      const ended = i === score.notes.length
+        || score.notes[i].position !== score.notes[start].position;
       if (!ended) continue;
       const first = score.notes[start];
       const last = score.notes[i - 1];
       out.push({
         key: `${first.id}-bracket`,
-        from: playheadX + first.startTimeMs * pxPerMs,
-        to: playheadX + (last.startTimeMs + last.durationMs) * pxPerMs,
+        fromMs: first.startTimeMs,
+        toMs: last.startTimeMs + last.durationMs,
         label: first.position === 'Thumb' ? 'THUMB POS' : `${first.position.toUpperCase()} POS`,
         shift: out.length > 0,
       });
       start = i;
     }
     return out;
-  }, [score, playheadX, pxPerMs]);
+  }, [score]);
 
-  const field = useAnimatedStyle(() => ({
-    transform: [{ translateX: -playhead.timeMs.get() * pxPerMs }],
-  }));
+  const brackets = useMemo(() => runs
+    .filter((r) => r.toMs >= window.fromMs && r.fromMs <= window.toMs)
+    .map((r) => ({ ...r, from: alongAt(r.fromMs), to: alongAt(r.toMs) })),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [runs, window, hitAt, pxPerMs, vertical]);
+
+  const field = useAnimatedStyle(() => {
+    const shift = playhead.timeMs.get() * pxPerMs;
+    return { transform: vertical ? [{ translateY: shift }] : [{ translateX: -shift }] };
+  });
+
+  /** Cross-axis span the stave occupies, for rules that run its whole width. */
+  const staveSpan = vertical
+    ? { from: lanes.laneAt('C') + lanes.laneSize / 2, to: lanes.laneAt('A') + lanes.laneSize / 2 }
+    : { from: staveTop, to: staveTop + staveHeight };
 
   return (
-    <View style={{ height: drawHeight, width: drawWidth, overflow: 'hidden' }}>
+    <View style={{ height, width, overflow: 'hidden' }}>
       {/* Stave lines, one per string, tinted in that string's colour. */}
-      {STRING_ORDER.map((string, index) => {
-        const y = rowY(3 - index);
+      {STRING_ORDER.map((string) => {
+        const lane = laneAt(string);
         return (
           <View key={string}>
             <View
-              style={{
-                position: 'absolute',
-                left: theme.s(20),
-                right: 0,
-                top: y,
-                height: theme.rule(2),
-                backgroundColor: chrome.strings[string],
-                opacity: 0.85,
-              }}
+              style={vertical
+                ? {
+                  position: 'absolute',
+                  top: theme.s(20),
+                  // An explicit height, not `bottom: 0`. These lines are wrapped
+                  // in an unstyled `<View key={string}>`, which has no height of
+                  // its own because everything inside it is absolutely
+                  // positioned — so `bottom` had nothing to measure against and
+                  // the four string columns rendered zero pixels tall. The
+                  // horizontal branch never showed this because its `height` is
+                  // stated outright.
+                  height: Math.max(0, timeExtent - theme.s(20)),
+                  left: lane,
+                  width: theme.rule(2),
+                  backgroundColor: chrome.strings[string],
+                  opacity: 0.85,
+                }
+                : {
+                  position: 'absolute',
+                  left: theme.s(20),
+                  right: 0,
+                  top: lane,
+                  height: theme.rule(2),
+                  backgroundColor: chrome.strings[string],
+                  opacity: 0.85,
+                }}
             />
-            <View style={{ position: 'absolute', left: 0, top: y - theme.s(9) }}>
+            <View
+              style={vertical
+                ? { position: 'absolute', left: lane - theme.s(3), top: 0 }
+                : { position: 'absolute', left: 0, top: lane - theme.s(9) }}
+            >
               <Num size={13} color={chrome.strings[string]}>{string}</Num>
             </View>
           </View>
         );
       })}
 
-      <Animated.View style={[{ position: 'absolute', left: 0, top: 0, bottom: 0 }, field]}>
+      <Animated.View style={[{ position: 'absolute', left: 0, top: 0 }, field]}>
         {/* Bar lines and numbers. */}
         {bars.map((bar) => (
           <View key={`bar-${bar.index}`}>
             <View
-              style={{
-                position: 'absolute',
-                left: bar.x - theme.s(12),
-                top: staveTop - theme.s(8),
-                width: theme.rule(1),
-                height: staveHeight + theme.s(16),
-                backgroundColor: chrome.lineSoft,
-              }}
+              style={vertical
+                ? {
+                  position: 'absolute',
+                  top: bar.along,
+                  left: staveSpan.from - theme.s(10),
+                  height: theme.rule(1),
+                  width: staveSpan.to - staveSpan.from + theme.s(20),
+                  backgroundColor: chrome.lineSoft,
+                }
+                : {
+                  position: 'absolute',
+                  left: bar.along - theme.s(12),
+                  top: staveSpan.from - theme.s(8),
+                  width: theme.rule(1),
+                  height: staveHeight + theme.s(16),
+                  backgroundColor: chrome.lineSoft,
+                }}
             />
-            <View style={{ position: 'absolute', left: bar.x - theme.s(10), top: barLabelY }}>
+            <View
+              style={vertical
+                ? { position: 'absolute', top: bar.along - theme.s(6), left: staveSpan.to + barLabelOffset }
+                : { position: 'absolute', left: bar.along - theme.s(10), top: staveSpan.from - barLabelOffset }}
+            >
               <Label size={10}>{`m.${bar.index + 1}`}</Label>
             </View>
           </View>
         ))}
 
         {/* Position brackets. */}
-        {brackets.map((bracket) => (
-          <View key={bracket.key}>
-            <View
-              style={{
-                position: 'absolute',
-                left: bracket.from - theme.s(14),
-                width: Math.max(theme.s(20), bracket.to - bracket.from + theme.s(20)),
-                top: bracketY,
-                height: theme.s(12),
-                borderLeftWidth: theme.rule(2),
-                borderRightWidth: theme.rule(2),
-                borderTopWidth: theme.rule(2),
-                borderColor: bracket.shift ? chrome.accent : chrome.line,
-              }}
-            />
-            <View
-              style={{
-                position: 'absolute',
-                left: bracket.from - theme.s(10),
-                top: bracketLabelY,
-                backgroundColor: chrome.bg,
-                paddingRight: theme.s(5),
-              }}
-            >
-              <Label
-                size={10}
-                numberOfLines={1}
-                color={bracket.shift ? chrome.accent : chrome.dim}
+        {brackets.map((bracket) => {
+          const span = Math.max(theme.s(20), Math.abs(bracket.to - bracket.from) + theme.s(20));
+          const head = Math.min(bracket.from, bracket.to) - theme.s(14);
+          return (
+            <View key={bracket.key}>
+              <View
+                style={vertical
+                  ? {
+                    position: 'absolute',
+                    top: head,
+                    height: span,
+                    left: staveSpan.from - bracketOffset,
+                    width: theme.s(12),
+                    borderTopWidth: theme.rule(2),
+                    borderBottomWidth: theme.rule(2),
+                    borderLeftWidth: theme.rule(2),
+                    borderColor: bracket.shift ? chrome.accent : chrome.line,
+                  }
+                  : {
+                    position: 'absolute',
+                    left: head,
+                    width: span,
+                    top: staveSpan.from - bracketOffset,
+                    height: theme.s(12),
+                    borderLeftWidth: theme.rule(2),
+                    borderRightWidth: theme.rule(2),
+                    borderTopWidth: theme.rule(2),
+                    borderColor: bracket.shift ? chrome.accent : chrome.line,
+                  }}
+              />
+              <View
+                style={vertical
+                  ? {
+                    position: 'absolute',
+                    top: head + theme.s(2),
+                    left: staveSpan.from - bracketOffset - theme.s(2),
+                    backgroundColor: chrome.bg,
+                  }
+                  : {
+                    position: 'absolute',
+                    left: head + theme.s(4),
+                    top: staveSpan.from - bracketOffset - theme.s(12),
+                    backgroundColor: chrome.bg,
+                    paddingRight: theme.s(5),
+                  }}
               >
-                {bracket.label}
-              </Label>
+                <Label
+                  size={10}
+                  numberOfLines={1}
+                  color={bracket.shift ? chrome.accent : chrome.dim}
+                >
+                  {bracket.label}
+                </Label>
+              </View>
             </View>
-          </View>
-        ))}
+          );
+        })}
 
         {/* Finger badges. */}
         {laid.map((item) => (
           <TabBadge
             key={item.note.id}
             note={item.note}
-            x={item.x}
-            y={item.y}
+            along={item.along}
+            lane={item.lane}
+            vertical={vertical}
             tapeColor={item.tapeColor}
             showFinger={showFingerings}
             active={item.index === playhead.activeIndex}
@@ -196,25 +337,37 @@ export function TabVision({
 
       {/* The playhead is fixed; the music moves under it. */}
       <View
-        style={{
-          position: 'absolute',
-          left: playheadX,
-          top: 0,
-          bottom: 0,
-          width: theme.rule(2),
-          backgroundColor: chrome.accent,
-        }}
+        style={vertical
+          ? {
+            position: 'absolute',
+            top: hitAt,
+            left: 0,
+            right: 0,
+            height: theme.rule(2),
+            backgroundColor: chrome.accent,
+          }
+          : {
+            position: 'absolute',
+            left: hitAt,
+            top: 0,
+            bottom: 0,
+            width: theme.rule(2),
+            backgroundColor: chrome.accent,
+          }}
       />
     </View>
   );
 }
 
 const TabBadge = memo(function TabBadge({
-  note, x, y, tapeColor, showFinger, active, played,
+  note, along, lane, vertical, tapeColor, showFinger, active, played,
 }: {
   note: CelloNote;
-  x: number;
-  y: number;
+  /** Time-axis offset at time zero. */
+  along: number;
+  /** Cross-axis offset — the centre of the string's line or column. */
+  lane: number;
+  vertical: boolean;
   tapeColor: string | null;
   showFinger: boolean;
   active: boolean;
@@ -223,15 +376,17 @@ const TabBadge = memo(function TabBadge({
   const theme = useTheme();
   const { chrome } = theme;
   const stringColor = chrome.strings[note.string];
+  const w = theme.s(BADGE.width);
+  const h = theme.s(BADGE.height);
 
   return (
     <View
       style={{
         position: 'absolute',
-        left: x - theme.s(BADGE.width / 2),
-        top: y - theme.s(BADGE.height / 2),
-        width: theme.s(BADGE.width),
-        height: theme.s(BADGE.height),
+        left: (vertical ? lane : along) - w / 2,
+        top: (vertical ? along : lane) - h / 2,
+        width: w,
+        height: h,
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: active ? stringColor : chrome.bg,
@@ -257,7 +412,11 @@ const TabBadge = memo(function TabBadge({
         {showFinger ? note.finger : '·'}
       </Num>
       {note.bowDirection === 'down' || note.bowDirection === 'up' ? (
-        <View style={{ position: 'absolute', top: theme.s(-14) }}>
+        <View
+          style={vertical
+            ? { position: 'absolute', left: theme.s(-16) }
+            : { position: 'absolute', top: theme.s(-14) }}
+        >
           <BowMark direction={note.bowDirection} color={played ? chrome.lineSoft : chrome.dim} />
         </View>
       ) : null}

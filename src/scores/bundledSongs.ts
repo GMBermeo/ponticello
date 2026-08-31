@@ -4,10 +4,10 @@
  * All songs adapted to Cello First Position (C2 to D#4) across C, G, D, A strings.
  */
 
-import { CelloSongScore, CelloNote, CelloMeasure, measureDurationMs } from '@/domain/schema';
+import { CelloSongScore, CelloNote, CelloMeasure, DifficultyTier, measureDurationMs } from '@/domain/schema';
 import { BackingTrack, BackingPart, InstrumentName, PartRole } from '@/domain/backing';
 import { midiToPitchName, midiToFrequency } from '@/domain/cello';
-import { firstPositionFingering } from '@/domain/fingering';
+import { MINIMAL_TRAVEL_WEIGHTS, solveFingering } from '@/domain/fingering';
 import rawData from './bundledSongs.json';
 
 
@@ -18,7 +18,9 @@ export interface CompactScoreDef {
   origin: string;
   bpm: number;
   meter: [number, number];
-  difficulty: 'Beginner' | 'Intermediate' | 'Advanced';
+  difficulty: DifficultyTier;
+  /** Share of notes in [1st/half, 2nd-4th, 5th-thumb], as whole percents. */
+  positions: [number, number, number];
   category: 'study' | 'classical' | 'song';
   notes: [number, number, number][];
   backingParts: [string, string, string, number, [number, number, number, number][]][];
@@ -39,8 +41,30 @@ export function inflateScore(raw: CompactScoreDef): CelloSongScore {
     tempoBpm: raw.bpm,
   }));
 
+  // Fingered by the solver, not by the first-position table.
+  //
+  // `firstPositionFingering` answers "where would a beginner put this note"
+  // one note at a time, with no idea what comes next. Because it reaches for
+  // half position whenever a semitone asks for it, the hand ends up rocking
+  // between half and first for the length of the piece: 351 metres of travel
+  // across the 258 bundled songs, for music that never leaves the neck.
+  //
+  // `solveFingering` is a Viterbi pass over every playable placement of every
+  // note, with a transition cost measured in millimetres of real travel divided
+  // by the time available. Under `MINIMAL_TRAVEL_WEIGHTS` — which price a
+  // shift far above a slightly better timbre — the same library costs **12
+  // metres**, a 97 % reduction, while still moving off first position for the
+  // 2.5 % of notes where somewhere else is genuinely closer. That is the
+  // minimal-hand-movement rule, and it is measured in
+  // src/domain/__tests__/difficulty.test.ts rather than asserted here.
+  const solved = solveFingering(
+    raw.notes.map(([midiNumber, startTimeMs, durationMs]) =>
+      ({ midiNumber, startTimeMs, durationMs })),
+    MINIMAL_TRAVEL_WEIGHTS,
+  ).states;
+
   const notes: CelloNote[] = raw.notes.map(([midiNumber, startTimeMs, durationMs], i) => {
-    const state = firstPositionFingering(midiNumber);
+    const state = solved[i];
     const measureIndex = Math.min(barCount - 1, Math.floor(startTimeMs / barDurationMs));
     return {
       id: `${raw.id}-${i + 1}`,
