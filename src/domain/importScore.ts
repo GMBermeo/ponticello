@@ -11,14 +11,13 @@
  * from a file the app never had to ship.
  */
 
-import { BackingTrack, backingFromMidi, soloTrackScore } from './backing';
-import { midiToFrequency, midiToPitchName, OPEN_STRING_MIDI } from './cello';
+import { arrangeMidi } from './arrangement';
+import { BackingTrack, backingFromMidi, soloPartFromScore } from './backing';
+import { midiToFrequency, midiToPitchName } from './cello';
+import { difficultyOf } from './difficulty';
 import { detectShifts, RawNoteEvent, solveFingering } from './fingering';
-import { monophonic, ParsedMidi } from './midi';
+import { ParsedMidi } from './midi';
 import { CelloMeasure, CelloNote, CelloSongScore, measureDurationMs } from './schema';
-
-/** Highest note we will try to place on a cello. C6. */
-const HIGHEST_PLAYABLE = 84;
 
 export interface ImportedPiece {
   score: CelloSongScore;
@@ -42,13 +41,7 @@ export interface ImportScoreOptions {
 
 /** Best guess at which track is the cello, for pre-selecting one in the UI. */
 export function suggestSoloTrack(parsed: ParsedMidi): number | null {
-  let best: { index: number; score: number } | null = null;
-  for (const track of parsed.tracks) {
-    const score = soloTrackScore(track);
-    if (score < 0) continue;
-    if (!best || score > best.score) best = { index: track.index, score };
-  }
-  return best?.index ?? null;
+  return arrangeMidi(parsed, { level: 'Expert' }).sourceTrack;
 }
 
 export function importScore(parsed: ParsedMidi, options: ImportScoreOptions): ImportedPiece {
@@ -57,36 +50,31 @@ export function importScore(parsed: ParsedMidi, options: ImportScoreOptions): Im
   const timeSignature = parsed.timeSignature;
   const barDurationMs = measureDurationMs(timeSignature, bpm);
 
-  const soloNotes = monophonic(parsed.notes.filter((n) => n.track === soloTrack));
-  if (soloNotes.length === 0) {
+  const arranged = arrangeMidi(parsed, { level: 'Expert', sourceTrack: soloTrack });
+  if (arranged.notes.length === 0) {
     throw new Error('That track has no notes in it — pick a different one.');
   }
 
-  const origin = soloNotes[0]?.startTimeMs ?? 0;
+  const timeScale = parsed.bpm > 0 ? parsed.bpm / bpm : 1;
   const limitMs = options.maxBars === undefined ? Infinity : options.maxBars * barDurationMs;
+  const events: RawNoteEvent[] = arranged.notes
+    .map((note) => ({
+      startTimeMs: note.startTimeMs * timeScale,
+      durationMs: note.durationMs * timeScale,
+      midiNumber: note.midiNumber,
+    }))
+    .filter((note) => note.startTimeMs < limitMs)
+    .map((note) => ({
+      ...note,
+      durationMs: Math.max(1, Math.min(note.durationMs, limitMs - note.startTimeMs)),
+    }));
+  const skippedNotes = 0;
 
-  const events: RawNoteEvent[] = [];
-  let skippedNotes = 0;
-  for (const note of soloNotes) {
-    const startTimeMs = note.startTimeMs - origin;
-    if (startTimeMs >= limitMs) break;
-    // Transpose octaves rather than dropping notes: a part written for violin
-    // or voice is often perfectly playable an octave or two down, and silently
-    // losing the melody is worse than moving it.
-    let midiNumber = note.midiNumber;
-    while (midiNumber > HIGHEST_PLAYABLE) midiNumber -= 12;
-    while (midiNumber < OPEN_STRING_MIDI.C) midiNumber += 12;
-    if (midiNumber > HIGHEST_PLAYABLE || midiNumber < OPEN_STRING_MIDI.C) {
-      skippedNotes++;
-      continue;
-    }
-    events.push({ startTimeMs, durationMs: note.durationMs, midiNumber });
-  }
-
-  if (events.length === 0) throw new Error('Nothing in that track lands in the cello range.');
+  if (events.length === 0) throw new Error('Nothing in that track lands in the requested score window.');
 
   const { states } = solveFingering(events);
   const shifts = detectShifts(events, states);
+  const difficulty = difficultyOf(events, states);
 
   const totalMs = events.reduce((max, e) => Math.max(max, e.startTimeMs + e.durationMs), 0);
   const barCount = Math.max(1, Math.ceil(totalMs / barDurationMs));
@@ -135,16 +123,26 @@ export function importScore(parsed: ParsedMidi, options: ImportScoreOptions): Im
       keySignature: 'IMPORTED',
       timeSignature: timeSignature.join('/'),
       bpm,
-      difficulty: 'Intermediate',
+      difficulty: difficulty.tier,
       tonic: 'C',
-      teaches: 'Imported from a MIDI file. The fingerings come from the solver and are a starting point — read them through before trusting them.',
+      teaches: `Imported ${arranged.sourceKind} line, fitted to C2–A5 with one coherent octave policy. Choose an easier arrangement level on the practice sheet if needed.`,
       rights: 'Imported by you. Nothing about this file is distributed with the app.',
     },
     measures,
     notes,
   };
 
-  const backing = backingFromMidi(id, parsed, { name: title, soloTrack });
+  const sourceWindowEndMs = Number.isFinite(limitMs)
+    ? arranged.originMs + limitMs / timeScale
+    : arranged.sourceEndMs;
+  const backing = backingFromMidi(id, parsed, {
+    name: title,
+    soloTrack,
+    originMs: arranged.originMs,
+    endMs: Math.min(arranged.sourceEndMs, sourceWindowEndMs),
+    timeScale,
+    soloNotes: soloPartFromScore(score).notes,
+  });
 
   return { score, backing, skippedNotes, shiftCount: shifts.length };
 }

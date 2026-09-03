@@ -46,6 +46,8 @@ export interface MelodyMetrics {
   medianMidi: number;
   /** Notes per second. Above ~10 nothing is bowable. */
   density: number;
+  /** Fraction of non-static interval/rhythm windows that recur elsewhere. */
+  motifRecurrence: number;
   /** Octave shift that best fits the line into first position, in semitones. */
   octaveShift: number;
   /** Fraction inside first position once `octaveShift` is applied. */
@@ -59,14 +61,16 @@ export interface MelodyMetrics {
  * recognisable, so it is tried before a track is judged out of range — a guitar
  * riff written two octaves above the cello is still that riff.
  */
-export function bestOctaveShift(pitches: readonly number[]): { shift: number; fit: number } {
+export function bestOctaveShiftToRange(
+  pitches: readonly number[], low: number, high: number,
+): { shift: number; fit: number } {
   let best = { shift: 0, fit: -1 };
-  for (let octaves = -3; octaves <= 3; octaves++) {
-    const shift = octaves * 12;
+  for (let octaves = -8; octaves <= 8; octaves++) {
+    const shift = octaves === 0 ? 0 : octaves * 12;
     let inside = 0;
     for (const p of pitches) {
       const moved = p + shift;
-      if (moved >= CELLO_LOW && moved <= FIRST_POSITION_HIGH) inside++;
+      if (moved >= low && moved <= high) inside++;
     }
     const fit = pitches.length === 0 ? 0 : inside / pitches.length;
     // Ties go to the smaller move: leave the music where it was written.
@@ -77,6 +81,52 @@ export function bestOctaveShift(pitches: readonly number[]): { shift: number; fi
   return best;
 }
 
+export function bestOctaveShift(pitches: readonly number[]): { shift: number; fit: number } {
+  return bestOctaveShiftToRange(pitches, CELLO_LOW, FIRST_POSITION_HIGH);
+}
+
+/**
+ * Recurrence of short interval-and-rhythm cells, independent of absolute key.
+ * Static windows are excluded so a pedal is not mistaken for a memorable riff.
+ */
+export function motifRecurrence(notes: readonly MidiNote[]): number {
+  if (notes.length < 8) return 0;
+
+  const counts = new Map<string, number>();
+  let windows = 0;
+  for (let i = 0; i + 3 < notes.length; i++) {
+    const a = notes[i];
+    const b = notes[i + 1];
+    const c = notes[i + 2];
+    const d = notes[i + 3];
+    if (!a || !b || !c || !d) continue;
+
+    const intervals = [
+      b.midiNumber - a.midiNumber,
+      c.midiNumber - b.midiNumber,
+      d.midiNumber - c.midiNumber,
+    ];
+    if (intervals.every((interval) => interval === 0)) continue;
+    windows++;
+    if (intervals.every((interval) => interval === intervals[0])) continue;
+
+    // Ratios are quantized coarsely so expressive timing jitter does not erase
+    // an otherwise identical riff, while a straight shred does not gain credit
+    // merely for repeating the same pitch-class cycle.
+    const gap1 = Math.max(1, b.startTimeMs - a.startTimeMs);
+    const gap2 = Math.max(1, c.startTimeMs - b.startTimeMs);
+    const gap3 = Math.max(1, d.startTimeMs - c.startTimeMs);
+    const ratio = (gap: number) => Math.round((gap / gap1) * 4) / 4;
+    const signature = `${intervals.join(',')}|${ratio(gap2)},${ratio(gap3)}`;
+    counts.set(signature, (counts.get(signature) ?? 0) + 1);
+  }
+
+  if (windows === 0) return 0;
+  let recurring = 0;
+  for (const count of counts.values()) if (count > 1) recurring += count;
+  return recurring / windows;
+}
+
 export function melodyMetrics(
   notes: readonly MidiNote[], durationMs: number,
 ): MelodyMetrics {
@@ -84,7 +134,7 @@ export function melodyMetrics(
   if (pitches.length === 0) {
     return {
       noteCount: 0, distinctPitches: 0, movement: 0, span: 0, medianMidi: 0,
-      density: 0, octaveShift: 0, fitAfterShift: 0,
+      density: 0, motifRecurrence: 0, octaveShift: 0, fitAfterShift: 0,
     };
   }
 
@@ -106,6 +156,7 @@ export function melodyMetrics(
     span: highest - lowest,
     medianMidi: median,
     density: durationMs > 0 ? pitches.length / (durationMs / 1000) : 0,
+    motifRecurrence: motifRecurrence(notes),
     octaveShift: shift,
     fitAfterShift: fit,
   };
@@ -148,6 +199,12 @@ export function melodyTrackScore(
   score += Math.min(m.distinctPitches, 16) * 3.5;
   if (m.distinctPitches < 7) score -= 25;
 
+  // ── Recognisability ───────────────────────────────────────────────────────
+  // Main riffs and themes announce themselves by returning. This interval-and-
+  // rhythm measure is transposition invariant and excludes static windows, so
+  // it rewards a guitar or bass hook without promoting a drone.
+  score += m.motifRecurrence * 34;
+
   // ── Register fit ──────────────────────────────────────────────────────────
   // Measured after the best octave shift, so a riff written high still counts.
   score += m.fitAfterShift * 45;
@@ -185,24 +242,35 @@ export interface MelodyChoice {
  * real outcome for a drum loop or a sound-effects file, and better reported
  * than faked.
  */
-export function chooseMelodyTrack(parsed: {
+export function rankMelodyTracks(parsed: {
   notes: MidiNote[];
   tracks: MidiTrack[];
   durationMs: number;
-}): MelodyChoice | null {
-  let best: MelodyChoice | null = null;
+}): MelodyChoice[] {
+  const ranked: MelodyChoice[] = [];
 
   for (const track of parsed.tracks) {
     // Judge the line that will actually be played, not the raw track: a chord
     // stack reads as constant movement until it is flattened.
     const notes = monophonic(parsed.notes.filter((n) => n.track === track.index));
-    const score = melodyTrackScore(track, notes, parsed.durationMs);
+    const first = notes[0];
+    const last = notes[notes.length - 1];
+    const activeDurationMs = first && last
+      ? Math.max(1, last.startTimeMs + last.durationMs - first.startTimeMs)
+      : parsed.durationMs;
+    const score = melodyTrackScore(track, notes, activeDurationMs);
     if (score < 0) continue;
-    if (!best || score > best.score) {
-      const metrics = melodyMetrics(notes, parsed.durationMs);
-      best = { track: track.index, score, metrics, octaveShift: metrics.octaveShift };
-    }
+    const metrics = melodyMetrics(notes, activeDurationMs);
+    ranked.push({ track: track.index, score, metrics, octaveShift: metrics.octaveShift });
   }
 
-  return best;
+  return ranked.sort((a, b) => (b.score - a.score) || (a.track - b.track));
+}
+
+export function chooseMelodyTrack(parsed: {
+  notes: MidiNote[];
+  tracks: MidiTrack[];
+  durationMs: number;
+}): MelodyChoice | null {
+  return rankMelodyTracks(parsed)[0] ?? null;
 }

@@ -56,6 +56,7 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
   const slotRef = useRef(0);
   const volumeRef = useRef(0.8);
   const keyRef = useRef<string | null>(null);
+  const durationRef = useRef(0);
   /**
    * Two counters, because loading and starting invalidate different things.
    * A `stop()` must cancel a seek without throwing away a render that is still
@@ -103,6 +104,7 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
 
     release();
     keyRef.current = program.key;
+    durationRef.current = Math.max(0, program.durationSec);
     setReady(false);
 
     if (program.notes.length === 0 || program.durationSec <= 0) {
@@ -180,24 +182,33 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
    * re-checked afterwards: a stop that arrives mid-seek must win, or pausing
    * during the seek window silently starts the audio a moment later.
    */
-  const play = useCallback((offsetSeconds = 0) => {
+  const play = useCallback((
+    offsetSeconds = 0,
+    onStarted?: (delaySeconds?: number) => void,
+  ) => {
     const player = playerRef.current;
     if (!player) return;
 
     const generation = ++playGenerationRef.current;
-    const offset = Number.isFinite(offsetSeconds) ? Math.max(0, offsetSeconds) : 0;
+    const duration = durationRef.current;
+    const requested = Number.isFinite(offsetSeconds) ? Math.max(0, offsetSeconds) : 0;
+    const offset = duration > 0 ? requested % duration : 0;
 
     const begin = () => {
       if (playGenerationRef.current !== generation || playerRef.current !== player) return;
       try {
         player.play();
+        onStarted?.(0);
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause));
       }
     };
 
     try {
-      player.seekTo(offset).then(begin, begin);
+      player.seekTo(offset).then(begin, (cause) => {
+        if (playGenerationRef.current !== generation || playerRef.current !== player) return;
+        setError(cause instanceof Error ? cause.message : String(cause));
+      });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
@@ -219,7 +230,11 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
     if (!enabled) stop();
   }, [enabled, stop]);
 
-  useEffect(() => release, [release]);
+  useEffect(() => () => {
+    loadGenerationRef.current++;
+    playGenerationRef.current++;
+    release();
+  }, [release]);
 
   return { load, play, stop, setVolume, ready, progress, error };
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { BackingPart } from '@/domain/backing';
+import { arrangeScoreForLevel } from '@/domain/arrangement';
+import { BackingPart, generateAccompaniment, soloPartFromScore } from '@/domain/backing';
 import { clipToLoop, loopBudget, practiceLoop } from '@/domain/loop';
 import { COMPACT_SCORES, inflateBacking, inflateScore } from '@/scores/bundledSongs';
 import { buildProgram, estimatePeak } from '../backing/program';
@@ -11,7 +12,7 @@ import { renderProgramInto } from '../synth';
  *
  * The user's report was "the majority is not playing the back". They were right,
  * and the reason was a ninety-second ceiling on the loop the accompaniment
- * could be rendered from: 219 of these 258 songs are longer than that, so the
+ * could be rendered from: 229 of these 258 songs are longer than that, so the
  * renderer declined and the app said nothing. It was a single constant, and
  * nothing in the suite would have caught it, because every existing test used a
  * four-bar fixture.
@@ -32,6 +33,7 @@ interface Outcome {
   noteCount: number;
   withinBudget: boolean;
   peak: number;
+  renderedPeak: number;
   /** Fraction of a rendered probe slice that is above the noise floor. */
   audible: number;
 }
@@ -39,7 +41,7 @@ interface Outcome {
 /** Resolves a song exactly as `useBacking` does in `listenMode: 'both'`. */
 function resolve(index: number): Outcome {
   const raw = COMPACT_SCORES[index];
-  const score = inflateScore(raw);
+  const score = arrangeScoreForLevel(inflateScore(raw), 'Intermediate');
   const backing = inflateBacking(raw);
 
   // What the player gets on opening a song: the whole piece, written tempo.
@@ -49,8 +51,15 @@ function resolve(index: number): Outcome {
     tempoPercent: 100,
   });
 
-  const parts: BackingPart[] = clipToLoop(backing.parts, loop);
-  const program = buildProgram({ id: `${raw.id}:both`, parts, loop });
+  const solo = clipToLoop([soloPartFromScore(score)], loop);
+  const importedAccompaniment = backing.parts.filter((part) => part.role === 'accompaniment');
+  const accompaniment = importedAccompaniment.length > 0
+    ? clipToLoop(importedAccompaniment, loop)
+    : generateAccompaniment(score, {
+      style: 'pulse', fromBar: loop.fromBar, toBar: loop.toBar,
+    });
+  const parts: BackingPart[] = [...accompaniment, ...solo];
+  const program = buildProgram({ id: `${raw.id}:both:Intermediate`, parts, loop });
   const budget = loopBudget(loop);
 
   // Probe a slice from a third of the way in rather than from the top: an
@@ -60,12 +69,16 @@ function resolve(index: number): Outcome {
     SAMPLE_RATE * 2,
   );
   let audible = 0;
+  let renderedPeak = 0;
   if (probeSamples > 0 && program.notes.length > 0) {
     const from = Math.floor(program.durationSec * SAMPLE_RATE / 3);
     const out = new Float32Array(probeSamples);
     renderProgramInto(out, program, from, SAMPLE_RATE);
     let loud = 0;
-    for (let i = 0; i < out.length; i++) if (Math.abs(out[i]) > 1e-4) loud++;
+    for (let i = 0; i < out.length; i++) {
+      renderedPeak = Math.max(renderedPeak, Math.abs(out[i] ?? 0));
+      if (Math.abs(out[i] ?? 0) > 1e-4) loud++;
+    }
     audible = loud / out.length;
   }
 
@@ -75,6 +88,7 @@ function resolve(index: number): Outcome {
     noteCount: program.notes.length,
     withinBudget: budget.withinBudget,
     peak: estimatePeak(program.notes),
+    renderedPeak,
     audible,
   };
 }
@@ -90,7 +104,7 @@ describe('every bundled song plays its backing', () => {
     '%s',
     (_id, outcome) => {
       // The whole song, at written tempo, must be accompaniable. This is the
-      // assertion the old 90 s ceiling failed for 219 of these.
+      // assertion the old 90 s ceiling failed for 229 of these.
       expect(outcome.withinBudget, `${outcome.seconds.toFixed(0)}s exceeds the loop budget`)
         .toBe(true);
 
@@ -100,6 +114,7 @@ describe('every bundled song plays its backing', () => {
       // program layer existed the densest imported songs peaked at forty.
       expect(outcome.peak).toBeGreaterThan(0);
       expect(outcome.peak, 'mix is hot enough to distort').toBeLessThanOrEqual(0.75);
+      expect(outcome.renderedPeak, 'coherent PCM escaped the output limiter').toBeLessThan(0.9);
 
       // And it has to actually make sound. A program full of notes that all
       // render to zero would pass every check above.

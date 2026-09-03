@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { ARRANGEMENT_LEVELS, ARRANGEMENT_PROFILES, arrangeScoreForLevel } from '../arrangement';
+import { soloPartFromScore } from '../backing';
 import { midiToFrequency, midiToPitchName, OPEN_STRING_MIDI } from '../cello';
 import { validateScore } from '../schema';
 import { LIBRARY_ROWS, SCORES } from '@/scores';
@@ -23,7 +25,7 @@ describe('bundled scores', () => {
   it.each(SCORES.map((s) => [s.id, s] as const))('%s stays inside the cello range', (_id, score) => {
     for (const note of score.notes) {
       expect(note.midiNumber).toBeGreaterThanOrEqual(36); // C2
-      expect(note.midiNumber).toBeLessThanOrEqual(84);    // C6
+      expect(note.midiNumber).toBeLessThanOrEqual(81);    // A5
     }
   });
 
@@ -100,31 +102,65 @@ describe('library rows', () => {
     expect(row.bars).toBe(4);
   });
 
-  it('has 250+ playable first-position songs', async () => {
+  it('derives arrangement capability from score provenance, not category', async () => {
+    const { COMPACT_SCORES, CORE_SCORES, isAdaptiveBundledScore } = await import('@/scores');
+
+    expect(COMPACT_SCORES.every((score) => isAdaptiveBundledScore(score.id))).toBe(true);
+    expect(CORE_SCORES.every((score) => !isAdaptiveBundledScore(score.id))).toBe(true);
+
+    const generatedStudies = COMPACT_SCORES.filter((score) => score.category === 'study');
+    expect(generatedStudies).toHaveLength(6);
+    expect(generatedStudies.every((score) => isAdaptiveBundledScore(score.id))).toBe(true);
+    expect(isAdaptiveBundledScore('bwv1007-prelude')).toBe(false);
+  });
+
+  it('validates every compact song and every adaptive arrangement level', async () => {
     const { COMPACT_SCORES, getScore, getBundledBacking } = await import('@/scores');
-    expect(COMPACT_SCORES.length).toBeGreaterThan(200);
+    expect(COMPACT_SCORES).toHaveLength(258);
 
-    // Test a sample of compact scores
-    for (const item of COMPACT_SCORES.slice(0, 10)) {
-      const score = getScore(item.id);
-      expect(score).toBeDefined();
-      expect(validateScore(score!)).toEqual([]);
-      expect(score!.notes.length).toBeGreaterThan(0);
+    for (const item of COMPACT_SCORES) {
+      const full = getScore(item.id);
+      expect(full, item.id).toBeDefined();
+      if (!full) continue;
+      expect(validateScore(full), item.id).toEqual([]);
+      expect(full.notes.length, item.id).toBeGreaterThan(0);
+      expect(full.notes.every((note) => note.midiNumber >= 36 && note.midiNumber <= 81), item.id).toBe(true);
 
-      // Verify all notes are within 1st position (36 to 63)
-      for (const note of score!.notes) {
-        expect(note.midiNumber).toBeGreaterThanOrEqual(36);
-        expect(note.midiNumber).toBeLessThanOrEqual(63);
-        expect(['C', 'G', 'D', 'A']).toContain(note.string);
-        expect(['0', '1', '2', '3', '4']).toContain(note.finger);
+      const versions = ARRANGEMENT_LEVELS.map((level) => arrangeScoreForLevel(full, level));
+      const counts = versions.map((score) => score.notes.length);
+      expect(counts[0], item.id).toBeLessThanOrEqual(counts[1] ?? Infinity);
+      expect(counts[1], item.id).toBeLessThanOrEqual(counts[2] ?? Infinity);
+      expect(counts[2], item.id).toBeLessThanOrEqual(counts[3] ?? Infinity);
+      expect(counts[3], item.id).toBe(full.notes.length);
+
+      for (let index = 0; index < versions.length; index++) {
+        const level = ARRANGEMENT_LEVELS[index];
+        const version = versions[index];
+        if (!level || !version) continue;
+        const range = ARRANGEMENT_PROFILES[level].range;
+        expect(validateScore(version), `${item.id}/${level}`).toEqual([]);
+        expect(version.notes.length, `${item.id}/${level}`).toBeGreaterThan(0);
+        expect(
+          version.notes.every((note) => note.midiNumber >= range.low && note.midiNumber <= range.high),
+          `${item.id}/${level}`,
+        ).toBe(true);
+
+        const cello = soloPartFromScore(version);
+        expect(cello.notes.map((note) => note.midiNumber), `${item.id}/${level}`)
+          .toEqual(version.notes.map((note) => note.midiNumber));
+        expect(cello.notes.map((note) => note.startTimeMs), `${item.id}/${level}`)
+          .toEqual(version.notes.map((note) => note.startTimeMs));
       }
 
-      // Verify backing track exists
       const backing = getBundledBacking(item.id);
-      expect(backing).toBeDefined();
-      expect(backing!.parts.length).toBeGreaterThan(0);
+      expect(backing, item.id).toBeDefined();
+      expect(backing?.parts.length ?? 0, item.id).toBeGreaterThan(0);
+      for (const part of backing?.parts ?? []) {
+        expect(part.notes.every((note) => note.startTimeMs >= 0 && note.durationMs > 0), `${item.id}/${part.id}`)
+          .toBe(true);
+      }
     }
-  });
+  }, 120_000);
 
   it('provides backing tracks for all 5 training study exercises', async () => {
     const { getBundledBacking } = await import('@/scores');

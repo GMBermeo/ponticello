@@ -1,7 +1,7 @@
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
-import { useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Platform, Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -111,7 +111,7 @@ function PlayScreen() {
     ScreenOrientation.unlockAsync().catch(() => {});
   }, []);
 
-  const { score, backing: importedBacking } = usePiece(id);
+  const { score, backing: importedBacking, adaptive } = usePiece(id, setup.arrangementLevel);
 
   // Resolved once, here, and handed to both the transport and the
   // accompaniment. They used to work the window out separately and disagree
@@ -126,6 +126,36 @@ function PlayScreen() {
   );
 
   const playhead = usePlayhead({ score: score ?? EMPTY_SCORE, loop });
+  const {
+    play: startPlayhead,
+    pause: pausePlayhead,
+    restart: restartPlayhead,
+  } = playhead;
+  const [playRequested, setPlayRequested] = useState(false);
+
+  const handlePlaybackWillStart = useCallback(() => {
+    pausePlayhead();
+  }, [pausePlayhead]);
+
+  const handlePlaybackStarted = useCallback((delaySeconds = 0) => {
+    startPlayhead(delaySeconds * 1000);
+  }, [startPlayhead]);
+
+  const togglePlayback = useCallback(() => {
+    if (playRequested) {
+      setPlayRequested(false);
+      pausePlayhead();
+    } else {
+      setPlayRequested(true);
+    }
+  }, [playRequested, pausePlayhead]);
+
+  const restartPlayback = useCallback(() => {
+    // Freeze first. The revision makes audio seek; its actual-start callback
+    // releases the visual clock again when playback was requested.
+    pausePlayhead();
+    restartPlayhead();
+  }, [pausePlayhead, restartPlayhead]);
 
   /**
    * The microphone is closed while the transport runs, unless the player has
@@ -152,9 +182,12 @@ function PlayScreen() {
     listenMode: settings.listenMode,
     accompaniment: settings.accompaniment,
     loop,
-    playing: playhead.playing,
+    playing: playRequested,
+    transportRevision: playhead.revision,
     volume: settings.backingVolume,
     scoreTimeMs: playhead.scoreTimeMs,
+    onPlaybackWillStart: handlePlaybackWillStart,
+    onPlaybackStarted: handlePlaybackStarted,
   });
 
   // Point the cents calculation at whatever the player is supposed to be on.
@@ -256,7 +289,7 @@ function PlayScreen() {
         )}
 
         <Pressable
-          onPress={playhead.restart}
+          onPress={restartPlayback}
           accessibilityRole="button"
           accessibilityLabel="Restart the loop"
           style={{ minWidth: theme.tap, height: theme.tap, alignItems: 'center', justifyContent: 'center' }}
@@ -264,12 +297,12 @@ function PlayScreen() {
           <Label size={11} color={theme.chrome.dim}>↺</Label>
         </Pressable>
         <Pressable
-          onPress={playhead.toggle}
+          onPress={togglePlayback}
           accessibilityRole="button"
-          accessibilityLabel={playhead.playing ? 'Pause' : 'Play'}
+          accessibilityLabel={playRequested ? 'Pause' : 'Play'}
           style={{ minWidth: theme.tap, height: theme.tap, alignItems: 'center', justifyContent: 'center' }}
         >
-          <Title size={16} color={theme.chrome.accent}>{playhead.playing ? '❙❙' : '▶'}</Title>
+          <Title size={16} color={theme.chrome.accent}>{playRequested ? '❙❙' : '▶'}</Title>
         </Pressable>
       </Row>
       <Rule weight={2} />
@@ -424,6 +457,9 @@ function PlayScreen() {
             tone={pitch.mic.live ? 'accent' : 'dim'}
           />
           <StatusChip label={`${setup.tempoPercent}% TEMPO`} />
+          <StatusChip label={adaptive
+            ? `${setup.arrangementLevel.toUpperCase()} ARRANGEMENT`
+            : 'AUTHORED SCORE'} />
           <StatusChip label={settings.showFingerings ? 'FINGERINGS ON' : 'FINGERINGS HIDDEN'} />
           <StatusChip label={settings.showTapes ? 'TAPES ON' : 'TAPES OFF'} />
           <ListenChip mode={settings.listenMode} rendering={backing.rendering} />

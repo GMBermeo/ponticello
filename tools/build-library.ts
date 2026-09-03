@@ -1,9 +1,9 @@
 import { readdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseMidi, monophonic } from '../src/domain/midi';
-import { chooseMelodyTrack, bestOctaveShift } from '../src/domain/melody';
+import { parseMidi } from '../src/domain/midi';
+import { arrangeMidi } from '../src/domain/arrangement';
 import { instrumentForProgram } from '../src/domain/backing';
-import { MINIMAL_TRAVEL_WEIGHTS, solveFingering } from '../src/domain/fingering';
+import { DEFAULT_WEIGHTS, solveFingering } from '../src/domain/fingering';
 import { difficultyOf } from '../src/domain/difficulty';
 import type { DifficultyTier } from '../src/domain/schema';
 // Note: the emitted template references @/domain/cello, @/domain/schema and
@@ -25,7 +25,7 @@ function parseSongInfo(filename: string, category: 'study' | 'classical' | 'song
       id,
       title,
       composer,
-      origin: 'PUBLIC DOMAIN · 1ST POSITION',
+      origin: 'PUBLIC DOMAIN · CELLO ARRANGEMENT',
       category: 'classical' as const,
     };
   }
@@ -36,7 +36,7 @@ function parseSongInfo(filename: string, category: 'study' | 'classical' | 'song
       id,
       title,
       composer: 'Ponticello Etude',
-      origin: 'ORIGINAL ETUDE · 1ST POSITION',
+      origin: 'ORIGINAL ETUDE · CELLO',
       category: 'study' as const,
     };
   }
@@ -49,7 +49,7 @@ function parseSongInfo(filename: string, category: 'study' | 'classical' | 'song
       id,
       title: titleRaw,
       composer: artistRaw,
-      origin: `${artistRaw.toUpperCase()} · 1ST POSITION`,
+      origin: `${artistRaw.toUpperCase()} · CELLO ARRANGEMENT`,
       category: 'song' as const,
     };
   }
@@ -59,7 +59,7 @@ function parseSongInfo(filename: string, category: 'study' | 'classical' | 'song
     id,
     title,
     composer: 'Song',
-    origin: 'SONG · 1ST POSITION',
+    origin: 'SONG · CELLO ARRANGEMENT',
     category: 'song' as const,
   };
 }
@@ -137,58 +137,33 @@ for (const { dir, cat } of categories) {
     const parsed = parseMidi(bytes);
     if (parsed.notes.length === 0) continue;
 
-    // Which track is the tune. Judged from what the notes do — movement,
-    // variety, register — rather than from the track's name, which is how the
-    // bass pedal under Lateralus used to win by being played by a Chancellor.
-    const choice = chooseMelodyTrack(parsed);
-    let soloTrack = choice?.track ?? null;
-    if (soloTrack === null || !parsed.tracks.find(t => t.index === soloTrack && t.noteCount > 0)) {
-      const trackWithNotes = parsed.tracks.find(t => t.noteCount > 0);
-      if (trackWithNotes) soloTrack = trackWithNotes.index;
-    }
-    if (soloTrack === null) continue;
+    // The same arranger runs here and on-device: motif-aware riff/theme source
+    // ranking, root-guide fallback, one coherent octave move, and C2–A5 range.
+    const arranged = arrangeMidi(parsed, { level: 'Expert' });
+    if (arranged.notes.length === 0) continue;
 
-    const soloNotesRaw = monophonic(parsed.notes.filter(n => n.track === soloTrack));
-    const soloNotes = soloNotesRaw.length > 0 ? soloNotesRaw : monophonic(parsed.notes);
-    if (soloNotes.length === 0) continue;
-
+    const soloTrack = arranged.sourceTrack;
     const info = parseSongInfo(f, cat);
     const timeSignature = parsed.timeSignature;
     const bpm = parsed.bpm || 80;
-    const originTime = soloNotes[0].startTimeMs;
+    const originTime = arranged.originMs;
 
-    // One shift for the whole line, chosen to land as much of it as possible
-    // inside first position. Displacing the line bodily keeps the tune intact;
-    // the previous per-note fold moved individual notes an octave whenever they
-    // crossed the boundary, which broke the contour in the middle of a phrase.
-    const midis = soloNotes.map(n => n.midiNumber);
-    const { shift: octaveShift } = bestOctaveShift(midis);
+    const compactNotes: [number, number, number][] = arranged.notes.map((note) => [
+      note.midiNumber,
+      Math.round(note.startTimeMs),
+      Math.max(1, Math.round(note.durationMs)),
+    ]);
+    const foldedPct = Math.round((100 * arranged.foldedNotes) / compactNotes.length);
 
-    let folded = 0;
-    const compactNotes: [number, number, number][] = [];
-    for (const note of soloNotes) {
-      const startTimeMs = Math.round(note.startTimeMs - originTime);
-      const shifted = note.midiNumber + octaveShift;
-      let m = shifted;
-      // Whatever still will not fit gets folded, because the schema cannot hold
-      // it — but it is counted, so a badly-fitting arrangement is visible
-      // rather than silently mangled.
-      while (m > 63) m -= 12;
-      while (m < 36) m += 12;
-      if (m !== shifted) folded++;
-      compactNotes.push([m, startTimeMs, Math.max(1, Math.round(note.durationMs))]);
-    }
-    const foldedPct = Math.round((100 * folded) / compactNotes.length);
-
-    // Quality signals for the run report. A song that had to fold many notes,
-    // or whose chosen track barely moves, is one to look at by ear.
     quality.push({
       id: info.id,
-      track: soloTrack,
-      trackName: (parsed.tracks.find(t => t.index === soloTrack)?.name ?? '-').slice(0, 24),
-      distinct: choice?.metrics.distinctPitches ?? 0,
-      movement: Math.round((choice?.metrics.movement ?? 0) * 100),
-      shift: octaveShift,
+      track: soloTrack ?? -1,
+      trackName: soloTrack === null
+        ? 'derived roots'
+        : (parsed.tracks.find((track) => track.index === soloTrack)?.name ?? '-').slice(0, 24),
+      distinct: arranged.metrics?.distinctPitches ?? new Set(compactNotes.map((note) => note[0])).size,
+      movement: Math.round((arranged.metrics?.movement ?? 0) * 100),
+      shift: arranged.octaveShift,
       foldedPct,
     });
 
@@ -198,7 +173,7 @@ for (const { dir, cat } of categories) {
     // draw a list. See src/domain/difficulty.ts for the weighting.
     const events = compactNotes.map(([midiNumber, startTimeMs, durationMs]) =>
       ({ midiNumber, startTimeMs, durationMs }));
-    const solvedStates = solveFingering(events, MINIMAL_TRAVEL_WEIGHTS).states;
+    const solvedStates = solveFingering(events, DEFAULT_WEIGHTS).states;
     const report = difficultyOf(events, solvedStates);
     const difficulty: DifficultyTier = report.tier;
     difficulties.push({ id: info.id, tier: report.tier, score: report.score });
@@ -228,16 +203,25 @@ for (const { dir, cat } of categories) {
       // completely silent after the first minute.
       const tNotes = thinTrack(
         parsed.notes
-          .filter(n => n.track === track.index)
+          .filter((note) => note.track === track.index
+            && note.startTimeMs < arranged.sourceEndMs
+            && note.startTimeMs + note.durationMs > originTime)
           .sort((a, b) => a.startTimeMs - b.startTimeMs),
         MAX_TRACK_NOTES,
       )
-        .map(n => [
-          n.midiNumber,
-          Math.max(0, Math.round(n.startTimeMs - originTime)),
-          Math.max(1, Math.round(n.durationMs)),
-          Math.round((Math.max(0.05, n.velocity / 127)) * 100) / 100,
-        ] as [number, number, number, number]);
+        .map((note) => {
+          const startTimeMs = Math.max(0, note.startTimeMs - originTime);
+          const endTimeMs = Math.min(
+            note.startTimeMs + note.durationMs,
+            arranged.sourceEndMs,
+          ) - originTime;
+          return [
+            note.midiNumber,
+            Math.round(startTimeMs),
+            Math.max(1, Math.round(endTimeMs - startTimeMs)),
+            Math.round((Math.max(0.05, note.velocity / 127)) * 100) / 100,
+          ] as [number, number, number, number];
+        });
 
       if (tNotes.length === 0) continue;
       const inst = isSolo ? 'cello' : instrumentForProgram(track.program, track.isPercussion);
@@ -269,13 +253,13 @@ writeFileSync('src/scores/bundledSongs.json', JSON.stringify(compactList));
 const outTs = `/**
  * Bundled Release 1.2 Scores and Backing Tracks.
  * Auto-generated by tools/build-library.ts from _MIDIS.
- * All songs adapted to Cello First Position (C2 to D#4) across C, G, D, A strings.
+ * Songs store one full C2–A5 cello line; easier levels are derived at runtime.
  */
 
 import { CelloSongScore, CelloNote, CelloMeasure, DifficultyTier, measureDurationMs } from '@/domain/schema';
 import { BackingTrack, BackingPart, InstrumentName, PartRole } from '@/domain/backing';
 import { midiToPitchName, midiToFrequency } from '@/domain/cello';
-import { MINIMAL_TRAVEL_WEIGHTS, solveFingering } from '@/domain/fingering';
+import { DEFAULT_WEIGHTS, solveFingering } from '@/domain/fingering';
 import rawData from './bundledSongs.json';
 
 
@@ -309,26 +293,13 @@ export function inflateScore(raw: CompactScoreDef): CelloSongScore {
     tempoBpm: raw.bpm,
   }));
 
-  // Fingered by the solver, not by the first-position table.
-  //
-  // \`firstPositionFingering\` answers "where would a beginner put this note"
-  // one note at a time, with no idea what comes next. Because it reaches for
-  // half position whenever a semitone asks for it, the hand ends up rocking
-  // between half and first for the length of the piece: 351 metres of travel
-  // across the 258 bundled songs, for music that never leaves the neck.
-  //
-  // \`solveFingering\` is a Viterbi pass over every playable placement of every
-  // note, with a transition cost measured in millimetres of real travel divided
-  // by the time available. Under \`MINIMAL_TRAVEL_WEIGHTS\` — which price a
-  // shift far above a slightly better timbre — the same library costs **12
-  // metres**, a 97 % reduction, while still moving off first position for the
-  // 2.5 % of notes where somewhere else is genuinely closer. That is the
-  // minimal-hand-movement rule, and it is measured in
-  // src/domain/__tests__/difficulty.test.ts rather than asserted here.
+  // Fingering happens after source choice and range fitting. The normal solver
+  // weights preserve phrase ergonomics across the full C2–A5 compass; easier
+  // runtime levels are re-fingered after their own density/register reduction.
   const solved = solveFingering(
     raw.notes.map(([midiNumber, startTimeMs, durationMs]) =>
       ({ midiNumber, startTimeMs, durationMs })),
-    MINIMAL_TRAVEL_WEIGHTS,
+    DEFAULT_WEIGHTS,
   ).states;
 
   const notes: CelloNote[] = raw.notes.map(([midiNumber, startTimeMs, durationMs], i) => {
@@ -359,12 +330,12 @@ export function inflateScore(raw: CompactScoreDef): CelloSongScore {
       title: raw.title,
       composer: raw.composer,
       origin: raw.origin,
-      keySignature: '1ST POSITION',
+      keySignature: 'ADAPTIVE',
       timeSignature: raw.meter.join('/'),
       bpm: raw.bpm,
       difficulty: raw.difficulty,
       tonic: 'C',
-      teaches: 'Arranged for cello first position. Playable across C, G, D, A strings.',
+      teaches: 'Full C2–A5 cello line. Choose Beginner, Intermediate, Advanced, or Full on the practice sheet.',
       rights: raw.category === 'classical' ? 'Public domain' : raw.category === 'study' ? 'Original study' : 'Study reduction \u2014 personal practice, analysis and research',
     },
     measures,

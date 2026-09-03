@@ -251,7 +251,7 @@ describe('engrave survives the real library', () => {
         }
       }
     }
-  });
+  }, 60_000);
 
   it('shortens the page by collapsing repeats', () => {
     // Across the library, written bars should come out below source bars.

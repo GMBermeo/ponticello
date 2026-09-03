@@ -53,6 +53,11 @@ export function getScore(id: string | undefined): CelloSongScore | undefined {
   return undefined;
 }
 
+/** True for MIDI-derived bundled scores that support runtime arrangement levels. */
+export function isAdaptiveBundledScore(id: string | undefined): boolean {
+  return id !== undefined && COMPACT_MAP.has(id);
+}
+
 export function getBundledBacking(id: string | undefined): BackingTrack | undefined {
   if (!id) return undefined;
   if (STUDIES_BACKINGS[id]) return STUDIES_BACKINGS[id];

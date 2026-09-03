@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { harmonicsOf } from '../synth';
-import { VOICES } from '../voices';
-import { BackingProgram, ScheduledNote } from './program';
+import { envelopeAt, envelopeHeldLevel, VOICES } from '../voices';
+import { BackingProgram, notesActiveAtOffset, ScheduledNote } from './program';
 import { BackingPlayer } from './types';
 
 /**
@@ -12,7 +12,7 @@ import { BackingPlayer } from './types';
  * looped that. Sample-accurate and drift-free, and unusable for the library
  * this app actually ships: the median bundled song is three and a half minutes,
  * which is a 47 MB buffer and a second of blocked main thread to build, so the
- * code refused to render anything over ninety seconds and 219 of 258 songs
+ * code refused to render anything over ninety seconds and 229 of 258 songs
  * played in silence.
  *
  * A scheduler has none of that cost. Notes are handed to Web Audio a couple of
@@ -66,6 +66,7 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
   const noiseRef = useRef<AudioBuffer | null>(null);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const playGenerationRef = useRef(0);
   const voicesRef = useRef<Voice[]>([]);
   /**
    * The audio-clock time at which loop position zero occurs for the current
@@ -84,8 +85,15 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
     if (!contextRef.current) {
       const created = new AudioContext();
       const master = created.createGain();
+      const safety = created.createDynamicsCompressor();
       master.gain.value = volumeRef.current;
-      master.connect(created.destination);
+      safety.threshold.value = -3;
+      safety.knee.value = 3;
+      safety.ratio.value = 12;
+      safety.attack.value = 0.002;
+      safety.release.value = 0.12;
+      master.connect(safety);
+      safety.connect(created.destination);
       contextRef.current = created;
       masterRef.current = master;
     }
@@ -138,7 +146,7 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
 
   /** Schedules one note at an absolute audio-clock time. */
   const scheduleNote = useCallback((
-    audio: AudioContext, note: ScheduledNote, at: number,
+    audio: AudioContext, note: ScheduledNote, at: number, elapsedSec = 0,
   ) => {
     const master = masterRef.current;
     if (!master) return;
@@ -151,20 +159,34 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
     const decay = Math.max(0.001, spec.decayMs / 1000);
     const release = Math.max(0.01, spec.releaseMs / 1000);
     const hold = Math.max(0.01, note.holdSec);
+    const elapsed = Math.max(0, elapsedSec);
+    if (elapsed >= hold + release) return;
 
     const gain = audio.createGain();
     gain.connect(master);
 
-    // The same ADSR the native renderer draws, expressed as automation. Ramps
-    // rather than steps throughout: a step on a gain node is a click.
+    // Express the same stateless ADSR used by native PCM as Web Audio ramps.
+    // For a resumed long note, begin at envelope(elapsed) and schedule only the
+    // remaining phase endpoints, so a drone does not disappear until wrap.
     const g = gain.gain;
-    g.setValueAtTime(0, at);
-    g.linearRampToValueAtTime(peak, at + Math.min(attack, hold));
-    if (hold > attack) {
-      g.linearRampToValueAtTime(peak * spec.sustain, at + Math.min(attack + decay, hold));
+    const heldLevel = envelopeHeldLevel(hold, attack, decay, spec.sustain);
+    const currentLevel = envelopeAt(elapsed, attack, decay, spec.sustain, hold, release);
+    g.setValueAtTime(peak * currentLevel, at);
+
+    if (elapsed < hold) {
+      if (elapsed < attack && attack < hold) {
+        g.linearRampToValueAtTime(peak, at + attack - elapsed);
+      }
+      const decayEnd = attack + decay;
+      if (elapsed < decayEnd && decayEnd < hold) {
+        g.linearRampToValueAtTime(peak * spec.sustain, at + decayEnd - elapsed);
+      }
+      const holdEnd = at + hold - elapsed;
+      g.linearRampToValueAtTime(peak * heldLevel, holdEnd);
+      g.linearRampToValueAtTime(0, holdEnd + release);
+    } else {
+      g.linearRampToValueAtTime(0, at + hold + release - elapsed);
     }
-    g.setValueAtTime(hold > attack ? peak * spec.sustain : peak, at + hold);
-    g.linearRampToValueAtTime(0, at + hold + release);
 
     let source: OscillatorNode | AudioBufferSourceNode;
     if (spec.noise) {
@@ -181,11 +203,12 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
       source = osc;
     }
 
+    const remaining = hold + release - elapsed;
     source.connect(gain);
     source.start(at);
-    source.stop(at + hold + release + 0.02);
+    source.stop(at + remaining + 0.02);
 
-    const voice: Voice = { endsAt: at + hold + release + 0.05, osc: source, gain };
+    const voice: Voice = { endsAt: at + remaining + 0.05, osc: source, gain };
     source.onended = () => {
       try { source.disconnect(); gain.disconnect(); } catch { /* already gone */ }
       const index = voicesRef.current.indexOf(voice);
@@ -231,6 +254,7 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
   }, [scheduleNote]);
 
   const stop = useCallback(() => {
+    playGenerationRef.current++;
     if (timerRef.current !== null) {
       clearInterval(timerRef.current);
       timerRef.current = null;
@@ -254,32 +278,57 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
     setError(null);
   }, [context, stop]);
 
-  const play = useCallback((offsetSeconds = 0) => {
+  const play = useCallback((
+    offsetSeconds = 0,
+    onStarted?: (delaySeconds?: number) => void,
+  ) => {
     const audio = context();
     const program = programRef.current;
     if (!audio || !program || program.durationSec <= 0) return;
 
-    // Browsers suspend the context until a gesture; `play` is always reached
-    // from one, so this is the right place to resume.
-    if (audio.state === 'suspended') audio.resume().catch(() => {});
-
     stop();
+    const generation = playGenerationRef.current;
 
-    const duration = program.durationSec;
-    const offset = ((offsetSeconds % duration) + duration) % duration;
-    // Position zero of this pass sits `offset` seconds in the past, so a note
-    // due at `offset` lands now — which is how the accompaniment starts under
-    // the playhead rather than at the top of the loop.
-    cycleOriginRef.current = audio.currentTime + START_DELAY_SEC - offset;
+    const schedule = () => {
+      if (playGenerationRef.current !== generation || programRef.current !== program) return;
 
-    // Start the cursor at the first note not already behind us.
-    let index = 0;
-    while (index < program.notes.length && program.notes[index].atSec < offset) index++;
-    cursorRef.current = index;
+      const duration = program.durationSec;
+      const offset = ((offsetSeconds % duration) + duration) % duration;
+      // Position zero of this pass sits `offset` seconds in the past. The small
+      // lead gives Web Audio time to accept the first nodes; the playhead
+      // receives that same lead and counts it down on the UI thread.
+      const startsAt = audio.currentTime + START_DELAY_SEC;
+      cycleOriginRef.current = startsAt - offset;
 
-    tick();
-    timerRef.current = setInterval(tick, TICK_MS);
-  }, [context, stop, tick]);
+      // Restore notes whose onset is behind the playhead but whose hold/release
+      // still overlaps it. This is essential for a loop-length drone: without
+      // it, resuming anywhere after zero is silent until the next wrap.
+      for (const active of notesActiveAtOffset(program, offset).slice(0, MAX_PER_TICK)) {
+        scheduleNote(audio, active.note, startsAt, active.elapsedSec);
+      }
+
+      // Start the cursor at the first future onset; overlapping notes above are
+      // intentionally excluded so they are not scheduled twice.
+      let index = 0;
+      while (index < program.notes.length && program.notes[index].atSec < offset) index++;
+      cursorRef.current = index;
+
+      tick();
+      timerRef.current = setInterval(tick, TICK_MS);
+      onStarted?.(START_DELAY_SEC);
+    };
+
+    // Browsers suspend the context until a gesture. Do not announce playback
+    // until resume has completed, or the visual transport can run over silence.
+    if (audio.state === 'suspended') {
+      audio.resume().then(schedule).catch((cause) => {
+        if (playGenerationRef.current !== generation) return;
+        setError(cause instanceof Error ? cause.message : String(cause));
+      });
+    } else {
+      schedule();
+    }
+  }, [context, scheduleNote, stop, tick]);
 
   const setVolume = useCallback((volume: number) => {
     volumeRef.current = volume;

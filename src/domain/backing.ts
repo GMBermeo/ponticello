@@ -19,7 +19,8 @@ export type PartRole = 'solo' | 'accompaniment';
 
 /** The voices the synthesiser knows how to make. */
 export type InstrumentName =
-  | 'cello' | 'piano' | 'strings' | 'bass' | 'pluck' | 'drone' | 'percussion';
+  | 'cello' | 'piano' | 'mallet' | 'organ' | 'guitar' | 'strings'
+  | 'bass' | 'pluck' | 'brass' | 'reed' | 'synth' | 'drone' | 'percussion';
 
 export interface BackingNote {
   midiNumber: number;
@@ -348,31 +349,28 @@ export function instrumentForProgram(program: number | null, percussion: boolean
   if (program === null) return 'piano';
   if (program === 42) return 'cello';
   if (program < 8) return 'piano';
-  if (program < 24) return 'pluck';       // chromatic percussion, organ
-  if (program < 32) return 'pluck';       // guitar
+  if (program < 16) return 'mallet';       // chromatic percussion
+  if (program < 24) return 'organ';
+  if (program < 32) return 'guitar';
   if (program < 40) return 'bass';
   if (program < 56) return 'strings';
-  if (program < 80) return 'strings';     // brass, reed, pipe
-  return 'piano';
-}
-
-/** How likely a track is to be the cello line, for pre-selecting one on import. */
-export function soloTrackScore(track: MidiTrack): number {
-  if (track.noteCount === 0 || track.isPercussion) return -1;
-  let score = 0;
-  if (/cello|violoncello|vc\b|solo/i.test(track.name ?? '')) score += 100;
-  if (track.program === 42) score += 60;
-  // A cello part sits roughly C2–A5 and is usually close to monophonic.
-  const centre = (track.lowestMidi + track.highestMidi) / 2;
-  if (centre >= 40 && centre <= 72) score += 25;
-  if (track.lowestMidi >= 30 && track.highestMidi <= 88) score += 15;
-  return score;
+  if (program < 64) return 'brass';
+  if (program < 80) return 'reed';         // reeds and pipes
+  return 'synth';
 }
 
 export interface ImportOptions {
   name: string;
   /** Track index to treat as the solo line, or null for "all accompaniment". */
   soloTrack: number | null;
+  /** Absolute source time which becomes score/backing time zero. */
+  originMs?: number;
+  /** Absolute source end after corrupt remote-event rejection. */
+  endMs?: number;
+  /** Multiply rebased source times when importing at a different tempo. */
+  timeScale?: number;
+  /** Adapted displayed line; when provided this is the only solo that may sound. */
+  soloNotes?: BackingNote[];
 }
 
 export function backingFromMidi(
@@ -381,19 +379,30 @@ export function backingFromMidi(
   options: ImportOptions,
 ): BackingTrack {
   const parts: BackingPart[] = [];
+  const originMs = Math.max(0, options.originMs ?? 0);
+  const endMs = Math.max(originMs, Math.min(parsed.durationMs, options.endMs ?? parsed.durationMs));
+  const timeScale = Math.max(0.01, options.timeScale ?? 1);
 
   for (const track of parsed.tracks) {
     if (track.noteCount === 0) continue;
     const isSolo = options.soloTrack === track.index;
-    const notes = parsed.notes
-      .filter((n) => n.track === track.index)
-      .map((n) => ({
-        midiNumber: n.midiNumber,
-        startTimeMs: n.startTimeMs,
-        durationMs: n.durationMs,
-        velocity: Math.max(0.05, n.velocity / 127),
-      }));
+    const notes: BackingNote[] = isSolo && options.soloNotes
+      ? options.soloNotes.map((note) => ({ ...note }))
+      : parsed.notes
+        .filter((note) => note.track === track.index && note.startTimeMs < endMs)
+        .map((note) => {
+          const endTimeMs = (Math.min(note.startTimeMs + note.durationMs, endMs) - originMs) * timeScale;
+          const startTimeMs = Math.max(0, (note.startTimeMs - originMs) * timeScale);
+          return {
+            midiNumber: note.midiNumber,
+            startTimeMs,
+            durationMs: endTimeMs - startTimeMs,
+            velocity: Math.max(0.05, note.velocity / 127),
+          };
+        })
+        .filter((note) => note.durationMs > 0);
 
+    if (notes.length === 0) continue;
     parts.push({
       id: `${id}-t${track.index}`,
       name: track.name || `Track ${track.index + 1}`,
@@ -411,6 +420,6 @@ export function backingFromMidi(
     source: 'imported',
     parts,
     bpm: parsed.bpm,
-    durationMs: parsed.durationMs,
+    durationMs: Math.max(0, (endMs - originMs) * timeScale),
   };
 }

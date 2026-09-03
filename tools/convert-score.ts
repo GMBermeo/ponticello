@@ -19,13 +19,15 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 
 import {
-  midiToFrequency, midiToPitchName, OPEN_STRING_MIDI, } from '../src/domain/cello';
+  midiToFrequency, midiToPitchName,
+} from '../src/domain/cello';
+import { arrangeMidi } from '../src/domain/arrangement';
 import { detectShifts, RawNoteEvent, solveFingering } from '../src/domain/fingering';
 import type { DifficultyTier } from '../src/domain/schema';
 import {
   CelloMeasure, CelloNote, CelloSongScore, measureDurationMs, validateScore,
 } from '../src/domain/schema';
-import { monophonic, parseMidi } from '../src/domain/midi';
+import { parseMidi } from '../src/domain/midi';
 
 interface Options {
   input: string;
@@ -78,39 +80,52 @@ function main() {
   const options = parseArgs(process.argv.slice(2));
 
   const bytes = new Uint8Array(readFileSync(options.input));
-  let midiNotes = parseMidi(bytes).notes;
-  if (midiNotes.length === 0) throw new Error('no notes found in that MIDI file');
+  const parsed = parseMidi(bytes);
+  if (parsed.notes.length === 0) throw new Error('no notes found in that MIDI file');
 
-  if (options.track !== null) {
-    midiNotes = midiNotes.filter((n) => n.track === options.track);
-    if (midiNotes.length === 0) throw new Error(`track ${options.track} has no notes`);
+  const timeScale = parsed.bpm > 0 ? parsed.bpm / options.bpm : 1;
+  const retimed = {
+    ...parsed,
+    bpm: options.bpm,
+    timeSignature: options.timeSignature,
+    durationMs: parsed.durationMs * timeScale,
+    notes: parsed.notes.map((note) => ({
+      ...note,
+      startTimeMs: note.startTimeMs * timeScale,
+      durationMs: note.durationMs * timeScale,
+    })),
+  };
+  const arranged = arrangeMidi(retimed, {
+    level: options.difficulty,
+    sourceTrack: options.track ?? undefined,
+  });
+  if (arranged.notes.length === 0) {
+    throw new Error(options.track === null
+      ? 'no melodic/riff track or harmonic root guide could be arranged'
+      : `track ${options.track} has no notes`);
   }
 
-  const line = monophonic(midiNotes);
-
-  // Everything is re-timed to the requested tempo and bar length; the source
-  // file's own tempo map is only used to get the note *order* and relative
-  // lengths right.
   const barDurationMs = measureDurationMs(options.timeSignature, options.bpm);
-  const start = line[0].startTimeMs;
-  const events: RawNoteEvent[] = line.map((n) => ({
-    midiNumber: n.midiNumber,
-    startTimeMs: n.startTimeMs - start,
-    durationMs: n.durationMs,
+  const events: RawNoteEvent[] = arranged.notes.map((note) => ({
+    midiNumber: note.midiNumber,
+    startTimeMs: note.startTimeMs,
+    durationMs: note.durationMs,
   }));
 
-  const playable = events.filter((e) => {
-    const inRange = e.midiNumber >= OPEN_STRING_MIDI.C && e.midiNumber <= 88;
-    if (!inRange) {
-      console.warn(`  skipping ${midiToPitchName(e.midiNumber)} — outside the cello's range`);
-    }
-    return inRange;
-  });
-
   const limitMs = options.maxBars === null ? Infinity : options.maxBars * barDurationMs;
-  const kept = playable.filter((e) => e.startTimeMs < limitMs);
+  const kept = events
+    .filter((event) => event.startTimeMs < limitMs)
+    .map((event) => ({
+      ...event,
+      durationMs: Math.max(1, Math.min(event.durationMs, limitMs - event.startTimeMs)),
+    }));
 
-  console.log(`  ${midiNotes.length} notes read, ${kept.length} kept after reduction`);
+  console.log(
+    `  source ${arranged.sourceKind}${arranged.sourceTrack === null ? '' : ` track ${arranged.sourceTrack}`}: `
+      + `${arranged.originalNoteCount} notes, ${kept.length} kept at ${options.difficulty}`,
+  );
+
+  if (kept.length === 0) throw new Error('the requested bar window contains no arranged notes');
 
   const { states, totalCost } = solveFingering(kept);
   const shifts = detectShifts(kept, states);

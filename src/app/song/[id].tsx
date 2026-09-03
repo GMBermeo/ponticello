@@ -12,12 +12,20 @@ import { LIBRARY_ROWS } from '@/scores';
 import { usePiece } from '@/state/usePiece';
 import { useSession } from '@/state/session';
 import { useBacking } from '@/audio/useBacking';
+import { ArrangementLevel } from '@/domain/arrangement';
 import { AccompanimentStyle } from '@/domain/backing';
 import { practiceLoop } from '@/domain/loop';
 import { ListenMode } from '@/audio/backing/types';
 import { BoardView, FlowAxis, useSettings, VisionName } from '@/state/settings';
 import { useTheme } from '@/theme/ThemeProvider';
 import { ChromeName } from '@/theme/tokens';
+
+const ARRANGEMENT_SEGMENTS = [
+  { value: 'Beginner' as const, label: 'EASY', hint: 'Up to about 2.5 notes per second; first-position range' },
+  { value: 'Intermediate' as const, label: 'PRACTICE', hint: 'Up to about 4 notes per second; moderate register' },
+  { value: 'Advanced' as const, label: 'ADV', hint: 'Up to about 6 notes per second; upper positions allowed' },
+  { value: 'Expert' as const, label: 'FULL', hint: 'Every selected riff or theme note' },
+];
 
 const VISIONS = [
   { value: 'tab' as const, label: 'TAB' },
@@ -78,7 +86,8 @@ export default function SongScreen() {
   const [previewFor, setPreviewFor] = useState<string | null>(null);
   const previewing = previewFor === id && settings.listenMode !== 'off';
 
-  const { row, score, backing, imported } = usePiece(id);
+  const { row, score, backing, adaptive } = usePiece(id, setup.arrangementLevel);
+  const fixedBacking = backing?.parts.some((part) => part.role === 'accompaniment') ?? false;
   const barCount = score?.measures.length ?? 0;
   const index = LIBRARY_ROWS.findIndex((r) => r.id === id) + 1;
 
@@ -268,6 +277,23 @@ export default function SongScreen() {
             <Stack padX={20} padY={16} gap={14}>
               <Label size={11}>PRACTICE SETUP</Label>
 
+              {adaptive ? (
+                <>
+                  <Label size={10}>ARRANGEMENT DETAIL</Label>
+                  <Segmented
+                    segments={ARRANGEMENT_SEGMENTS}
+                    value={setup.arrangementLevel}
+                    onChange={(arrangementLevel: ArrangementLevel) => updateSetup({ arrangementLevel })}
+                    grow
+                    compact
+                  />
+                  <Body size={12} color={theme.chrome.dim}>
+                    {ARRANGEMENT_SEGMENTS.find((segment) => segment.value === setup.arrangementLevel)?.hint}
+                  </Body>
+                  <Rule />
+                </>
+              ) : null}
+
               <Row gap={10}>
                 <Body size={14} style={{ flex: 1 }}>Loop from</Body>
                 <Stepper
@@ -347,7 +373,7 @@ export default function SongScreen() {
                 rendering={listen.rendering}
                 error={listen.error}
                 audibleParts={listen.audibleParts}
-                imported={imported}
+                fixedBacking={fixedBacking}
                 hasSolo={listen.hasSolo}
               />
               {settings.listenMode === 'off' ? null : (
@@ -383,7 +409,7 @@ export default function SongScreen() {
                     onPress={() => router.push(`/play/${row.id}`)}
                   />
                   <Label size={10} style={{ textTransform: 'none' }}>
-                    {`Loop ${loopSpan} at ${setup.tempoPercent}% · fingerings ${settings.showFingerings ? 'on' : 'hidden'}`}
+                    {`Loop ${loopSpan} at ${setup.tempoPercent}% · ${adaptive ? `${setup.arrangementLevel.toLowerCase()} arrangement` : 'authored score'} · fingerings ${settings.showFingerings ? 'on' : 'hidden'}`}
                   </Label>
                 </>
               ) : (

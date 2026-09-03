@@ -158,10 +158,8 @@ export function renderParts(
     }
   }
 
-  return out;
+  return limit(out);
 }
-
-/** Sums buffers of possibly different lengths into a new one. */
 export function mixBuffers(...buffers: Float32Array[]): Float32Array {
   const length = buffers.reduce((max, b) => Math.max(max, b.length), 0);
   const out = new Float32Array(length);
@@ -278,6 +276,8 @@ export function renderProgramInto(
       if (phase >= TABLE_SIZE) phase -= TABLE_SIZE;
     }
   }
+
+  limit(out);
 }
 
 /** Harmonic series of a voice, for the web scheduler's `createPeriodicWave`. */

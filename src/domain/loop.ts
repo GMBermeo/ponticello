@@ -171,7 +171,7 @@ export function clipToLoop(
  *
  * This used to be ninety seconds, and it was the single worst bug in the app.
  * The accompaniment was synthesised into one `Float32Array` before a note could
- * sound, so the ceiling was a memory and blocked-thread budget — and 219 of the
+ * sound, so the ceiling was a memory and blocked-thread budget — and 229 of the
  * 258 bundled songs are longer than ninety seconds, which meant the majority of
  * the library played no backing at all and said nothing about why.
  *

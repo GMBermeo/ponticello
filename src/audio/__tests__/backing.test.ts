@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   backingFromMidi, generateAccompaniment, inferChord, instrumentForProgram, isMinorKey,
-  soloPartFromScore, soloTrackScore, tonicPitchClass, trackDurationMs,
+  soloPartFromScore, tonicPitchClass, trackDurationMs,
 } from '@/domain/backing';
 import { MidiTrack } from '@/domain/midi';
 import { fadeEdges, limit, mixBuffers, renderParts } from '../synth';
@@ -117,26 +117,17 @@ describe('importing MIDI', () => {
     lowestMidi: 40, highestMidi: 70, isPercussion: false, ...over,
   });
 
-  it('prefers a track that says it is a cello', () => {
-    const named = soloTrackScore(track({ name: 'Violoncello' }));
-    const other = soloTrackScore(track({ name: 'Piano' }));
-    expect(named).toBeGreaterThan(other);
-  });
-
-  it('uses the General MIDI cello program as a hint', () => {
-    expect(soloTrackScore(track({ program: 42 })))
-      .toBeGreaterThan(soloTrackScore(track({ program: 0 })));
-  });
-
-  it('never nominates a drum track', () => {
-    expect(soloTrackScore(track({ isPercussion: true, name: 'Cello' }))).toBe(-1);
-  });
-
-  it('maps General MIDI programs onto voices we can make', () => {
+  it('maps General MIDI programs onto native/web synthesized instrument families', () => {
     expect(instrumentForProgram(0, false)).toBe('piano');
+    expect(instrumentForProgram(12, false)).toBe('mallet');
+    expect(instrumentForProgram(19, false)).toBe('organ');
+    expect(instrumentForProgram(29, false)).toBe('guitar');
     expect(instrumentForProgram(42, false)).toBe('cello');
     expect(instrumentForProgram(33, false)).toBe('bass');
     expect(instrumentForProgram(48, false)).toBe('strings');
+    expect(instrumentForProgram(57, false)).toBe('brass');
+    expect(instrumentForProgram(65, false)).toBe('reed');
+    expect(instrumentForProgram(82, false)).toBe('synth');
     expect(instrumentForProgram(null, true)).toBe('percussion');
   });
 
@@ -156,6 +147,31 @@ describe('importing MIDI', () => {
     expect(backing.parts[0].instrument).toBe('cello');
     expect(backing.parts[1].instrument).toBe('piano');
     expect(backing.parts[1].notes[0].velocity).toBeCloseTo(80 / 127, 3);
+  });
+
+  it('rebases accompaniment to the adapted solo origin and mirrors that solo exactly', () => {
+    const parsed = {
+      bpm: 120,
+      durationMs: 3000,
+      tracks: [track({ index: 0, name: 'Lead' }), track({ index: 1, name: 'Piano', program: 0 })],
+      notes: [
+        { midiNumber: 84, startTimeMs: 1000, durationMs: 400, track: 0, channel: 0, velocity: 100 },
+        { midiNumber: 48, startTimeMs: 1000, durationMs: 500, track: 1, channel: 0, velocity: 80 },
+        { midiNumber: 50, startTimeMs: 1500, durationMs: 500, track: 1, channel: 0, velocity: 80 },
+      ],
+    };
+    const adaptedSolo = [
+      { midiNumber: 60, startTimeMs: 0, durationMs: 360, velocity: 0.8 },
+    ];
+    const backing = backingFromMidi('x', parsed, {
+      name: 'Test', soloTrack: 0, originMs: 1000, soloNotes: adaptedSolo,
+    });
+    const solo = backing.parts.find((part) => part.role === 'solo');
+    const accompaniment = backing.parts.find((part) => part.role === 'accompaniment');
+
+    expect(solo?.notes).toEqual(adaptedSolo);
+    expect(accompaniment?.notes[0].startTimeMs).toBe(0);
+    expect(backing.durationMs).toBe(2000);
   });
 
   it('treats every track as accompaniment when no solo is chosen', () => {

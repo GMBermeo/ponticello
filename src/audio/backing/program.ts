@@ -11,7 +11,7 @@
  * forced every platform to pay for a full synthesis before a single note could
  * sound. A 539-second song came to a 47 MB buffer and a second of blocked JS
  * thread on a laptop, several on a phone, and the code's answer was to refuse
- * anything over ninety seconds. That refusal is why 219 of the 258 bundled
+ * anything over ninety seconds. That refusal is why 229 of the 258 bundled
  * songs played no accompaniment at all.
  *
  * Pure: no React, no React Native, no Web Audio. See AGENTS.md.
@@ -48,6 +48,38 @@ export interface BackingProgram {
   durationSec: number;
 }
 
+
+export interface ActiveScheduledNote {
+  note: ScheduledNote;
+  /** Seconds already elapsed since this note's onset. */
+  elapsedSec: number;
+}
+
+/**
+ * Notes that must already be sounding when playback begins at `offsetSeconds`.
+ *
+ * Future-onset scheduling alone is insufficient for drones, long chords, and
+ * imported legato notes: their onset may be behind the playhead while their
+ * hold or release still overlaps it. The web adapter starts these voices at
+ * the current envelope phase; native gets the same behavior by seeking PCM.
+ */
+export function notesActiveAtOffset(
+  program: BackingProgram,
+  offsetSeconds: number,
+): ActiveScheduledNote[] {
+  if (program.durationSec <= 0 || program.notes.length === 0) return [];
+  const offset = ((offsetSeconds % program.durationSec) + program.durationSec)
+    % program.durationSec;
+
+  return program.notes.flatMap((note) => {
+    const elapsedSec = offset - note.atSec;
+    if (elapsedSec <= 0) return [];
+    const spec = VOICES[note.instrument];
+    const soundingSec = Math.max(0.01, note.holdSec)
+      + Math.max(0.01, spec.releaseMs / 1000);
+    return elapsedSec < soundingSec ? [{ note, elapsedSec }] : [];
+  });
+}
 export const EMPTY_PROGRAM: BackingProgram = { key: 'empty', notes: [], durationSec: 0 };
 
 /**
@@ -105,6 +137,38 @@ export interface ProgramOptions {
   loop: PracticeLoop;
 }
 
+function compareScheduled(a: ScheduledNote, b: ScheduledNote): number {
+  return (a.atSec - b.atSec)
+    || (a.holdSec - b.holdSec)
+    || (a.midiNumber - b.midiNumber)
+    || a.instrument.localeCompare(b.instrument)
+    || (a.amplitude - b.amplitude);
+}
+
+/** Stable FNV-1a hash; avoids Node crypto in this shared native/web module. */
+function hashText(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function contentKey(id: string, notes: readonly ScheduledNote[], durationSec: number): string {
+  const canonical = [
+    durationSec.toFixed(6),
+    ...notes.map((note) => [
+      note.atSec.toFixed(6),
+      note.holdSec.toFixed(6),
+      String(note.midiNumber),
+      note.instrument,
+      note.amplitude.toFixed(6),
+    ].join(',')),
+  ].join(';');
+  return `${id}:${hashText(canonical)}`;
+}
+
 /**
  * Resolves parts into a program.
  *
@@ -133,9 +197,15 @@ export function buildProgram({ id, parts, loop }: ProgramOptions): BackingProgra
     }
   }
 
-  if (notes.length === 0) return { key: `${id}:silent`, notes: [], durationSec };
+  if (notes.length === 0) {
+    return { key: contentKey(id, [], durationSec), notes: [], durationSec };
+  }
 
-  notes.sort((a, b) => a.atSec - b.atSec);
+  notes.sort(compareScheduled);
+  // Identity describes the requested music, not merely count and duration.
+  // Compute it before peak trim so two differently authored amplitudes cannot
+  // collapse to the same key just because gain protection normalises them.
+  const key = contentKey(id, notes, durationSec);
 
   // One trim for the whole program, applied here rather than at playback, so
   // the two adapters cannot disagree about how loud the same music is.
@@ -143,25 +213,5 @@ export function buildProgram({ id, parts, loop }: ProgramOptions): BackingProgra
   const trim = peak > 0 ? Math.min(1, TARGET_PEAK / peak) : 1;
   if (trim < 1) for (const note of notes) note.amplitude *= trim;
 
-  return {
-    key: `${id}:${notes.length}:${durationSec.toFixed(3)}:${trim.toFixed(4)}`,
-    notes,
-    durationSec,
-  };
-}
-
-/**
- * Where in the program a score time falls, in real seconds, wrapped.
- *
- * The playhead is a cycle, so a time past the end of the loop is the same time
- * at the start of the next pass. This is what phase-locks the accompaniment to
- * the playhead when playback starts part way through a phrase.
- */
-export function programOffsetSeconds(
-  program: BackingProgram, loop: PracticeLoop, scoreTimeMs: number,
-): number {
-  if (program.durationSec <= 0 || loop.scoreDurationMs <= 0) return 0;
-  const into = (scoreTimeMs - loop.fromMs) % loop.scoreDurationMs;
-  const wrapped = into < 0 ? into + loop.scoreDurationMs : into;
-  return wrapped / loop.tempoScale / 1000;
+  return { key, notes, durationSec };
 }

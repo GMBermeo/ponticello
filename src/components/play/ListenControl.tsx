@@ -31,8 +31,8 @@ export interface ListenControlProps {
   rendering: boolean;
   error: string | null;
   audibleParts: BackingPart[];
-  /** True when the piece brought its own accompaniment, so style has no effect. */
-  imported: boolean;
+  /** True when the piece supplies accompaniment, so generated style has no effect. */
+  fixedBacking: boolean;
   hasSolo: boolean;
 }
 
@@ -47,7 +47,7 @@ export interface ListenControlProps {
  */
 export function ListenControl({
   mode, onModeChange, style, onStyleChange, volume, onVolumeChange,
-  rendering, error, audibleParts, imported, hasSolo,
+  rendering, error, audibleParts, fixedBacking, hasSolo,
 }: ListenControlProps) {
   const theme = useTheme();
   const { chrome } = theme;
@@ -85,10 +85,10 @@ export function ListenControl({
             />
           </Row>
 
-          {imported ? (
+          {fixedBacking ? (
             <>
               <Rule />
-              <Label size={10}>PARTS FROM THE IMPORTED FILE</Label>
+              <Label size={10}>FIXED BACKING PARTS</Label>
               {audibleParts.map((part) => (
                 <Row key={part.id} gap={8}>
                   <View

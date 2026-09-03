@@ -18,10 +18,13 @@ export interface Playhead {
   /** Score time in milliseconds, advanced on the UI thread every frame. */
   timeMs: SharedTime;
   playing: boolean;
-  play: () => void;
+  /** Start now, or after an adapter-reported delay counted on the UI thread. */
+  play: (delayMs?: number) => void;
   pause: () => void;
   toggle: () => void;
   restart: () => void;
+  /** Increments on every restart so dependent transports can seek too. */
+  revision: number;
   /**
    * Reads the clock from JS. The accompaniment calls this once, when it
    * starts, to work out where in the loop to begin.
@@ -54,8 +57,10 @@ export function usePlayhead({ score, loop }: PlayheadOptions): Playhead {
   const loopStart = useSharedValue(0);
   const loopEnd = useSharedValue(0);
   const running = useSharedValue(0);
+  const startDelayMs = useSharedValue(0);
 
   const [playing, setPlaying] = useState(false);
+  const [revision, setRevision] = useState(0);
   const [activeIndex, setActiveIndex] = useState(0);
   const [measureIndex, setMeasureIndex] = useState(0);
 
@@ -72,8 +77,23 @@ export function usePlayhead({ score, loop }: PlayheadOptions): Playhead {
 
   useFrameCallback((frame) => {
     'worklet';
-    if (running.get() === 0) return;
-    const deltaMs = frame.timeSincePreviousFrame ?? 16.67;
+    let deltaMs = frame.timeSincePreviousFrame ?? 16.67;
+
+    if (running.get() === 0) {
+      const pending = startDelayMs.get();
+      if (pending <= 0) return;
+      const remaining = pending - deltaMs;
+      if (remaining > 0) {
+        startDelayMs.set(remaining);
+        return;
+      }
+      // The audio boundary landed inside this frame. Start at that boundary
+      // and retain only the overshoot, rather than advancing a whole frame.
+      startDelayMs.set(0);
+      running.set(1);
+      deltaMs = Math.max(0, -remaining);
+    }
+
     const start = loopStart.get();
     const end = loopEnd.get();
     const span = end - start;
@@ -112,15 +132,18 @@ export function usePlayhead({ score, loop }: PlayheadOptions): Playhead {
 
   // Shared values are writable straight from the JS thread; hopping through
   // runOnUI to flip a flag buys nothing and adds a scheduling round-trip.
-  const play = useCallback(() => {
-    running.set(1);
+  const play = useCallback((delayMs = 0) => {
+    const delay = Number.isFinite(delayMs) ? Math.max(0, delayMs) : 0;
+    startDelayMs.set(delay);
+    running.set(delay === 0 ? 1 : 0);
     setPlaying(true);
-  }, [running]);
+  }, [running, startDelayMs]);
 
   const pause = useCallback(() => {
+    startDelayMs.set(0);
     running.set(0);
     setPlaying(false);
-  }, [running]);
+  }, [running, startDelayMs]);
 
   const toggle = useCallback(() => {
     if (playing) pause();
@@ -131,12 +154,13 @@ export function usePlayhead({ score, loop }: PlayheadOptions): Playhead {
     timeMs.set(loopStartMs);
     setActiveIndex(activeNoteIndex(score, loopStartMs));
     setMeasureIndex(measureAt(score, loopStartMs)?.index ?? 0);
+    setRevision((current) => current + 1);
   }, [loopStartMs, score, timeMs]);
 
   const scoreTimeMs = useCallback(() => timeMs.get(), [timeMs]);
 
   return {
-    timeMs, playing, play, pause, toggle, restart, scoreTimeMs,
+    timeMs, playing, play, pause, toggle, restart, revision, scoreTimeMs,
     activeIndex, measureIndex, loopStartMs, loopEndMs,
   };
 }

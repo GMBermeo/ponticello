@@ -1,8 +1,11 @@
 import { useMemo } from 'react';
 
+import { ArrangementLevel, arrangeScoreForLevel } from '@/domain/arrangement';
 import { BackingTrack } from '@/domain/backing';
 import { CelloSongScore } from '@/domain/schema';
-import { getBundledBacking, getScore, LIBRARY_ROWS, LibraryRow } from '@/scores';
+import {
+  getBundledBacking, getScore, isAdaptiveBundledScore, LIBRARY_ROWS, LibraryRow,
+} from '@/scores';
 import { useImportedLibrary } from './library';
 
 /**
@@ -18,6 +21,8 @@ export interface ResolvedPiece {
   score: CelloSongScore | null;
   backing: BackingTrack | null;
   imported: boolean;
+  /** Whether this piece is MIDI-derived and supports runtime arrangement levels. */
+  adaptive: boolean;
 }
 
 /** A library row describing an imported piece. */
@@ -51,30 +56,52 @@ export function rowForImported(score: CelloSongScore, backingParts: number): Lib
   };
 }
 
-export function usePiece(id: string | undefined): ResolvedPiece {
+function rowForArrangement(base: LibraryRow, score: CelloSongScore): LibraryRow {
+  const projected = rowForImported(score, 0);
+  return {
+    ...base,
+    keySignature: score.metadata.keySignature,
+    range: projected.range,
+    difficulty: score.metadata.difficulty,
+    bars: score.measures.length,
+    distribution: projected.distribution,
+    note: score.metadata.teaches,
+  };
+}
+
+export function usePiece(id: string | undefined, level: ArrangementLevel = 'Expert'): ResolvedPiece {
   const { entries, resolve } = useImportedLibrary();
 
   return useMemo(() => {
-    if (!id) return { row: null, score: null, backing: null, imported: false };
+    if (!id) {
+      return { row: null, score: null, backing: null, imported: false, adaptive: false };
+    }
 
     const bundled = getScore(id);
     if (bundled) {
+      const baseRow = LIBRARY_ROWS.find((row) => row.id === id) ?? null;
+      const adaptive = isAdaptiveBundledScore(id);
+      const score = adaptive ? arrangeScoreForLevel(bundled, level) : bundled;
       return {
-        row: LIBRARY_ROWS.find((r) => r.id === id) ?? null,
-        score: bundled,
+        row: baseRow ? rowForArrangement(baseRow, score) : null,
+        score,
         backing: getBundledBacking(id) ?? null,
         imported: false,
+        adaptive,
       };
     }
 
     if (entries.some((e) => e.id === id)) {
       const piece = resolve(id);
       if (piece) {
+        const score = arrangeScoreForLevel(piece.score, level);
+        const backingParts = piece.backing.parts.filter((part) => part.role === 'accompaniment').length;
         return {
-          row: rowForImported(piece.score, piece.backing.parts.filter((p) => p.role === 'accompaniment').length),
-          score: piece.score,
+          row: rowForImported(score, backingParts),
+          score,
           backing: piece.backing,
           imported: true,
+          adaptive: true,
         };
       }
     }
@@ -84,8 +111,9 @@ export function usePiece(id: string | undefined): ResolvedPiece {
       score: null,
       backing: null,
       imported: false,
+      adaptive: false,
     };
-  }, [id, entries, resolve]);
+  }, [id, level, entries, resolve]);
 }
 
 /** Library rows for every imported piece, newest first. */

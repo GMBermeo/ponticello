@@ -3,9 +3,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccompanimentStyle, BackingPart, BackingTrack, generateAccompaniment, soloPartFromScore,
 } from '@/domain/backing';
-import { clipToLoop, loopBudget, PracticeLoop } from '@/domain/loop';
+import { clipToLoop, loopBudget, loopOffsetSeconds, PracticeLoop } from '@/domain/loop';
 import { CelloSongScore } from '@/domain/schema';
-import { buildProgram, programOffsetSeconds } from './backing/program';
+import { buildProgram } from './backing/program';
+import { backingTransportDecision } from './backing/transport';
 import { ListenMode } from './backing/types';
 import { useBackingPlayer } from './backing/useBackingPlayer';
 
@@ -21,7 +22,7 @@ import { useBackingPlayer } from './backing/useBackingPlayer';
  * a `Float32Array` and give the player samples. For the library this app ships
  * that was fatal: the median bundled song is three and a half minutes, the
  * longest is nine, and the render cost 47 MB and a second of blocked JS thread
- * — so there was a ninety-second ceiling, and 219 of the 258 songs fell outside
+ * — so there was a ninety-second ceiling, and 229 of the 258 songs fell outside
  * it and played in silence. Now the parts are resolved into a `BackingProgram`
  * — notes in real seconds, gain-staged once — and each platform does the
  * cheapest thing it can with it. There is no length ceiling left to trip over.
@@ -42,6 +43,8 @@ export interface UseBackingOptions {
    */
   loop: PracticeLoop;
   playing: boolean;
+  /** Monotonic restart token from the visual transport owner. */
+  transportRevision?: number;
   /** 0–1. */
   volume: number;
   /**
@@ -53,6 +56,10 @@ export interface UseBackingOptions {
    * transport starts.
    */
   scoreTimeMs?: () => number;
+  /** Pause/freeze the visual clock before an asynchronous platform start. */
+  onPlaybackWillStart?: () => void;
+  /** Start/resume the visual clock at the adapter's reported boundary. */
+  onPlaybackStarted?: (delaySeconds?: number) => void;
 }
 
 export interface BackingState {
@@ -73,21 +80,30 @@ export interface BackingState {
 
 export function useBacking(options: UseBackingOptions): BackingState {
   const {
-    score, backing, listenMode, accompaniment, loop, playing, volume, scoreTimeMs,
+    score, backing, listenMode, accompaniment, loop, playing, transportRevision = 0,
+    volume, scoreTimeMs, onPlaybackWillStart, onPlaybackStarted,
   } = options;
 
   const enabled = listenMode !== 'off';
-  const player = useBackingPlayer(enabled);
+  const {
+    load: loadPlayer,
+    play: playPlayer,
+    stop: stopPlayer,
+    setVolume: setPlayerVolume,
+    ready: playerReady,
+    progress: playerProgress,
+    error: playerError,
+  } = useBackingPlayer(enabled);
 
   const [preparing, setPreparing] = useState(false);
 
   const soloParts = useMemo<BackingPart[]>(() => {
-    // Imported parts are in score time and have to be clipped like anything
-    // else. Skipping this is what made an imported backing unusable.
-    const imported = (backing?.parts ?? []).filter((p) => p.role === 'solo');
-    if (imported.length > 0) return clipToLoop(imported, loop);
-    if (!score) return [];
-    return clipToLoop([soloPartFromScore(score)], loop);
+    // The displayed arranged score is authoritative. Imported raw solo events
+    // may use another octave, density level, or source start and must never
+    // disagree with what the player is being asked to bow.
+    if (score) return clipToLoop([soloPartFromScore(score)], loop);
+    const imported = (backing?.parts ?? []).filter((part) => part.role === 'solo');
+    return clipToLoop(imported, loop);
   }, [backing, score, loop]);
 
   const accompanimentParts = useMemo<BackingPart[]>(() => {
@@ -129,66 +145,104 @@ export function useBacking(options: UseBackingOptions): BackingState {
 
   const budget = useMemo(() => loopBudget(loop), [loop]);
 
-  // Hand the program over whenever it changes. Debounced, because the tempo and
-  // loop steppers fire on every tap and most taps are superseded.
+  // Hand the program over whenever it changes. The outgoing program is stopped
+  // immediately so a silent/new selection can never keep old music sounding.
+  // Non-empty programs remain debounced because tempo and loop steppers often
+  // supersede one another; clearing an empty program is cheap and immediate.
   const loadToken = useRef(0);
+  const [loadedProgramKey, setLoadedProgramKey] = useState<string | null>(null);
   useEffect(() => {
-    if (!enabled || program.notes.length === 0 || !budget.withinBudget) return;
-
     const token = ++loadToken.current;
-    const handle = setTimeout(() => {
-      setPreparing(true);
-      player.load(program).finally(() => {
+    stopPlayer();
+
+    if (!enabled || !budget.withinBudget) {
+      const handle = setTimeout(() => {
         if (loadToken.current === token) setPreparing(false);
-      });
-    }, DEBOUNCE_MS);
+      }, 0);
+      return () => clearTimeout(handle);
+    }
 
+    const load = () => {
+      setPreparing(true);
+      loadPlayer(program)
+        .then(() => {
+          if (loadToken.current === token) setLoadedProgramKey(program.key);
+        })
+        .finally(() => {
+          if (loadToken.current === token) setPreparing(false);
+        });
+    };
+
+    const handle = setTimeout(load, program.notes.length === 0 ? 0 : DEBOUNCE_MS);
     return () => clearTimeout(handle);
-    // `player` is a stable set of callbacks; including it would reload the
-    // audio on every parent render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, program, budget.withinBudget]);
+  }, [enabled, program, budget.withinBudget, loadPlayer, stopPlayer]);
 
-  useEffect(() => { player.setVolume(volume); }, [player, volume]);
-
-  /**
-   * Starts the accompaniment *where the playhead already is*.
-   *
-   * Without the offset the loop always began at its own first note, so pressing
-   * play half way through a phrase put the backing a half-phrase ahead and it
-   * stayed there for the rest of the session. The offset is read at this
-   * instant rather than tracked, because the two clocks only need introducing
-   * once — after that they are the same length and stay together.
-   */
-  const start = useCallback(() => {
-    const now = scoreTimeMs?.() ?? loop.fromMs;
-    player.play(programOffsetSeconds(program, loop, now));
-  }, [player, program, loop, scoreTimeMs]);
-
-  const halt = useCallback(() => player.stop(), [player]);
-
-  useEffect(() => {
-    // `budget.withinBudget` belongs here as well as in the load: refusing to
-    // prepare an over-long loop leaves the *previous* program loaded, and
-    // playing that would be worse than silence — it is a different passage.
-    if (playing && enabled && player.ready && budget.withinBudget) start();
-    else halt();
-  }, [playing, enabled, player.ready, budget.withinBudget, start, halt]);
+  useEffect(() => { setPlayerVolume(volume); }, [setPlayerVolume, volume]);
 
   // Derived, not stored: with nothing to sound there is no loop, and that is a
   // fact about the current mode rather than a state transition.
   const wouldSound = enabled && program.notes.length > 0;
+  const currentProgramReady = enabled && budget.withinBudget
+    && loadedProgramKey === program.key && playerReady;
+
+  /**
+   * Starts the accompaniment *where the paused playhead already is*.
+   *
+   * Native must finish its seek and web must reach its scheduled audio-clock
+   * boundary before `onPlaybackStarted` resumes the visual clock. Freezing
+   * first also makes changing listen mode while already playing phase-safe.
+   */
+  const start = useCallback(() => {
+    onPlaybackWillStart?.();
+    const now = scoreTimeMs?.() ?? loop.fromMs;
+    playPlayer(loopOffsetSeconds(loop, now), onPlaybackStarted);
+  }, [loop, onPlaybackStarted, onPlaybackWillStart, playPlayer, scoreTimeMs]);
+
+  const halt = useCallback(() => stopPlayer(), [stopPlayer]);
+
+  const transportDecision = backingTransportDecision({
+    requested: playing,
+    wouldSound,
+    withinBudget: budget.withinBudget,
+    loadedProgramKey,
+    programKey: program.key,
+    playerReady,
+    playerError,
+  });
+
+  useEffect(() => {
+    switch (transportDecision) {
+      case 'halt':
+        halt();
+        return;
+      case 'visual-only':
+        halt();
+        onPlaybackStarted?.();
+        return;
+      case 'start':
+        start();
+        return;
+      case 'wait':
+        // A requested sounding program is still loading. Keep the visual clock
+        // frozen rather than letting it get ahead before the adapter is ready.
+        onPlaybackWillStart?.();
+        halt();
+    }
+  }, [
+    transportDecision, transportRevision, start, halt,
+    onPlaybackStarted, onPlaybackWillStart,
+  ]);
 
   // An over-long loop is likewise a property of the current window, so it is
   // derived here instead of being pushed into state from inside an effect. It
   // outranks a stale player error: it is the reason there is no sound *now*.
   const error = (wouldSound && !budget.withinBudget ? budget.message : null)
-    ?? player.error;
+    ?? playerError;
 
   return {
-    ready: player.ready,
-    rendering: preparing || player.progress < 1,
-    progress: player.progress,
+    ready: currentProgramReady,
+    rendering: preparing || playerProgress < 1,
+    progress: playerProgress,
     error,
     audibleParts,
     hasSolo: soloParts.length > 0,

@@ -6,7 +6,7 @@
  * play no backing": handing over a rendered buffer meant somebody had to
  * synthesise the entire loop before a note could sound, which cost 47 MB and a
  * blocked JS thread on a long song, so the old code simply refused anything
- * over ninety seconds. 219 of the 258 bundled songs are longer than that.
+ * over ninety seconds. 229 of the 258 bundled songs are longer than that.
  *
  * With a program instead, each platform can do the cheapest thing it is
  * capable of. Web schedules Web Audio voices in a rolling window and never
@@ -49,9 +49,12 @@ export interface BackingPlayer {
    * `offsetSeconds` is where in the buffer to begin, and it is what keeps the
    * accompaniment under the playhead: press play three bars into the loop and
    * the audio has to start three bars in as well. Both adapters wrap the offset
-   * into the buffer, so a caller never has to bounds-check it.
+   * into the buffer, so a caller never has to bounds-check it. `onStarted`
+   * fires once platform playback is accepted/scheduled. Web reports its small
+   * remaining audio-clock lead so the visual transport can count down on the
+   * UI thread; native calls it after seek with zero delay.
    */
-  play: (offsetSeconds?: number) => void;
+  play: (offsetSeconds?: number, onStarted?: (delaySeconds?: number) => void) => void;
   stop: () => void;
   /** 0–1. */
   setVolume: (volume: number) => void;

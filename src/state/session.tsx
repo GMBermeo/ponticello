@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useMemo, useState } from 'react';
 
+import { ArrangementLevel } from '@/domain/arrangement';
+
 /**
  * Practice setup for the current piece.
  *
@@ -13,6 +15,8 @@ export interface PracticeSetup {
   loopToBar: number;
   /** Percentage of the written tempo, 40–120. */
   tempoPercent: number;
+  /** Bow/register detail derived from the stored full line. */
+  arrangementLevel: ArrangementLevel;
 }
 
 const DEFAULTS: PracticeSetup = {
@@ -29,6 +33,7 @@ const DEFAULTS: PracticeSetup = {
    * deliberate act, and the stepper is right there for it.
    */
   tempoPercent: 100,
+  arrangementLevel: 'Intermediate',
 };
 
 interface SessionContextValue {

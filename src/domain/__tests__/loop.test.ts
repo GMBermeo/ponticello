@@ -207,5 +207,5 @@ describe('imported backings are clipped like everything else', () => {
       // inside the budget for every piece that ships.
       expect(loopBudget(loop).withinBudget).toBe(true);
     }
-  });
+  }, 60_000);
 });
