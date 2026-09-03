@@ -44,6 +44,17 @@ export interface FingerboardProps {
   showLandmarks?: boolean;
   /** Print the note each tape gives on the active string. */
   showNoteNames?: boolean;
+  /**
+   * Faint dots for a set of stopping points — the notes of the song's key, or
+   * every note the song uses — so the player can see the shape of what they are
+   * about to play, or a key to improvise in, across all four strings.
+   */
+  noteOverlay?: readonly {
+    string: CelloString;
+    semitones: number;
+    pitchName: string;
+    isTonic: boolean;
+  }[];
   /** Highlight one stopped note. */
   active?: { string: CelloString; semitones: number; finger: CelloFinger } | null;
   /** Width of the left gutter that holds landmark labels, in design units. */
@@ -58,7 +69,7 @@ export interface FingerboardProps {
 
 export function Fingerboard({
   height, maxMm = 400, tapeSets, showTapes = true, showLandmarks = true,
-  showNoteNames = false, active = null, gutter = 46, compact = false,
+  showNoteNames = false, noteOverlay, active = null, gutter = 46, compact = false,
   invert = true,
 }: FingerboardProps) {
   const theme = useTheme();
@@ -165,6 +176,31 @@ export function Fingerboard({
             }}
           />
         )) : null}
+
+        {/* Faint scale/song overlay: stopping points across all four strings.
+            Drawn before the active note so the live marker sits on top. */}
+        {noteOverlay ? noteOverlay
+          .filter((marker) => stopDistanceMm(marker.semitones) <= maxMm)
+          .map((marker) => {
+            const dot = theme.s(compact ? (marker.isTonic ? 10 : 8) : (marker.isTonic ? 13 : 10));
+            const color = chrome.strings[marker.string];
+            return (
+              <View
+                key={`ov-${marker.string}-${marker.semitones}`}
+                style={{
+                  position: 'absolute',
+                  left: railX(marker.string) - dot / 2 + theme.rule(marker.string === 'C' ? 1.5 : 1),
+                  top: layout.y(stopDistanceMm(marker.semitones)) - dot / 2,
+                  width: dot,
+                  height: dot,
+                  borderRadius: dot / 2,
+                  backgroundColor: alpha(color, marker.isTonic ? 0.55 : 0.28),
+                  borderWidth: theme.rule(marker.isTonic ? 1.5 : 1),
+                  borderColor: alpha(color, marker.isTonic ? 0.9 : 0.5),
+                }}
+              />
+            );
+          }) : null}
 
         {/* The note under the hand right now. */}
         {active ? (

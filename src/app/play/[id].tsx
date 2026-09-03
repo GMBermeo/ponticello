@@ -19,10 +19,11 @@ import { usePitch } from '@/audio/usePitch';
 import { useBacking } from '@/audio/useBacking';
 import { ListenMode } from '@/audio/backing/types';
 import { OPEN_STRING_MIDI } from '@/domain/cello';
+import { detectSongKey, fingerboardMarkers, songPitchClasses } from '@/domain/key';
 import { practiceLoop } from '@/domain/loop';
 import { usePiece } from '@/state/usePiece';
 import { useSession } from '@/state/session';
-import { useSettings, VisionName } from '@/state/settings';
+import { NoteOverlayMode, useSettings, VisionName } from '@/state/settings';
 import { ThemeProvider, useTheme } from '@/theme/ThemeProvider';
 
 const VISION_SEGMENTS = [
@@ -42,6 +43,24 @@ const LISTEN_SEGMENTS = [
   { value: 'solo' as const, label: 'CELLO', hint: 'Listen: written cello part' },
   { value: 'both' as const, label: 'BOTH', hint: 'Listen: backing and cello' },
 ];
+
+/** Fingerboard note overlay mode switcher on the top bar. */
+const OVERLAY_SEGMENTS = [
+  { value: 'key' as const, label: 'KEY', hint: 'Show key notes for improvising' },
+  { value: 'song' as const, label: 'SONG', hint: 'Show all notes in song' },
+];
+
+/** Compact labels for the fingerboard note-overlay toggle. */
+const OVERLAY_LABEL: Record<NoteOverlayMode, string> = {
+  off: 'KEY',
+  key: 'KEY',
+  song: 'SONG',
+};
+
+/** Toggle between KEY and SONG notes overlay. */
+function nextOverlayMode(mode: NoteOverlayMode): NoteOverlayMode {
+  return mode === 'song' ? 'key' : 'song';
+}
 
 const KEEP_AWAKE_TAG = 'ponticello-play';
 
@@ -201,6 +220,27 @@ function PlayScreen() {
     return `${rounded > 0 ? '+' : rounded < 0 ? '−' : ''}${Math.abs(rounded)}¢`;
   }, [pitch.reading]);
 
+  /**
+   * Faint fingerboard overlay markers. `key` shows the whole detected key to
+   * improvise in; `song` shows only the pitch classes the piece actually uses.
+   * Capped at 19 semitones to match the 440 mm the panel draws, and recomputed
+   * only when the score or mode changes — never per frame. Computed before the
+   * no-score early return so the hook order is stable.
+   */
+  const songKey = useMemo(() => (score ? detectSongKey(score) : null), [score]);
+  const noteOverlay = useMemo(() => {
+    if (!score || !songKey || settings.noteOverlay === 'off') return undefined;
+    const preferFlats = score.metadata.preferFlats ?? songKey.name.includes('♭');
+    const classes = settings.noteOverlay === 'key'
+      ? songKey.scale
+      : songPitchClasses(score);
+    return fingerboardMarkers(classes, {
+      maxSemitones: 19,
+      tonic: songKey.tonic,
+      preferFlats,
+    });
+  }, [settings.noteOverlay, score, songKey]);
+
   if (!score) {
     return (
       <View style={{ flex: 1, backgroundColor: theme.chrome.bg, padding: theme.s(30) }}>
@@ -256,7 +296,7 @@ function PlayScreen() {
         */}
         <View style={narrow
           ? { flex: 1, minWidth: 0 }
-          : { minWidth: 0, maxWidth: theme.s(210) }}
+          : { minWidth: 0, maxWidth: theme.s(210), flexShrink: 1 }}
         >
           <Title size={15} numberOfLines={1}>{score.metadata.title}</Title>
           <Label size={10} numberOfLines={1}>
@@ -282,6 +322,12 @@ function PlayScreen() {
               segments={LISTEN_SEGMENTS}
               value={settings.listenMode}
               onChange={(listenMode: ListenMode) => update({ listenMode })}
+              compact
+            />
+            <Segmented
+              segments={OVERLAY_SEGMENTS}
+              value={settings.noteOverlay === 'song' ? 'song' : 'key'}
+              onChange={(noteOverlay: NoteOverlayMode) => update({ noteOverlay })}
               compact
             />
             <Grow />
@@ -331,6 +377,12 @@ function PlayScreen() {
               onChange={(listenMode: ListenMode) => update({ listenMode })}
               compact
             />
+            <Segmented
+              segments={OVERLAY_SEGMENTS}
+              value={settings.noteOverlay === 'song' ? 'song' : 'key'}
+              onChange={(noteOverlay: NoteOverlayMode) => update({ noteOverlay })}
+              compact
+            />
           </ScrollView>
           <Rule weight={2} />
         </>
@@ -347,8 +399,36 @@ function PlayScreen() {
             borderColor: theme.chrome.line,
           }}
         >
-          {/* The panel is narrower when the screen is; the label follows it. */}
-          <Label size={10} numberOfLines={1}>{narrow ? 'BOARD' : 'FINGERBOARD'}</Label>
+          {/* Panel header: label plus note-overlay toggle button. */}
+          <Row gap={6} style={{ alignItems: 'center' }}>
+            <Label size={10} numberOfLines={1}>{narrow ? 'BOARD' : 'FINGERBOARD'}</Label>
+            <Grow />
+            <Pressable
+              onPress={() => update({ noteOverlay: nextOverlayMode(settings.noteOverlay) })}
+              accessibilityRole="button"
+              accessibilityLabel={`Note overlay: ${OVERLAY_LABEL[settings.noteOverlay]}`}
+              hitSlop={8}
+              style={{
+                paddingHorizontal: theme.s(6),
+                paddingVertical: theme.s(3),
+                borderWidth: theme.rule(1),
+                borderColor: theme.chrome.accent,
+                backgroundColor: theme.chrome.accentWash,
+              }}
+            >
+              <Label
+                size={9}
+                color={theme.chrome.accent}
+              >
+                {OVERLAY_LABEL[settings.noteOverlay]}
+              </Label>
+            </Pressable>
+          </Row>
+          <Label size={9} color={theme.chrome.dim} numberOfLines={1}>
+            {settings.noteOverlay === 'song'
+              ? 'SONG NOTES'
+              : `KEY · ${(songKey?.name ?? '').toUpperCase()}`}
+          </Label>
           <View ref={boardRef} style={{ flex: 1, marginTop: theme.s(6) }} onLayout={onBoardLayout}>
             <Fingerboard
               height={boardSize.height}
@@ -356,6 +436,7 @@ function PlayScreen() {
               tapeSets={settings.tapeSets}
               showTapes={settings.showTapes}
               showLandmarks={settings.cueDensity === 'full'}
+              noteOverlay={noteOverlay}
               gutter={46}
               compact
               invert={settings.boardView === 'player'}

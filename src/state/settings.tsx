@@ -33,6 +33,16 @@ export type BoardView = 'player' | 'reader';
  */
 export type FlowAxis = 'vertical' | 'horizontal';
 
+/**
+ * Faint note overlay on the fingerboard panel.
+ *
+ * `off` shows only tapes and the live note. `key` shows every stopping point
+ * that belongs to the song's detected key — a shape to improvise in and learn
+ * the key. `song` shows only the notes the piece actually uses, so the player
+ * can see the whole hand map of what is coming before the bow moves.
+ */
+export type NoteOverlayMode = 'off' | 'key' | 'song';
+
 export interface Settings {
   /** Chrome for the play screen only; menus are always paper. */
   chrome: ChromeName;
@@ -72,6 +82,8 @@ export interface Settings {
   highwayAxis: FlowAxis;
   /** Which way notes travel on the tab stave. */
   tabAxis: FlowAxis;
+  /** Faint fingerboard overlay: the song's key, the song's notes, or nothing. */
+  noteOverlay: NoteOverlayMode;
 }
 
 const DEFAULTS: Settings = {
@@ -90,6 +102,7 @@ const DEFAULTS: Settings = {
   boardView: 'player',
   highwayAxis: 'vertical',
   tabAxis: 'horizontal',
+  noteOverlay: 'key',
 };
 
 const STORAGE_KEY = 'ponticello:settings:v1';
@@ -117,6 +130,9 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       .then((raw) => {
         if (cancelled || !raw) return;
         const stored = JSON.parse(raw) as Partial<Settings>;
+        if (stored.noteOverlay === 'off' || !stored.noteOverlay) {
+          stored.noteOverlay = 'key';
+        }
         // Merge rather than replace: a settings key added in a later version
         // must not come back undefined for someone upgrading.
         setSettings((current) => ({ ...current, ...stored }));
