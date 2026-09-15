@@ -28,7 +28,7 @@ export interface MicSource {
 /** Called with mono float samples in [-1, 1] as they arrive. */
 export type SampleSink = (samples: Float32Array) => void;
 
-export const TARGET_SAMPLE_RATE = 48000;
+export const TARGET_SAMPLE_RATE = 16000;
 
 /** Mixes interleaved multi-channel PCM down to mono in place-ish. */
 export function toMono(interleaved: Float32Array, channels: number): Float32Array {

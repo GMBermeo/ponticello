@@ -7,8 +7,7 @@ import {
 import { FONT } from '@/theme/tokens';
 
 /**
- * Flat modernist primitives: hard rules instead of shadows, square corners,
- * one accent. Every size arrives in design units and is converted through the
+ * Shared text, spacing, and musical cues for the matte practice interface. Every size arrives in design units and is converted through the
  * theme, so a component never needs to know what device it is on.
  */
 

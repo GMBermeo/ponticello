@@ -77,6 +77,27 @@ const THUMB_FRAME: Record<number, CelloFinger> = { 0: 'T', 1: '1', 2: '1', 3: '2
 const POSITIONS_ALLOWING_FORWARD: CelloPosition[] = ['Half', '1st', '2nd', '3rd', '4th'];
 const POSITIONS_ALLOWING_BACKWARD: CelloPosition[] = ['1st', '2nd', '3rd', '4th'];
 
+/**
+ * Anchors the left hand can be resting at while an open string sounds.
+ *
+ * An open string is not a hand position — nothing is stopping the string, so
+ * the hand is wherever the music left it. Modelling it as first position (the
+ * one anchor it used to get) charged a shift down to the nut and another back
+ * up for a note the hand never touches, and the solver responded the only way
+ * it could: by refusing open strings in any passage above first position and
+ * taking the pitch high up a neighbouring string instead. Open D at the top of
+ * the C string, in seventh position, with the open D string sitting right
+ * there.
+ *
+ * Offering the open string at every anchor another state can occupy lets the
+ * path keep the hand where it already is, and lets an open note pay for a
+ * shift with its own duration — which is what open strings are *for*.
+ */
+const OPEN_STRING_ANCHORS: readonly number[] = [...new Set([
+  ...Object.values(POSITION_BASE_SEMITONES),
+  ...Array.from({ length: MAX_SEMITONES_ON_STRING - 11 }, (_, i) => 12 + i),
+])].sort((a, b) => a - b);
+
 export function candidateStates(midi: number): CelloState[] {
   const out: CelloState[] = [];
   const key = new Set<string>();
@@ -89,7 +110,12 @@ export function candidateStates(midi: number): CelloState[] {
     const semitones = midi - OPEN_STRING_MIDI[string];
 
     if (semitones === 0) {
-      add({ string, position: '1st', finger: '0', extension: 'none', baseSemitones: 2 });
+      // Written as first position throughout, because that is how an open
+      // string is notated and read; `baseSemitones` is the part that varies,
+      // and it is the only part the shift model looks at.
+      for (const base of OPEN_STRING_ANCHORS) {
+        add({ string, position: '1st', finger: '0', extension: 'none', baseSemitones: base });
+      }
       continue;
     }
     if (semitones < 0 || semitones > MAX_SEMITONES_ON_STRING) continue;
@@ -141,26 +167,36 @@ export interface CostWeights {
 }
 
 /**
- * Weights for the bundled library, where staying put beats everything.
+ * Weights for anything this app arranges, where staying put beats everything.
  *
  * `DEFAULT_WEIGHTS` balances shifting against the things that make a *phrase*
  * sound good — not taking a long note on an open string it cannot vibrate, not
  * stretching when the closed frame would do. That is the right trade for a
- * player choosing a fingering.
+ * player choosing a fingering for themselves.
  *
- * It is the wrong trade for this library. Every bundled arrangement is folded
- * into MIDI 36–63, so the whole of it is reachable without leaving first
- * position, and under the default weights the solver spends 487 metres of hand
- * travel across the 258 songs where a first-position mapping spends 351 — it
- * climbs to dodge an open string on a long note. For a beginner reading a
- * scrolling highway, a hand that stays where it is beats a slightly better
- * timbre every time.
+ * It is the wrong trade for a library somebody is learning from. Under the
+ * default weights the solver climbs the neck to dodge an open string on any
+ * note over 300 ms — a quarter note at a walking tempo — and across the 258
+ * bundled songs it refused **37 % of the open strings available to it**,
+ * answering an open A with a fourth finger in second position on the D string.
+ * That is the wrong answer for a player with tapes on the fingerboard, for
+ * whom the open string is the reference pitch, and it was the direct cause of
+ * "instead of playing 0 on a string it's playing 5 on another".
  *
  * So shifting is weighted heavily enough here that the hand moves only when the
- * alternative is genuinely unplayable, while the solver keeps everything else it
- * is good at: choosing the finger, the string and the extension.
+ * alternative is genuinely unplayable, the open-string penalty is cut to a
+ * token, and the solver keeps everything else it is good at: choosing the
+ * finger, the string and the extension.
+ *
+ * This was named `ARRANGEMENT_WEIGHTS` and described itself as the weighting
+ * "for the bundled library" while every path that actually built the library —
+ * `build-library.ts`, `inflateScore`, `arrangeScoreForLevel`, `importScore`,
+ * `convert-score` — silently took `DEFAULT_WEIGHTS`. A name describing the
+ * mechanism instead of the role is how a decision gets made and then not
+ * applied, so the name now says what it is for, and
+ * `fingering.test.ts` pins the call sites.
  */
-export const MINIMAL_TRAVEL_WEIGHTS: CostWeights = {
+export const ARRANGEMENT_WEIGHTS: CostWeights = {
   openStringOnLongNote: 0.25,
   longNoteMs: 300,
   forwardExtension: 1.2,
@@ -180,6 +216,14 @@ export const DEFAULT_WEIGHTS: CostWeights = {
   heelCrossing: 1.5,
 };
 
+/**
+ * Comfort of holding the hand at an anchor with nothing stopped under it,
+ * on the same 0.3-per-position scale the neck positions use.
+ */
+function idleAnchorCost(semitones: number): number {
+  return Math.max(0, semitones - POSITION_BASE_SEMITONES['1st']) * 0.3;
+}
+
 export function emissionCost(
   state: CelloState, note: RawNoteEvent, w: CostWeights = DEFAULT_WEIGHTS,
 ): number {
@@ -198,6 +242,11 @@ export function emissionCost(
 
   if (state.finger === '0') {
     cost += note.durationMs < w.longNoteMs ? 0.2 : w.openStringOnLongNote;
+    // The hand is still somewhere. An open string costs no shift to reach —
+    // nothing is stopped — but holding the arm out at seventh position while
+    // no finger is down is a posture, not a rest, and left uncharged the
+    // solver would open a line up the neck for nothing and then stay there.
+    cost += idleAnchorCost(handSemitones(state));
   } else if (state.finger === '4' && state.position === 'Thumb') {
     cost += w.fourthFingerInThumb;
   }
@@ -215,6 +264,14 @@ const CROSSING_COST = [0, 1, 3.5, 7];
  */
 const REFERENCE_SHIFT_MM = stopDistanceMm(POSITION_BASE_SEMITONES['4th'])
   - stopDistanceMm(POSITION_BASE_SEMITONES['1st']);
+
+/**
+ * The anchor at which the hand leaves the neck.
+ *
+ * Fourth position sits at 7 semitones and fifth at 9, so anything from 8
+ * upwards has passed the heel and the thumb has to come off the neck.
+ */
+const NECK_HEEL_SEMITONES = POSITION_BASE_SEMITONES['4th'] + 1;
 
 export function transitionCost(
   from: CelloState, to: CelloState, deltaTMs: number, w: CostWeights = DEFAULT_WEIGHTS,
@@ -235,9 +292,14 @@ export function transitionCost(
   // Effort grows with the square of the distance and shrinks with the time
   // available: the same shift is trivial over a half note and violent over a
   // semiquaver.
-  const p1 = POSITION_ORDER[from.position];
-  const p2 = POSITION_ORDER[to.position];
-  const crossesHeel = (p1 <= 4 && p2 >= 5) || (p1 >= 5 && p2 <= 4);
+  //
+  // The heel is read off the hand's anchor, not off the position label. Those
+  // agree for every stopped note — fourth position anchors below the heel and
+  // fifth above it — and they disagree for an open string, which is written as
+  // first position wherever the hand happens to be waiting. Labels would call
+  // every open string a trip past the heel and back.
+  const crossesHeel = (handSemitones(from) < NECK_HEEL_SEMITONES)
+    !== (handSemitones(to) < NECK_HEEL_SEMITONES);
   const shift = ((distance ** 2) / Math.pow(deltaTSec, 0.8)) * (crossesHeel ? w.heelCrossing : 1) * w.shift;
   return crossing + shift;
 }

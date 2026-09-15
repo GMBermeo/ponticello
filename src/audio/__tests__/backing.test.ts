@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  backingFromMidi, generateAccompaniment, inferChord, instrumentForProgram, isMinorKey,
+  arrangementBackingParts, backingFromMidi, generateAccompaniment, inferChord, instrumentForProgram, isMinorKey,
   soloPartFromScore, tonicPitchClass, trackDurationMs,
 } from '@/domain/backing';
 import { MidiTrack } from '@/domain/midi';
@@ -296,5 +296,20 @@ describe('trackDurationMs', () => {
     const parts = generateAccompaniment(BWV1007_PRELUDE, { style: 'chords', fromBar: 1, toBar: 2 });
     const expected = BWV1007_PRELUDE.measures[0].durationMs + BWV1007_PRELUDE.measures[1].durationMs;
     expect(trackDurationMs(parts)).toBeGreaterThan(expected * 0.9);
+  });
+});
+
+
+describe('backing while the cello accompanies', () => {
+  it('keeps the lead audible for bass/drone levels and excludes it for melody levels', () => {
+    const lead = soloPartFromScore(D_MAJOR_TWO_STRINGS);
+    const accompaniment = { ...lead, id: 'bass', role: 'accompaniment' as const };
+    const backing = { id: 'test', name: 'Test', source: 'imported' as const,
+      bpm: 60, durationMs: 4000, parts: [lead, accompaniment] };
+    for (const arrangementRole of ['roots', 'bass'] as const) {
+      const score = { ...D_MAJOR_TWO_STRINGS, metadata: { ...D_MAJOR_TWO_STRINGS.metadata, arrangementRole } };
+      expect(arrangementBackingParts(backing, score)).toEqual([lead, accompaniment]);
+    }
+    expect(arrangementBackingParts(backing, D_MAJOR_TWO_STRINGS)).toEqual([accompaniment]);
   });
 });

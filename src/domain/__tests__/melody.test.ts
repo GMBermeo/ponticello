@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { bestOctaveShift, chooseMelodyTrack, melodyMetrics, melodyTrackScore } from '@/domain/melody';
+import {
+  bestOctaveShift, bestOctaveShiftToRange, chooseMelodyTrack, melodyMetrics, melodyTrackScore,
+} from '@/domain/melody';
 import { MidiNote, MidiTrack } from '@/domain/midi';
 
 /** A track descriptor with sensible defaults. */
@@ -52,6 +54,32 @@ describe('bestOctaveShift', () => {
   it('prefers the smaller move when two shifts fit equally', () => {
     // A single pitch fits in several octaves; staying put must win.
     expect(bestOctaveShift([48]).shift).toBe(0);
+  });
+
+  it('brings a line down when it fits equally well an octave lower', () => {
+    // A vocal line at E4–E5. It fits the solo compass perfectly where it is,
+    // and where it is, is thumb position for every note of it. Sixty songs in
+    // the library were placed exactly this way, because the old objective
+    // counted only how much of the line landed inside the range.
+    const vocal = [64, 67, 69, 71, 72, 71, 69, 67, 64];
+    const { shift, fit } = bestOctaveShiftToRange(vocal, 36, 81);
+    expect(shift).toBe(-12);
+    expect(fit).toBe(1);
+  });
+
+  it('leaves a bass line at the bottom of the instrument alone', () => {
+    // Sitting below the ceiling is free, so nothing is ever lifted *up* out of
+    // its register to reach the singing range. Both +12 and +24 fit; the
+    // smaller move keeps a bass line a bass line.
+    expect(bestOctaveShiftToRange([24, 26, 28, 29], 36, 81).shift).toBe(12);
+  });
+
+  it('will not trade away a large amount of fit for register', () => {
+    // C4–C6 fits at -12 with a couple of notes over the top, and fully at -24.
+    // Coming down two octaves is right here; coming down when it would push
+    // half the line off the bottom of the C string is not.
+    const wide = [36, 40, 43, 48, 52, 55, 60];
+    expect(bestOctaveShiftToRange(wide, 36, 81).shift).toBe(0);
   });
 });
 

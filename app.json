@@ -2,7 +2,7 @@
   "expo": {
     "name": "Ponticello",
     "slug": "ponticello",
-    "version": "1.4.1",
+    "version": "1.5.0",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "ponticello",
@@ -10,10 +10,10 @@
     "ios": {
       "icon": "./assets/expo.icon",
       "bundleIdentifier": "com.bermeo.ponticello",
-      "buildNumber": "6"
+      "buildNumber": "7"
     },
     "android": {
-      "versionCode": 6,
+      "versionCode": 7,
       "adaptiveIcon": {
         "backgroundColor": "#f3f2f2",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

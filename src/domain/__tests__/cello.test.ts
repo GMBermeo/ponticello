@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  centsBetween, defaultStringFor, frequencyToMidi, judgeIntonation, LANDMARKS,
+  calculateFretboardMaxMm, CELLO_NOTES, centsBetween, defaultStringFor, DISPLAY_STRING_ORDER,
+  frequencyToMidi, getCelloNote, judgeIntonation, LANDMARKS,
   midiAt, midiToFrequency, midiToPitchName, OPEN_STRING_MIDI, semitonesAtMm,
   semitonesFor, stopDistanceMm, STRING_LENGTH_MM,
 } from '../cello';
@@ -94,5 +95,71 @@ describe('notes on the fingerboard', () => {
     expect(defaultStringFor(59)).toBe('A');  // B3
     expect(defaultStringFor(43)).toBe('G');  // G2
     expect(defaultStringFor(36)).toBe('C');  // C2
+  });
+
+  it('orders display strings from left to right as A-D-G-C', () => {
+    expect(DISPLAY_STRING_ORDER).toEqual(['A', 'D', 'G', 'C']);
+  });
+});
+
+describe('CELLO_NOTES and score notation catalog', () => {
+  it('contains valid note info across standard cello range C2 to C6', () => {
+    const c2 = CELLO_NOTES[36];
+    expect(c2).toBeDefined();
+    expect(c2?.pitchName).toBe('C2');
+    expect(c2?.staffStep).toBe(-4);
+    expect(c2?.ledgerLines).toEqual([-2, -4]);
+
+    const d3 = CELLO_NOTES[50];
+    expect(d3).toBeDefined();
+    expect(d3?.pitchName).toBe('D3');
+    expect(d3?.staffStep).toBe(4);
+    expect(d3?.ledgerLines).toEqual([]);
+
+    const c4 = CELLO_NOTES[60];
+    expect(c4).toBeDefined();
+    expect(c4?.pitchName).toBe('C4');
+    expect(c4?.staffStep).toBe(10);
+    expect(c4?.ledgerLines).toEqual([10]);
+  });
+
+  it('getCelloNote respects flat spellings when requested', () => {
+    const dFlat = getCelloNote(49, true);
+    expect(dFlat.pitchName).toBe('Db3');
+    expect(dFlat.accidental).toBe('♭');
+
+    const cSharp = getCelloNote(49, false);
+    expect(cSharp.pitchName).toBe('C#3');
+    expect(cSharp.accidental).toBe('♯');
+  });
+});
+
+describe('calculateFretboardMaxMm', () => {
+  it('zooms to ~220 mm when only 1st position / low semitones are used', () => {
+    const notes = [
+      { string: 'D' as const, midiNumber: 50 }, // open D (0 semitones)
+      { string: 'D' as const, midiNumber: 52 }, // E (2 semitones)
+      { string: 'D' as const, midiNumber: 55 }, // G (5 semitones)
+    ];
+    expect(calculateFretboardMaxMm(notes)).toBe(220);
+  });
+
+  it('zooms to ~330 mm when up to 4th position is used', () => {
+    const notes = [
+      { string: 'D' as const, midiNumber: 50 },
+      { string: 'D' as const, midiNumber: 57 }, // A (7 semitones - 4th pos)
+    ];
+    expect(calculateFretboardMaxMm(notes)).toBe(330);
+  });
+
+  it('uses full 440 mm when thumb position or high semitones are used', () => {
+    const notes = [
+      { string: 'A' as const, midiNumber: 69, position: 'Thumb' as const },
+    ];
+    expect(calculateFretboardMaxMm(notes)).toBe(440);
+  });
+
+  it('defaults to 440 mm for empty notes', () => {
+    expect(calculateFretboardMaxMm([])).toBe(440);
   });
 });

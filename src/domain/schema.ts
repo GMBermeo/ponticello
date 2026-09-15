@@ -56,6 +56,8 @@ export interface CelloSongMetadata {
   title: string;
   composer: string;
   arranger?: string;
+  /** When the player accompanies, retain the source melody in the backing. */
+  arrangementRole?: 'melody' | 'bass' | 'roots';
   origin: string;
   keySignature: string;
   timeSignature: string;

@@ -1,9 +1,15 @@
 /**
  * Design tokens.
  *
- * The look is flat modernist: hard rules instead of shadows, square corners,
- * one accent, and a type scale that leans on weight and letter-spacing rather
- * than size. Nothing here knows about screen size — see `scale.ts` for that.
+ * A cool, matte practice surface, quiet separators, readable type, and one
+ * blue accent family reserved for actions and selection. Musical string and
+ * tape colours retain their established meaning. Nothing here knows about
+ * screen size — see `scale.ts` for that.
+ *
+ * The blues are the brand set — #165788, #274490, #1D2D5C, #1E3765 — used
+ * where they hold contrast: the deep pair as the dark practice grounds, the
+ * mid pair as the accent on paper. On a navy ground the accent has to be a
+ * lighter tint of the same hue, or it disappears into the background.
  */
 
 import { CelloString } from '@/domain/cello';
@@ -11,12 +17,23 @@ import { TapeColor } from '@/domain/tapes';
 
 // ─── Base palette ────────────────────────────────────────────────────────────
 
-export const PAPER = '#f3f2f2';
-export const INK = '#201e1d';
-export const SURFACE = '#eae9e9';
-export const ACCENT = '#ec3013';
-export const ACCENT_DARK = '#ae1800';
-export const ACCENT_WASH = '#ffe0d9';
+/** The brand blues, by role. */
+export const BLUE = {
+  ocean: '#165788',
+  cobalt: '#274490',
+  navy: '#1D2D5C',
+  deep: '#1E3765',
+} as const;
+
+export const PAPER = '#f6f7f9';
+export const INK = '#131a2a';
+export const SURFACE = '#eceff4';
+/** 7.4:1 on paper — body-text contrast, so it is safe as a text colour too. */
+export const ACCENT = BLUE.ocean;
+export const ACCENT_DARK = BLUE.navy;
+export const ACCENT_WASH = '#e2ebf4';
+/** Accent tint for navy grounds: the ocean hue, lifted to 8:1 on `BLUE.navy`. */
+const ACCENT_ON_NAVY = '#a9c8ec';
 
 /**
  * String hues.
@@ -27,7 +44,7 @@ export const ACCENT_WASH = '#ffe0d9';
  * here because React Native's style engine takes hex, not colour functions.
  */
 export const STRING_COLOR_MUTED: Record<CelloString, string> = {
-  C: '#ba2b2e', // oklch(0.52 0.18 25)  — agrees with the accent red
+  C: '#ba2b2e', // oklch(0.52 0.18 25)
   G: '#9d6400', // oklch(0.55 0.14 78)
   D: '#00793d', // oklch(0.50 0.14 155)
   A: '#6250b2', // oklch(0.50 0.15 288)
@@ -55,7 +72,7 @@ export const TAPE_COLOR_ON_DARK: Record<TapeColor, string> = {
   green: '#3bb360',
   red: '#e0524a',
   orange: '#e08b2c',
-  white: '#f3f2f2',
+  white: '#f7f6f2',
 };
 
 export const TAPE_COLOR_ON_PAPER: Record<TapeColor, string> = {
@@ -101,9 +118,9 @@ export const CHROMES: Record<ChromeName, Chrome> = {
     bg: PAPER,
     surface: SURFACE,
     ink: INK,
-    dim: 'rgba(32,30,29,0.55)',
-    line: 'rgba(32,30,29,0.40)',
-    lineSoft: 'rgba(32,30,29,0.16)',
+    dim: '#586173',
+    line: '#8b94a4',
+    lineSoft: '#dce1e9',
     accent: ACCENT,
     accentWash: ACCENT_WASH,
     glow: false,
@@ -113,14 +130,14 @@ export const CHROMES: Record<ChromeName, Chrome> = {
   quiet: {
     name: 'quiet',
     dark: true,
-    bg: INK,
-    surface: '#2b2928',
-    ink: PAPER,
-    dim: 'rgba(243,242,242,0.55)',
-    line: 'rgba(243,242,242,0.36)',
-    lineSoft: 'rgba(243,242,242,0.15)',
-    accent: '#ff563c',
-    accentWash: 'rgba(255,86,60,0.18)',
+    bg: BLUE.navy,
+    surface: BLUE.deep,
+    ink: '#f3f6fb',
+    dim: '#b8c3d9',
+    line: 'rgba(243,246,251,0.34)',
+    lineSoft: 'rgba(243,246,251,0.14)',
+    accent: ACCENT_ON_NAVY,
+    accentWash: BLUE.cobalt,
     glow: false,
     strings: STRING_COLOR_HOT,
     tapes: TAPE_COLOR_ON_DARK,
@@ -128,14 +145,14 @@ export const CHROMES: Record<ChromeName, Chrome> = {
   neon: {
     name: 'neon',
     dark: true,
-    bg: '#100f0f',
-    surface: '#1c1a19',
-    ink: '#f8f4f4',
-    dim: 'rgba(248,244,244,0.55)',
-    line: 'rgba(248,244,244,0.34)',
-    lineSoft: 'rgba(248,244,244,0.14)',
-    accent: '#ff563c',
-    accentWash: 'rgba(255,86,60,0.22)',
+    bg: '#0a0f1e',
+    surface: '#131b33',
+    ink: '#f5f7fc',
+    dim: '#b5bdd0',
+    line: 'rgba(245,247,252,0.32)',
+    lineSoft: 'rgba(245,247,252,0.13)',
+    accent: '#8db8ef',
+    accentWash: BLUE.deep,
     glow: true,
     strings: STRING_COLOR_HOT,
     tapes: TAPE_COLOR_ON_DARK,

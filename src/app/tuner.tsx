@@ -1,11 +1,12 @@
-import { useEffect, useMemo } from 'react';
-import { View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { Platform, View } from 'react-native';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 
+import { Button } from '@/components/ui/controls';
 import { LevelMeter } from '@/components/play/Meters';
-import { Body, Grow, Kicker, Label, Num, Row, Rule, Stack, Title } from '@/components/ui/primitives';
+import { Body, Grow, Label, Num, Row, Rule, Stack, Title } from '@/components/ui/primitives';
 import { Screen, ScreenHeader } from '@/components/ui/Screen';
-import { usePitch } from '@/audio/usePitch';
+import { usePitch, usePitchReading } from '@/audio/usePitch';
 import {
   A4_HZ, CENTS_PERFECT, midiToFrequency, midiToPitchName, OPEN_STRING_MIDI,
   STRING_NUMERAL, STRING_ORDER, CelloString,
@@ -26,12 +27,13 @@ const SPAN = 50;
 export default function TunerScreen() {
   const theme = useTheme();
   const { chrome } = theme;
-  const pitch = usePitch(true, { tunerMode: true });
+  const [micEnabled, setMicEnabled] = useState(Platform.OS !== 'web');
+  const pitch = usePitch(micEnabled, { tunerMode: true });
 
   // No target — report whatever is sounding, and let the player aim at it.
   useEffect(() => { pitch.setTarget(null); }, [pitch]);
 
-  const { reading } = pitch;
+  const reading = usePitchReading(pitch);
 
   /** Which open string the player is closest to, so its row can light up. */
   const nearestString = useMemo<CelloString | null>(() => {
@@ -61,138 +63,55 @@ export default function TunerScreen() {
 
   return (
     <Screen scroll={false} padded={false}>
-      <ScreenHeader backLabel="LIBRARY" meta={`A = ${A4_HZ} Hz`} />
-
-      <Screen padded={false}>
-        <Stack padX={22} padY={18} gap={8}>
-          <Kicker size={10}>OPEN STRING TUNER · MPM / NSDF</Kicker>
-          <Row gap={16} style={{ alignItems: 'flex-end' }}>
-            <Title size={78} style={{ lineHeight: theme.font(78) }}>
-              {reading.heard ?? '—'}
-            </Title>
-            <View style={{ paddingBottom: theme.s(10) }}>
-              <Num size={16}>{reading.voiced ? `${reading.frequency.toFixed(1)} Hz` : '— Hz'}</Num>
-              <Label size={11} style={{ textTransform: 'none' }}>
-                {reading.heard === null
-                  ? 'bow an open string'
-                  : `target ${midiToFrequency(midiFromName(reading.heard)).toFixed(2)} Hz`}
-              </Label>
+      <ScreenHeader backLabel="Library" meta={`A = ${A4_HZ} Hz`} />
+      <Screen>
+        <Stack padY={24} gap={8}>
+          <Title accessibilityRole="header" size={30}>Tune your cello</Title>
+          <Body size={15} color={chrome.dim}>Bow one open string at a time, starting with low C.</Body>
+        </Stack>
+        <View style={{ flexDirection: theme.scale.compact ? 'column' : 'row', gap: theme.s(24) }}>
+        <View style={{ flex: theme.scale.compact ? undefined : 1, backgroundColor: chrome.surface, borderRadius: theme.s(12), padding: theme.s(24), gap: theme.s(20) }}>
+          <Row gap={16} style={{ alignItems: 'center' }}>
+            <View style={{ flex: 1 }}>
+              <Title size={72} style={{ lineHeight: theme.font(80) }}>{reading.heard ?? '—'}</Title>
+              <Body size={13} color={chrome.dim}>{reading.voiced ? `${reading.frequency.toFixed(1)} Hz` : pitch.mic.live ? 'Ready when you are' : micEnabled ? 'Waiting for microphone' : 'Enable the microphone to begin'}</Body>
             </View>
-            <Grow />
-            <View style={{ alignItems: 'flex-end', paddingBottom: theme.s(8) }}>
-              <Num size={36} color={color}>{centsText}</Num>
-              <Label size={10} color={color}>{verdictWord(reading.verdict)}</Label>
+            <View style={{ alignItems: 'flex-end' }}>
+              <Num size={30} color={color}>{centsText}</Num>
+              <Label size={11} color={color}>{micEnabled ? verdictWord(reading.verdict) : 'Mic off'}</Label>
             </View>
           </Row>
-        </Stack>
-        <Rule />
-
-        {/* Horizontal meter. */}
-        <Stack padX={22} padY={18} gap={6}>
-          <View style={{ height: theme.s(70), borderBottomWidth: theme.rule(2), borderColor: chrome.line }}>
-            <View
-              style={{
-                position: 'absolute',
-                left: `${50 - (CENTS_PERFECT / SPAN) * 50}%`,
-                right: `${50 - (CENTS_PERFECT / SPAN) * 50}%`,
-                top: 0,
-                bottom: 0,
-                backgroundColor: chrome.surface,
-              }}
-            />
-            {[-50, -25, 0, 25, 50].map((value) => (
-              <View
-                key={value}
-                style={{
-                  position: 'absolute',
-                  left: `${50 + (value / SPAN) * 50}%`,
-                  bottom: 0,
-                  width: theme.rule(1),
-                  height: theme.s(value === 0 ? 70 : 22),
-                  backgroundColor: value === 0 ? chrome.ink : chrome.line,
-                }}
-              />
-            ))}
-            {reading.voiced ? (
-              <Animated.View
-                style={[
-                  { position: 'absolute', top: 0, bottom: 0, width: theme.rule(4), backgroundColor: color },
-                  needle,
-                ]}
-              />
-            ) : null}
+          {!micEnabled ? <Button label="Enable microphone" tone="accent" onPress={() => setMicEnabled(true)} style={{ alignSelf: 'flex-start' }} /> : null}
+          <View style={{ height: theme.s(60), borderBottomWidth: theme.rule(1), borderColor: chrome.line }}>
+            <View style={{ position: 'absolute', left: `${50 - (CENTS_PERFECT / SPAN) * 50}%`, right: `${50 - (CENTS_PERFECT / SPAN) * 50}%`, top: 0, bottom: 0, backgroundColor: chrome.lineSoft }} />
+            {[-50, -25, 0, 25, 50].map((value) => <View key={value} style={{ position: 'absolute', left: `${50 + (value / SPAN) * 50}%`, bottom: 0, width: theme.rule(1), height: theme.s(value === 0 ? 60 : 18), backgroundColor: value === 0 ? chrome.ink : chrome.line }} />)}
+            {reading.voiced ? <Animated.View style={[{ position: 'absolute', top: 0, bottom: 0, width: theme.rule(3), backgroundColor: color }, needle]} /> : null}
           </View>
-          <Row>
-            <Label size={9}>−50¢</Label>
-            <Grow />
-            <Label size={9}>{`±${CENTS_PERFECT}¢ IN TUNE`}</Label>
-            <Grow />
-            <Label size={9}>+50¢</Label>
-          </Row>
-        </Stack>
-        <Rule weight={2} />
-
-        {/* The four open strings. */}
-        {STRING_ORDER.map((string) => {
-          const midi = OPEN_STRING_MIDI[string];
-          const target = midiToFrequency(midi);
-          const isNear = nearestString === string;
-          const cents = isNear && reading.voiced
-            ? 1200 * Math.log2(reading.frequency / target)
-            : null;
-          return (
-            <View key={string}>
-              <Row
-                padX={22}
-                padY={14}
-                gap={14}
-                style={{ backgroundColor: isNear ? chrome.surface : 'transparent' }}
-              >
-                <View style={{ width: theme.s(6), height: theme.s(36), backgroundColor: chrome.strings[string] }} />
-                <View style={{ flex: 1 }}>
-                  <Title size={18}>{`${midiToPitchName(midi)} · ${STRING_NUMERAL[string]}`}</Title>
-                  <Label size={10}>
-                    {string === 'C'
-                      ? `${target.toFixed(2)} HZ · WEAK FUNDAMENTAL — READ ON THE LOW BAND`
-                      : `${target.toFixed(2)} HZ`}
-                  </Label>
-                </View>
-                <Num size={15} color={isNear ? chrome.ink : chrome.dim}>
-                  {isNear && reading.voiced ? reading.frequency.toFixed(2) : '—'}
+          <Row><Body size={12} color={chrome.dim}>Flat</Body><Grow /><Body size={12} color={chrome.dim}>In tune</Body><Grow /><Body size={12} color={chrome.dim}>Sharp</Body></Row>
+        </View>
+        <Stack padY={theme.scale.compact ? 0 : 8} gap={8} style={{ flex: theme.scale.compact ? undefined : 1 }}>
+          <Row><Label size={11}>Open strings</Label><Grow /><Body size={12} color={chrome.dim}>C → G → D → A</Body></Row>
+          {STRING_ORDER.map((string) => {
+            const midi = OPEN_STRING_MIDI[string];
+            const target = midiToFrequency(midi);
+            const isNear = nearestString === string;
+            const cents = isNear && reading.voiced ? 1200 * Math.log2(reading.frequency / target) : null;
+            return <View key={string}>
+              <Row padY={10} padX={8} gap={14} style={{ borderRadius: theme.s(8), backgroundColor: isNear ? chrome.surface : 'transparent' }}>
+                <View style={{ width: theme.s(38), height: theme.s(38), borderRadius: theme.s(19), backgroundColor: chrome.surface, alignItems: 'center', justifyContent: 'center' }}><Title size={20} color={chrome.strings[string]}>{string}</Title></View>
+                <View style={{ flex: 1 }}><Title size={15}>{`${midiToPitchName(midi)} · String ${STRING_NUMERAL[string]}`}</Title><Body size={12} color={chrome.dim}>{target.toFixed(2)} Hz</Body></View>
+                <Num size={15} color={cents !== null && Math.abs(cents) <= CENTS_PERFECT ? intonationColor('perfect', chrome) : chrome.dim}>
+                  {cents === null ? '—' : Math.abs(cents) <= CENTS_PERFECT ? 'In tune' : `${cents > 0 ? '+' : '−'}${Math.abs(Math.round(cents))}¢`}
                 </Num>
-                <View style={{ width: theme.s(64), alignItems: 'flex-end' }}>
-                  <Num
-                    size={14}
-                    color={cents === null
-                      ? chrome.dim
-                      : Math.abs(cents) <= CENTS_PERFECT
-                        ? intonationColor('perfect', chrome)
-                        : chrome.accent}
-                  >
-                    {cents === null
-                      ? '—'
-                      : Math.abs(cents) <= CENTS_PERFECT
-                        ? '✓'
-                        : `${cents > 0 ? '+' : '−'}${Math.abs(Math.round(cents))}¢`}
-                  </Num>
-                </View>
-              </Row>
-              <Rule />
-            </View>
-          );
-        })}
-
-        <Stack padX={22} padY={16} gap={10}>
-          <Row gap={12}>
-            <LevelMeter level={pitch.level} height={16} label="INPUT LEVEL" />
-          </Row>
-          {pitch.mic.error === null ? null : (
-            <Body size={13} color={chrome.accent}>{pitch.mic.error}</Body>
-          )}
-          <Body size={12} color={chrome.dim}>
-            Tune from the C string up. Each string you tighten pulls the others slightly flat,
-            so go round twice.
-          </Body>
+              </Row><Rule />
+            </View>;
+          })}
+        </Stack>
+        </View>
+        <Stack padY={20} gap={10}>
+          <LevelMeter level={pitch.level} height={16} label="Microphone input" />
+          {pitch.mic.error === null ? null : <Body size={13} color={chrome.accent}>{pitch.mic.error}</Body>}
+          <Body size={13} color={chrome.dim}>Make small adjustments, then check all four strings again.</Body>
         </Stack>
       </Screen>
     </Screen>
@@ -207,14 +126,4 @@ function verdictWord(verdict: string | null): string {
     case 'miss': return 'OUT';
     default: return 'LISTENING';
   }
-}
-
-/** Scientific pitch name back to a MIDI number, for the target readout. */
-function midiFromName(name: string): number {
-  const letters: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
-  const match = /^([A-G])(#|b)?(-?\d+)$/.exec(name);
-  if (!match) return 69;
-  const [, letter, accidental, octave] = match;
-  const offset = accidental === '#' ? 1 : accidental === 'b' ? -1 : 0;
-  return (Number(octave) + 1) * 12 + letters[letter] + offset;
 }

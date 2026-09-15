@@ -435,9 +435,7 @@ export function Callout({ title, children }: { title: string; children: React.Re
   return (
     <View
       style={{
-        borderLeftWidth: theme.rule(3),
-        borderColor: theme.chrome.accent,
-        paddingLeft: theme.s(14),
+        paddingLeft: theme.s(4),
         paddingVertical: theme.s(4),
       }}
     >

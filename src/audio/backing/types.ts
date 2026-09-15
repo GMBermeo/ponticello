@@ -16,9 +16,10 @@
  * dropped frames.
  */
 
+import { ListenMode } from '@/domain/backing';
 import { BackingProgram } from './program';
 
-export type ListenMode = 'off' | 'backing' | 'solo' | 'both';
+export type { ListenMode };
 
 export const LISTEN_LABEL: Record<ListenMode, string> = {
   off: 'Off',
@@ -58,6 +59,17 @@ export interface BackingPlayer {
   stop: () => void;
   /** 0–1. */
   setVolume: (volume: number) => void;
+  /**
+   * Where playback is inside the loop, in real seconds, as the *audio* hears
+   * it — or null when nothing is sounding (stopped, seeking, or still inside
+   * the start lead).
+   *
+   * The play screen samples this a few times a second and eases the visual
+   * clock onto it. Web reads the audio context's clock less its output
+   * latency; native reads the player's own position, which also absorbs any
+   * gap the platform leaves at the loop point.
+   */
+  positionSeconds: () => number | null;
   /** True once audio is loaded and playable. */
   ready: boolean;
   /**
@@ -76,6 +88,7 @@ export const NO_PLAYER: BackingPlayer = {
   play: () => {},
   stop: () => {},
   setVolume: () => {},
+  positionSeconds: () => null,
   ready: false,
   progress: 0,
   error: null,

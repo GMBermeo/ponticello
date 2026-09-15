@@ -7,6 +7,10 @@ import {
 import { CelloSongScore } from '@/domain/schema';
 import { inflateBacking, inflateScore } from '@/scores/bundledSongs';
 import { COMPACT_SCORES } from '@/scores';
+import { LIBRARY_EDITION } from '@/scores/libraryEdition';
+
+/** Size thresholds describe the full library; the free edition ships a dozen pieces. */
+const FULL_LIBRARY = LIBRARY_EDITION.id === 'full';
 
 /** A score of `bars` four-beat bars at 60 bpm, so every bar is 4000 ms. */
 function scoreOf(bars: number): CelloSongScore {
@@ -194,7 +198,7 @@ describe('imported backings are clipped like everything else', () => {
     );
 
     // The piece itself is minutes long; the loop is a handful of seconds.
-    expect(backing.durationMs).toBeGreaterThan(60_000);
+    expect(backing.durationMs).toBeGreaterThan(FULL_LIBRARY ? 60_000 : loop.scoreDurationMs);
     expect(soundingMs).toBeLessThanOrEqual(loop.scoreDurationMs);
     expect(loopBudget(loop).withinBudget).toBe(true);
   });

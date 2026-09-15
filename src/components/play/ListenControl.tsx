@@ -11,14 +11,14 @@ import { Body, Grow, Label, Num, Row, Rule, Stack } from '../ui/primitives';
 const LISTEN_SEGMENTS: { value: ListenMode; label: string; hint: string }[] =
   (['off', 'backing', 'solo', 'both'] as const).map((value) => ({
     value,
-    label: LISTEN_LABEL[value].toUpperCase(),
+    label: LISTEN_LABEL[value],
     hint: LISTEN_BLURB[value],
   }));
 
 const STYLE_SEGMENTS: { value: AccompanimentStyle; label: string }[] =
   (['none', 'drone', 'chords', 'pulse'] as const).map((value) => ({
     value,
-    label: ACCOMPANIMENT_LABEL[value].toUpperCase(),
+    label: ACCOMPANIMENT_LABEL[value],
   }));
 
 export interface ListenControlProps {
@@ -55,16 +55,16 @@ export function ListenControl({
   return (
     <Stack gap={12}>
       <Row>
-        <Label size={11}>LISTEN</Label>
+        <Label size={11}>Accompaniment</Label>
         <Grow />
         {rendering ? <Label size={10} color={chrome.accent}>PREPARING…</Label> : null}
       </Row>
 
-      <Segmented segments={LISTEN_SEGMENTS} value={mode} onChange={onModeChange} grow />
-      <Body size={12} color={chrome.dim}>{LISTEN_BLURB[mode]}</Body>
+      <Segmented accessibilityLabel="Playback sound" segments={LISTEN_SEGMENTS} value={mode} onChange={onModeChange} grow />
+      <Body size={13} color={chrome.dim}>{LISTEN_BLURB[mode]}</Body>
 
       {mode === 'solo' && !hasSolo ? (
-        <Body size={12} color={chrome.accent}>
+        <Body size={13} color={chrome.accent}>
           This piece has no written cello line to play back.
         </Body>
       ) : null}
@@ -88,7 +88,7 @@ export function ListenControl({
           {fixedBacking ? (
             <>
               <Rule />
-              <Label size={10}>FIXED BACKING PARTS</Label>
+              <Label size={10}>Playing parts</Label>
               {audibleParts.map((part) => (
                 <Row key={part.id} gap={8}>
                   <View
@@ -107,15 +107,15 @@ export function ListenControl({
             <>
               <Rule />
               <Label size={11}>ACCOMPANIMENT</Label>
-              <Segmented segments={STYLE_SEGMENTS} value={style} onChange={onStyleChange} grow compact />
-              <Body size={12} color={chrome.dim}>{ACCOMPANIMENT_BLURB[style]}</Body>
+              <Segmented accessibilityLabel="Accompaniment style" segments={STYLE_SEGMENTS} value={style} onChange={onStyleChange} grow compact />
+              <Body size={13} color={chrome.dim}>{ACCOMPANIMENT_BLURB[style]}</Body>
             </>
           )}
         </>
       )}
 
       {error === null ? null : (
-        <Body size={12} color={chrome.accent}>{error}</Body>
+        <Body size={13} color={chrome.accent}>{error}</Body>
       )}
     </Stack>
   );
@@ -135,8 +135,8 @@ export function ListenChip({
           backgroundColor: mode === 'off' ? theme.chrome.lineSoft : theme.chrome.accent,
         }}
       />
-      <Label size={10}>
-        {rendering ? 'BACKING PREPARING' : `LISTEN ${LISTEN_LABEL[mode].toUpperCase()}`}
+      <Label size={11} style={{ textTransform: 'none', letterSpacing: 0 }}>
+        {rendering ? 'Preparing sound' : `Sound: ${LISTEN_LABEL[mode]}`}
       </Label>
     </Row>
   );

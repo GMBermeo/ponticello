@@ -1,16 +1,16 @@
 import { useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { Pressable, TextInput, View } from 'react-native';
+import { memo, useCallback, useMemo, useState } from 'react';
+import { FlatList, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Fingerboard, FingerboardScaleNote } from '@/components/Fingerboard';
-import { Button, PressableRow, Segmented } from '@/components/ui/controls';
-import {
-  Body, Grow, Kicker, Label, Num, Row, Rule, Stack, TapeChip, Title,
-} from '@/components/ui/primitives';
+import { KeyDemandBar } from '@/components/practice/KeyCensus';
+import { Button, PressableRow, Segmented, useControlFeedback } from '@/components/ui/controls';
+import { Body, Label, Row, Rule, Stack, TapeChip, Title } from '@/components/ui/primitives';
 import { Screen } from '@/components/ui/Screen';
 import { FONT, TAPE_COLOR_LABEL } from '@/theme/tokens';
 import { APP_NAME, APP_TAGLINE } from '@/brand';
-import { LIBRARY_ROWS, LibraryRow } from '@/scores';
+import { KEY_PRACTICE_ROWS, LIBRARY_KEY_CENSUS, LIBRARY_ROWS, LibraryRow } from '@/scores';
+import { LIBRARY_EDITION } from '@/scores/libraryEdition';
 import { DifficultyTier } from '@/domain/schema';
 import { useImportedRows } from '@/state/usePiece';
 import { useSettings } from '@/state/settings';
@@ -18,344 +18,206 @@ import { useTheme } from '@/theme/ThemeProvider';
 
 type CategoryFilter = 'ALL' | 'study' | 'song' | 'imported';
 type DifficultyFilter = 'ALL' | DifficultyTier;
-
-const CATEGORY_TABS = [
-  { value: 'ALL' as const, label: 'ALL', hint: 'All pieces' },
-  { value: 'study' as const, label: 'STUDIES', hint: 'Training studies & etudes' },
-  { value: 'song' as const, label: 'SONGS', hint: 'Rock, metal, soundtracks & classical' },
-  { value: 'imported' as const, label: 'IMPORTED', hint: 'Your imported files' },
+const CATEGORIES = [
+  { value: 'ALL' as const, label: 'All pieces' }, { value: 'study' as const, label: 'Studies' },
+  { value: 'song' as const, label: 'Songs' }, { value: 'imported' as const, label: 'Imported' },
+];
+const LEVELS = [
+  { value: 'ALL' as const, label: 'Any level' }, { value: 'Beginner' as const, label: 'Beginner' },
+  { value: 'Intermediate' as const, label: 'Intermediate' }, { value: 'Advanced' as const, label: 'Advanced' },
+  { value: 'Expert' as const, label: 'Expert' },
 ];
 
-const DIFFICULTY_FILTERS = [
-  { value: 'ALL' as const, label: 'ALL LVLS' },
-  { value: 'Beginner' as const, label: 'BEG' },
-  { value: 'Intermediate' as const, label: 'INT' },
-  { value: 'Advanced' as const, label: 'ADV' },
-  { value: 'Expert' as const, label: 'EXP', hint: 'Expert' },
-];
-
-/**
- * Library — the landing screen.
- *
- * On the Fold 5's near-square inner display a single stretched column wastes
- * half the glass, so the list keeps a readable measure on the left and the
- * right rail carries the two things a beginner needs before any of it means
- * anything: what their tapes are, and where the tutorial is.
- */
 export default function LibraryScreen() {
   const theme = useTheme();
   const router = useRouter();
-  const { settings } = useSettings();
+  const insets = useSafeAreaInsets();
   const imported = useImportedRows();
   const [category, setCategory] = useState<CategoryFilter>('ALL');
   const [difficulty, setDifficulty] = useState<DifficultyFilter>('ALL');
   const [search, setSearch] = useState('');
-
-  // Imported pieces come first when not filtered
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const feedback = useControlFeedback();
   const allRows = useMemo(() => [...imported, ...LIBRARY_ROWS], [imported]);
-
-  const rows = useMemo(() => {
-    let list = allRows;
-
-    if (category === 'imported') {
-      list = imported;
-    } else if (category === 'study') {
-      list = list.filter((r) => r.category === 'study');
-    } else if (category === 'song') {
-      list = list.filter((r) => r.category === 'song' || r.category === 'classical');
-    }
-
-    if (difficulty !== 'ALL') {
-      list = list.filter((r) => r.difficulty === difficulty);
-    }
-
-    if (search.trim()) {
-      const q = search.toLowerCase().trim();
-      list = list.filter((r) =>
-        r.title.toLowerCase().includes(q)
-        || r.composer.toLowerCase().includes(q)
-        || r.origin.toLowerCase().includes(q)
-        || r.keySignature.toLowerCase().includes(q),
-      );
-    }
-
-    return list;
-  }, [allRows, imported, category, difficulty, search]);
-
+  const rows = useMemo(() => allRows.filter((row) => {
+    const inCategory = category === 'ALL' || (category === 'imported' ? imported.some((r) => r.id === row.id)
+      : category === 'song' ? row.category === 'song' || row.category === 'classical' : row.category === 'study');
+    const query = search.trim().toLowerCase();
+    return inCategory && (difficulty === 'ALL' || row.difficulty === difficulty)
+      && (!query || [row.title, row.composer, row.origin, row.keySignature].some((text) => text.toLowerCase().includes(query)));
+  }), [allRows, imported, category, difficulty, search]);
   const wide = !theme.scale.compact;
+  const clearFilters = () => { setCategory('ALL'); setDifficulty('ALL'); setSearch(''); };
 
-  const header = (
+  const handleSelectSong = useCallback((id: string) => {
+    router.push(`/song/${id}`);
+  }, [router]);
+
+  const renderItem = useCallback(({ item }: { item: LibraryRow }) => (
+    <SongRow row={item} onSelect={handleSelectSong} />
+  ), [handleSelectSong]);
+
+  const renderSeparator = useCallback(() => (
+    <Rule style={{ marginHorizontal: theme.s(24) }} />
+  ), [theme]);
+
+  const listHeader = useMemo(() => (
     <>
-      <Stack padX={20} padY={14} gap={2}>
-        <Kicker size={10}>
-          {search.trim()
-            ? `${rows.length} MATCHES OF ${allRows.length} PIECES · OFFLINE`
-            : `${allRows.length} PIECES · ${imported.length} IMPORTED · OFFLINE`}
-        </Kicker>
-        <Title size={34}>{APP_NAME}</Title>
-        <Label size={11} style={{ textTransform: 'none' }}>{APP_TAGLINE}</Label>
-      </Stack>
-      <Rule weight={2} />
-
-      {/* Search bar */}
-      <View style={{ paddingHorizontal: theme.s(20), paddingTop: theme.s(10), paddingBottom: theme.s(6) }}>
-        <Row
-          gap={8}
-          style={{
-            borderWidth: theme.rule(1),
-            borderColor: search.trim() ? theme.chrome.accent : theme.chrome.line,
-            backgroundColor: theme.chrome.surface,
-            paddingHorizontal: theme.s(12),
-            height: theme.s(38),
-            alignItems: 'center',
-          }}
-        >
-          <Label size={11} color={search.trim() ? theme.chrome.accent : theme.chrome.dim}>
-            SEARCH
-          </Label>
-          <TextInput
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Search by title, artist, key..."
-            placeholderTextColor={theme.chrome.dim}
-            style={{
-              flex: 1,
-              color: theme.chrome.ink,
-              fontSize: theme.font(13),
-              fontFamily: FONT.regular,
-              padding: 0,
-            }}
-            autoCapitalize="none"
-            autoCorrect={false}
-            clearButtonMode="while-editing"
-          />
-          {search.length > 0 ? (
-            <Pressable
-              onPress={() => setSearch('')}
-              accessibilityRole="button"
-              accessibilityLabel="Clear search"
-              style={{ padding: theme.s(4) }}
-            >
-              <Label size={13} color={theme.chrome.dim}>✕</Label>
-            </Pressable>
-          ) : null}
+      <Stack padX={24} padY={16} gap={10}>
+        <Row gap={8} style={{ alignItems: 'baseline' }}>
+          <Title accessibilityRole="header" size={30}>Your music</Title>
+          <Body size={13} color={theme.chrome.dim} style={{ marginLeft: 'auto' }}>{allRows.length} pieces</Body>
         </Row>
-      </View>
-
-      {/* Category Tabs */}
-      <View style={{ paddingHorizontal: theme.s(20), paddingTop: theme.s(6), paddingBottom: theme.s(6) }}>
-        <Segmented segments={CATEGORY_TABS} value={category} onChange={setCategory} grow compact />
-      </View>
-
-      {/* Difficulty Sub-filter */}
-      <View style={{ paddingHorizontal: theme.s(20), paddingBottom: theme.s(10) }}>
-        <Segmented segments={DIFFICULTY_FILTERS} value={difficulty} onChange={setDifficulty} grow compact />
-      </View>
-      <Rule weight={2} />
+        <Row gap={8} style={[{ borderWidth: theme.rule(1), borderColor: theme.chrome.line, borderRadius: theme.s(8), paddingLeft: theme.s(14), minHeight: theme.tap }, feedback.focusStyle]}>
+          <TextInput {...feedback.events} value={search} onChangeText={setSearch}
+            accessibilityLabel="Search music" placeholder="Search title, artist or key" placeholderTextColor={theme.chrome.dim}
+            style={{ flex: 1, minWidth: 0, minHeight: theme.tap, fontFamily: FONT.regular, color: theme.chrome.ink, fontSize: theme.font(15), padding: 0, outlineWidth: 0, outlineStyle: 'solid', outlineColor: 'transparent' }}
+            autoCapitalize="none" autoCorrect={false} returnKeyType="search" />
+          {search ? <Button label="×" accessibilityLabel="Clear search" tone="ghost" onPress={() => setSearch('')} /> : null}
+        </Row>
+        <Segmented accessibilityLabel="Music category" segments={CATEGORIES} value={category} onChange={setCategory} grow compact />
+        <Row>
+          <Body size={12} color={theme.chrome.dim} accessibilityLiveRegion="polite">{rows.length} {rows.length === 1 ? 'piece' : 'pieces'}{search ? ' found' : ' to explore'}</Body>
+          <View style={{ marginLeft: 'auto' }}><Button label={difficulty === 'ALL' ? 'Filter by level' : difficulty} hint={filtersOpen ? '−' : '+'} expanded={filtersOpen} tone="ghost" onPress={() => setFiltersOpen(!filtersOpen)} /></View>
+        </Row>
+        {filtersOpen ? <View style={{ gap: theme.s(8) }}>
+          <Body size={12} color={theme.chrome.dim}>Filter by the full score’s difficulty. Songs also offer easier arrangements.</Body>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.s(6) }}>
+            {LEVELS.map((level) => <Button key={level.value} label={level.label} tone={difficulty === level.value ? 'accent' : 'default'} onPress={() => setDifficulty(level.value)} />)}
+          </View>
+        </View> : null}
+      </Stack>
+      <Rule />
     </>
-  );
-
-  const list = (
-    <>
-      {rows.map((row, index) => (
-        <SongRow
-          key={row.id}
-          row={row}
-          index={index + 1}
-          onPress={() => router.push(`/song/${row.id}`)}
-        />
-      ))}
-      {rows.length === 0 ? (
-        <View style={{ padding: theme.s(24) }}>
-          <Body size={15} color={theme.chrome.dim}>
-            {search.trim()
-              ? `No pieces found matching “${search}”.`
-              : 'Nothing in this category yet.'}
-          </Body>
-        </View>
-      ) : null}
-    </>
-  );
-
-  const panel = (
-    <StartHerePanel
-      onTutorial={() => router.push('/tutorial')}
-      onTuner={() => router.push('/tuner')}
-      onTapes={() => router.push('/settings/tapes')}
-      onImport={() => router.push('/settings/import')}
-      tapeSets={settings.tapeSets}
-      scroll={wide}
-    />
-  );
-
-  // Two flex:1 scroll views stacked in a column would split the screen in half
-  // and give the player two tiny panes, so a narrow window gets a single
-  // scroll with the panel above the list instead.
-  if (!wide) {
-    return (
-      <Screen padded={false} contentStyle={{ paddingBottom: theme.s(24) }}>
-        {header}
-        {panel}
-        <Rule weight={2} />
-        {list}
-      </Screen>
-    );
-  }
+  ), [allRows.length, category, difficulty, feedback.events, feedback.focusStyle, filtersOpen, rows.length, search, theme]);
 
   return (
     <Screen scroll={false} padded={false}>
-      <View style={{ flex: 1, flexDirection: 'row' }}>
-        <View style={{ flex: 1.55, minWidth: 0 }}>
-          {header}
-          <Screen padded={false} contentStyle={{ paddingBottom: theme.s(20) }}>
-            {list}
-          </Screen>
+      <Row padX={24} gap={12} style={{ paddingTop: insets.top, minHeight: theme.s(76) + insets.top, borderBottomWidth: theme.rule(1), borderColor: theme.chrome.lineSoft }}>
+        <View style={{ flex: 1 }}>
+          <Title size={22}>{APP_NAME}</Title>
+          {wide ? <Body size={12} color={theme.chrome.dim}>{`${APP_TAGLINE} · ${LIBRARY_EDITION.label}`}</Body> : null}
         </View>
-        <Rule weight={2} vertical />
-        <View style={{ flex: 1, minWidth: 0 }}>{panel}</View>
+        <Button label="Tuner" tone="ghost" onPress={() => router.push('/tuner')} />
+        <Button label="Import" onPress={() => router.push('/settings/import')} />
+      </Row>
+      <View style={{ flex: 1, flexDirection: 'row', minHeight: 0 }}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <FlatList
+            ListHeaderComponent={listHeader}
+            data={rows}
+            keyExtractor={keyExtractor}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ paddingBottom: theme.s(20) }}
+            initialNumToRender={12}
+            maxToRenderPerBatch={12}
+            windowSize={5}
+            removeClippedSubviews
+            renderItem={renderItem}
+            ItemSeparatorComponent={renderSeparator}
+            ListEmptyComponent={<Stack pad={24} gap={12}>
+              <Title size={22}>{category === 'imported' && !search ? 'Make room for your music' : 'No pieces found'}</Title>
+              <Body size={14} color={theme.chrome.dim}>{category === 'imported' && !search ? 'Import a MIDI file to add a cello part and accompaniment to your library.' : 'Try another title, artist or key, or clear your filters.'}</Body>
+              <Button label={category === 'imported' && !search ? 'Import a MIDI file' : 'Clear filters'} onPress={category === 'imported' && !search ? () => router.push('/settings/import') : clearFilters} />
+            </Stack>}
+          />
+          {!wide ? <Row padX={16} style={{ borderTopWidth: theme.rule(1), borderColor: theme.chrome.lineSoft }}>
+            <Button label="Reading guide" tone="ghost" onPress={() => router.push('/tutorial')} />
+            <Button label="Scales" tone="ghost" onPress={() => router.push('/scales')} />
+            <View style={{ marginLeft: 'auto' }}><Button label="My tapes" tone="ghost" onPress={() => router.push('/settings/tapes')} /></View>
+          </Row> : null}
+        </View>
+        {wide ? <PracticeRail /> : null}
       </View>
     </Screen>
   );
 }
 
-function SongRow({
-  row, index, onPress,
-}: { row: LibraryRow; index: number; onPress: () => void }) {
-  const theme = useTheme();
-  const { chrome } = theme;
+const keyExtractor = (row: LibraryRow) => row.id;
 
-  // Four steps, and the top one has to look like a step rather than a repeat:
-  // Advanced and Expert both filled in the accent would make the new tier
-  // invisible, which is the usual way a fourth category gets added and then
-  // ignored. Expert inverts to ink instead — the strongest thing the palette has.
-  const badge = row.difficulty === 'Beginner'
-    ? { bg: chrome.surface, fg: chrome.ink }
-    : row.difficulty === 'Intermediate'
-      ? { bg: chrome.accentWash, fg: chrome.ink }
-      : row.difficulty === 'Advanced'
-        ? { bg: chrome.accent, fg: chrome.bg }
-        : { bg: chrome.ink, fg: chrome.bg };
+interface SongRowProps {
+  row: LibraryRow;
+  onSelect: (id: string) => void;
+}
+
+const SongRow = memo(function SongRow({ row, onSelect }: SongRowProps) {
+  const theme = useTheme();
+  const handlePress = useCallback(() => {
+    onSelect(row.id);
+  }, [onSelect, row.id]);
 
   return (
-    <>
-      <PressableRow
-        onPress={onPress}
-        accessibilityLabel={`${row.title} by ${row.composer}. ${row.difficulty}. ${row.playable ? 'Ready to play' : 'No score bundled'}`}
-      >
-        <Row padX={20} padY={12} gap={12} style={{ alignItems: 'flex-start' }}>
-          <Num size={12} color={chrome.dim} style={{ width: theme.s(24), paddingTop: theme.s(3) }}>
-            {String(index).padStart(2, '0')}
-          </Num>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Title size={17}>{row.title}</Title>
-            <Label size={11} style={{ textTransform: 'none' }}>{row.composer}</Label>
-            <Row gap={12} style={{ marginTop: theme.s(5), flexWrap: 'wrap' }}>
-              <Label size={10}>{row.keySignature}</Label>
-              <Label size={10}>{row.range}</Label>
-              <Label size={10}>{row.bars === null ? 'NO SCORE' : `${row.bars} BARS`}</Label>
-              <Label size={10} color={row.playable ? chrome.dim : chrome.accent}>
-                {row.playable ? `${row.distribution[0][1]}% 1ST POS` : 'ADD YOUR OWN'}
-              </Label>
-            </Row>
-          </View>
-          <View style={{
-            paddingHorizontal: theme.s(7),
-            paddingVertical: theme.s(3),
-            backgroundColor: badge.bg,
-          }}>
-            <Label size={9} color={badge.fg}>{row.difficulty.toUpperCase()}</Label>
-          </View>
-        </Row>
-      </PressableRow>
-      <Rule />
-    </>
+    <PressableRow onPress={handlePress} accessibilityLabel={`${row.title} by ${row.composer}. ${row.difficulty}. Open piece`}>
+      <Row padX={24} padY={16} gap={14}>
+        <View style={{ flex: 1, minWidth: 0, gap: theme.s(5) }}>
+          <Title size={17} numberOfLines={2}>{row.title}</Title>
+          <Body size={13} color={theme.chrome.dim} numberOfLines={1}>{row.composer} · {row.keySignature}</Body>
+        </View>
+        <View style={{ alignItems: 'flex-end', gap: theme.s(5) }}>
+          <Body size={12} color={theme.chrome.dim}>{row.difficulty}</Body>
+          <Body size={12} color={theme.chrome.dim}>{row.bars === null ? 'No score' : `${row.bars} bars`}</Body>
+        </View>
+        <Title size={20} color={theme.chrome.dim}>›</Title>
+      </Row>
+    </PressableRow>
   );
+});
+
+function PracticeRail() {
+  const theme = useTheme();
+  const router = useRouter();
+  const { settings } = useSettings();
+  return <View style={{ width: theme.s(224), borderLeftWidth: theme.rule(1), borderColor: theme.chrome.lineSoft, backgroundColor: theme.chrome.surface }}>
+    <Screen padded={false}>
+      <Stack pad={20} gap={14}>
+        <Label size={11}>A gentle start</Label>
+        <Title size={24}>Find your sound.</Title>
+        <Body size={14} color={theme.chrome.dim}>Settle into the bow with a short open-string study.</Body>
+        <Button label="Open-string study" hint="→" onPress={() => router.push(`/song/${LIBRARY_ROWS[0].id}`)} />
+        <Body size={12} color={theme.chrome.dim}>8 bars · Beginner</Body>
+      </Stack>
+      <Rule style={{ marginHorizontal: theme.s(20) }} />
+      <PracticeByKey />
+      <Rule style={{ marginHorizontal: theme.s(20) }} />
+      <Stack pad={20} gap={12}>
+        <Label size={11}>Before you play</Label>
+        <PressableRow onPress={() => router.push('/tutorial')} accessibilityLabel="Open the reading guide" style={{ justifyContent: 'center' }}><Title size={15}>Reading guide →</Title><Body size={12} color={theme.chrome.dim}>Notes, numbers and string colours</Body></PressableRow>
+        <PressableRow onPress={() => router.push('/settings/tapes')} accessibilityLabel="Edit my tapes" style={{ justifyContent: 'center' }}><Title size={15}>My fingerboard tapes →</Title><Body size={12} color={theme.chrome.dim}>Match the colours on your cello</Body></PressableRow>
+        <Row gap={7} style={{ flexWrap: 'wrap' }}>{settings.tapeSets[0]?.tapes.map((tape) => <TapeChip key={tape.id} color={theme.chrome.tapes[tape.color]} label={TAPE_COLOR_LABEL[tape.color]} width={32} height={5} />)}</Row>
+      </Stack>
+      <Stack padX={20} padY={12} gap={6}><Label size={10}>Always at your pace</Label><Body size={13} color={theme.chrome.dim}>Choose a lower arrangement, slow the tempo and repeat a few bars.</Body></Stack>
+    </Screen>
+  </View>;
 }
 
 /**
- * The right rail. Its job is to answer "what am I looking at" before the
- * player has opened anything — the tape strip is the single most useful thing
- * on this screen for someone three weeks into the instrument.
+ * The three keys the library leans on hardest, with the drills behind them.
+ *
+ * This is the census earning its place on the first screen: a player who has
+ * never thought about which key to practise is shown that a sixth of their
+ * music is in one key, and one tap away is a scale for it. Counts come from
+ * `LIBRARY_KEY_CENSUS`, measured at load, so this block cannot go stale
+ * against the library.
  */
-function StartHerePanel({
-  onTutorial, onTuner, onTapes, onImport, tapeSets, scroll,
-}: {
-  onTutorial: () => void;
-  onTuner: () => void;
-  onTapes: () => void;
-  onImport: () => void;
-  tapeSets: ReturnType<typeof useSettings>['settings']['tapeSets'];
-  /** False when the panel is inlined into a parent that already scrolls. */
-  scroll: boolean;
-}) {
+function PracticeByKey() {
   const theme = useTheme();
-  const { chrome } = theme;
+  const router = useRouter();
+  const top = KEY_PRACTICE_ROWS.filter((row) => row.drills.length > 0).slice(0, 3);
+  const total = LIBRARY_KEY_CENSUS.counted;
+  const maxShare = KEY_PRACTICE_ROWS[0]?.share ?? 0;
 
-  const body = (
-    <>
-      <Stack padX={20} padY={16} gap={12}>
-        <Label size={11}>START HERE</Label>
-        <Button label="How to read this" hint="4 MIN" onPress={onTutorial} tone="accent" />
-        <Body size={13} color={chrome.dim}>
-          What the numbers mean, where the nut is, and which colour under your hand matches
-          which mark on screen.
-        </Body>
-        <Button label="Tuner" hint="OPEN STRINGS" onPress={onTuner} />
-        <Button label="Import a MIDI file" hint="YOUR OWN MUSIC" onPress={onImport} />
-        <Body size={12} color={chrome.dim}>
-          Bring a file you have the right to use and the app will finger the cello line and turn
-          the rest into a backing track to play over.
-        </Body>
-      </Stack>
-
-      <Rule weight={2} />
-
-      <Stack padX={20} padY={16} gap={12}>
-        <Row>
-          <Label size={11}>MY TAPES</Label>
-          <Grow />
-          <PressableRow onPress={onTapes} accessibilityLabel="Edit my tapes">
-            <Label size={10} color={chrome.accent}>EDIT</Label>
-          </PressableRow>
-        </Row>
-
-        {tapeSets.map((set) => (
-          <View key={set.id}>
-            <Label size={10} color={chrome.ink}>{set.name.toUpperCase()}</Label>
-            <Row gap={6} style={{ marginTop: theme.s(6) }}>
-              {set.tapes.map((tape) => (
-                <TapeChip
-                  key={tape.id}
-                  color={chrome.tapes[tape.color]}
-                  label={TAPE_COLOR_LABEL[tape.color]}
-                  width={44}
-                />
-              ))}
-            </Row>
-          </View>
-        ))}
-
-        <Row gap={14} style={{ alignItems: 'flex-start', marginTop: theme.s(6) }}>
-          <Fingerboard
-            height={theme.s(230)}
-            maxMm={440}
-            tapeSets={tapeSets}
-            gutter={40}
-            compact
-          />
-          <View style={{ flex: 1, paddingTop: theme.s(4) }}>
-            <Body size={12} color={chrome.dim}>
-              Drawn to scale. The tapes crowd together as they climb because the string
-              halves at the octave — that is the instrument, not the drawing.
-            </Body>
-            <View style={{ marginTop: theme.s(8) }}>
-              <FingerboardScaleNote />
-            </View>
-          </View>
-        </Row>
-      </Stack>
-    </>
-  );
-
-  return scroll ? <Screen padded={false}>{body}</Screen> : body;
+  return <Stack pad={20} gap={12}>
+    <Label size={11}>Practise by key</Label>
+    <Body size={13} color={theme.chrome.dim}>
+      {`The keys your ${total} songs are actually in. Most-used first.`}
+    </Body>
+    {top.map((row) => (
+      <PressableRow key={row.key} onPress={() => router.push('/scales')}
+        accessibilityLabel={`${row.key}, ${row.songs} of ${total} songs, ${row.drills.length} drills. Open scales by key`}
+        style={{ justifyContent: 'center' }}>
+        <KeyDemandBar row={row} of={total} maxShare={maxShare} compact />
+      </PressableRow>
+    ))}
+    <Button label="All scales by key" hint="→" onPress={() => router.push('/scales')} />
+  </Stack>;
 }

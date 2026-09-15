@@ -45,9 +45,16 @@ example
 # personal MIDI stash - see _MIDIS/README.md
 _MIDIS/
 
+# built APKs - see tools/build-release.sh
+releases/
+
 # agent skills
 .agents/skills/*
 !.agents/skills/cello-scoring/
 .claude/
 .kiro/
 .idea
+.scratch
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/

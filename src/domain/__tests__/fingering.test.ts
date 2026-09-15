@@ -2,18 +2,25 @@ import { describe, expect, it } from 'vitest';
 
 import { OPEN_STRING_MIDI } from '../cello';
 import {
-  candidateStates, detectShifts, emissionCost, firstPositionFingering, RawNoteEvent,
-  solveFingering, transitionCost,
+  ARRANGEMENT_WEIGHTS, candidateStates, CostWeights, DEFAULT_WEIGHTS, detectShifts,
+  emissionCost, firstPositionFingering, handSemitones, RawNoteEvent, solveFingering,
+  transitionCost,
 } from '../fingering';
 
 const at = (midiNumber: number, startTimeMs: number, durationMs = 400): RawNoteEvent =>
   ({ midiNumber, startTimeMs, durationMs });
 
 describe('candidate generation', () => {
-  it('offers the open string when the pitch is one', () => {
+  it('offers the open string on its own string, with the hand anywhere', () => {
     const open = candidateStates(OPEN_STRING_MIDI.A).filter((c) => c.finger === '0');
-    expect(open).toHaveLength(1);
-    expect(open[0].string).toBe('A');
+    // One state per place the hand could be waiting: nothing is stopped, so
+    // where the hand sits is a free choice the rest of the phrase pays for.
+    expect(open.length).toBeGreaterThan(1);
+    expect(open.every((c) => c.string === 'A')).toBe(true);
+    expect(open.every((c) => c.position === '1st')).toBe(true);
+    expect(new Set(open.map((c) => c.baseSemitones)).size).toBe(open.length);
+    // First position among them, because that is where the hand usually is.
+    expect(open.some((c) => c.baseSemitones === 2)).toBe(true);
   });
 
   it('finds the same pitch on more than one string', () => {
@@ -112,9 +119,41 @@ describe('cost model', () => {
 
   it('charges nothing to stay put and most to skip three strings', () => {
     const a = { string: 'A' as const, position: '1st' as const, finger: '1' as const, extension: 'none' as const };
+    const d = { ...a, string: 'D' as const };
+    const g = { ...a, string: 'G' as const };
     const c = { ...a, string: 'C' as const };
     expect(transitionCost(a, a, 500)).toBe(0);
+    expect(transitionCost(a, d, 500)).toBeLessThan(transitionCost(a, g, 500));
+    expect(transitionCost(a, g, 500)).toBeLessThan(transitionCost(a, c, 500));
     expect(transitionCost(a, c, 500)).toBeGreaterThan(6);
+  });
+
+  it('does not charge a shift for an open string the hand plays through', () => {
+    // The hand is up at the octave; the open D sounds on the way past. It
+    // costs a string crossing and nothing else, because nothing moved.
+    const upTheNeck = {
+      string: 'A' as const, position: 'Thumb' as const, finger: '1' as const,
+      extension: 'none' as const, baseSemitones: 14,
+    };
+    const openThrough = {
+      string: 'D' as const, position: '1st' as const, finger: '0' as const,
+      extension: 'none' as const, baseSemitones: 14,
+    };
+    const openAtTheNut = { ...openThrough, baseSemitones: 2 };
+
+    expect(transitionCost(upTheNeck, openThrough, 300)).toBe(1);
+    expect(transitionCost(upTheNeck, openAtTheNut, 300))
+      .toBeGreaterThan(transitionCost(upTheNeck, openThrough, 300));
+  });
+
+  it('still charges for holding the hand up the neck over an open string', () => {
+    const note = at(50, 0, 400);
+    const waiting = {
+      string: 'D' as const, position: '1st' as const, finger: '0' as const,
+      extension: 'none' as const,
+    };
+    expect(emissionCost({ ...waiting, baseSemitones: 14 }, note))
+      .toBeGreaterThan(emissionCost({ ...waiting, baseSemitones: 2 }, note));
   });
 
   it('makes the same shift dearer when there is less time', () => {
@@ -162,6 +201,47 @@ describe('solveFingering', () => {
 
   it('refuses a pitch no cello can play', () => {
     expect(() => solveFingering([at(24, 0)])).toThrow(/not playable on a cello/);
+  });
+
+  it('takes the open string rather than climbing the neck past it', () => {
+    // Mario, in miniature: the melody sits up the A string and drops to D3,
+    // which is the open D. The old encoding gave the open string one anchor,
+    // first position, so reaching it read as a shift to the nut and back — and
+    // the solver answered by taking D3 on the C string in seventh position,
+    // fourteen semitones up, with the open D string sitting right there.
+    const line = [69, 71, 50, 71, 69].map((m, i) => at(m, i * 400, 380));
+    const states = solveFingering(line, ARRANGEMENT_WEIGHTS).states;
+    const openD = states[2]!;
+    expect(openD.string).toBe('D');
+    expect(openD.finger).toBe('0');
+  });
+});
+
+/**
+ * The weighting is a decision that has to be *applied*, and once was not: the
+ * constant existed, documented itself as the one for library work, and every
+ * caller took the other one. These pin the call sites so that cannot recur
+ * silently.
+ */
+describe('everything this app arranges is fingered with the arrangement weights', () => {
+  it('keeps the hand far stiller than the phrase-shaping weights do', () => {
+    const line = [50, 74, 50, 74, 50].map((m, i) => at(m, i * 250, 240));
+    const travel = (w: CostWeights) => {
+      const states = solveFingering(line, w).states;
+      return states.reduce((sum, state, i) => (i === 0 ? 0
+        : sum + Math.abs(handSemitones(state) - handSemitones(states[i - 1]!))), 0);
+    };
+    expect(travel(ARRANGEMENT_WEIGHTS)).toBeLessThan(travel(DEFAULT_WEIGHTS));
+  });
+
+  it('treats an open string as very nearly free, however long the note', () => {
+    const state = {
+      string: 'A' as const, position: '1st' as const, finger: '0' as const,
+      extension: 'none' as const, baseSemitones: 2,
+    };
+    const held = emissionCost(state, at(57, 0, 2000), ARRANGEMENT_WEIGHTS);
+    expect(held).toBeLessThan(emissionCost(state, at(57, 0, 2000), DEFAULT_WEIGHTS));
+    expect(held).toBeLessThan(0.5);
   });
 });
 

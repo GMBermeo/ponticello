@@ -21,7 +21,7 @@
  * Pure: no React, no React Native. See AGENTS.md.
  */
 
-import { CelloString, STRING_ORDER } from '@/domain/cello';
+import { CelloString, DISPLAY_STRING_ORDER } from '@/domain/cello';
 import type { FlowAxis } from '@/state/settings';
 
 export interface TimeWindow {
@@ -124,7 +124,7 @@ export interface LaneGeometry {
 export function laneGeometry(
   axis: FlowAxis, crossExtent: number, gap: number,
 ): LaneGeometry {
-  const count = STRING_ORDER.length;
+  const count = DISPLAY_STRING_ORDER.length;
   const laneStep = crossExtent / count;
   const laneSize = Math.max(1, laneStep - gap);
   const horizontal = axis === 'horizontal';
@@ -134,11 +134,28 @@ export function laneGeometry(
     laneSize,
     horizontal,
     laneAt: (string: CelloString) => {
-      const index = Math.max(0, STRING_ORDER.indexOf(string));
-      // Horizontal: row 0 is the top of the box, so the lowest string has to be
-      // the *last* row for it to sit at the bottom.
-      const slot = horizontal ? count - 1 - index : index;
+      const slot = Math.max(0, DISPLAY_STRING_ORDER.indexOf(string));
       return slot * laneStep;
     },
   };
 }
+
+/**
+ * Time-axis offset of an event at time `ms`, at time zero.
+ *
+ * For vertical (falling), time moves from top towards the hit line, so future
+ * notes sit above the hit line (hitAt - ms * pxPerMs).
+ * For horizontal (leftward stave), future notes arrive from the right of the hit
+ * line (hitAt + ms * pxPerMs).
+ */
+export function timeAlongOffset(
+  ms: number,
+  axis: FlowAxis,
+  hitAt: number,
+  pxPerMs: number,
+): number {
+  return axis === 'vertical'
+    ? hitAt - ms * pxPerMs
+    : hitAt + ms * pxPerMs;
+}
+

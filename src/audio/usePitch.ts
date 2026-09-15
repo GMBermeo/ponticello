@@ -5,7 +5,7 @@ import {
   centsBetween, IntonationVerdict, judgeIntonation, midiToFrequency, midiToPitchName,
 } from '@/domain/cello';
 import { CentsSmoother, PitchEngine, TunerPitchSmoother } from './PitchEngine';
-import { MicSource } from './sources/types';
+import { MicSource, TARGET_SAMPLE_RATE } from './sources/types';
 import { useMicSource } from './sources/useMicSource';
 
 export interface PitchReading {
@@ -36,6 +36,14 @@ export interface LivePitch {
   mic: MicSource;
   /** Point the analysis at a note. Pass null to just report what is heard. */
   setTarget: (midi: number | null) => void;
+  /** Subscribes to throttled text reading updates without causing parent re-renders. */
+  subscribeReading: (listener: (reading: PitchReading) => void) => () => void;
+}
+
+export function usePitchReading(pitch: LivePitch): PitchReading {
+  const [reading, setReading] = useState<PitchReading>(pitch.reading);
+  useEffect(() => pitch.subscribeReading(setReading), [pitch]);
+  return reading;
 }
 
 export interface UsePitchOptions {
@@ -61,13 +69,27 @@ export function usePitch(enabled: boolean, options?: UsePitchOptions): LivePitch
   const level = useSharedValue(0);
   const tracking = useSharedValue(0);
 
-  const [heard, setHeard] = useState<PitchReading>(SILENT);
+  const readingRef = useRef<PitchReading>(SILENT);
+  const listenersRef = useRef(new Set<(reading: PitchReading) => void>());
+
+  const publishReading = useCallback((next: PitchReading) => {
+    readingRef.current = next;
+    listenersRef.current.forEach((listener) => listener(next));
+  }, []);
+
+  const subscribeReading = useCallback((listener: (reading: PitchReading) => void) => {
+    listenersRef.current.add(listener);
+    listener(enabled ? readingRef.current : SILENT);
+    return () => {
+      listenersRef.current.delete(listener);
+    };
+  }, [enabled]);
 
   // Built once and retuned in place. Rebuilding it from a piece of React state
   // whenever the hardware reports a different sample rate would mean setting
   // that state from inside an effect, which cascades a render for something
   // the engine can simply absorb.
-  const engine = useMemo(() => new PitchEngine({ sampleRate: 48000 }), []);
+  const engine = useMemo(() => new PitchEngine({ sampleRate: TARGET_SAMPLE_RATE }), []);
   const smoother = useMemo(() => new CentsSmoother(90), []);
   const tunerSmoother = useMemo(() => new TunerPitchSmoother(1000, 450), []);
 
@@ -119,11 +141,11 @@ export function usePitch(enabled: boolean, options?: UsePitchOptions): LivePitch
       lastPublish.current = now;
 
       if (!smoothed.voiced || smoothed.frequency <= 0) {
-        setHeard((current) => (current.voiced ? SILENT : current));
+        if (readingRef.current.voiced) publishReading(SILENT);
         return;
       }
 
-      setHeard({
+      publishReading({
         frequency: smoothed.frequency,
         heard: midiToPitchName(smoothed.nearestMidi),
         cents: smoothed.cents,
@@ -148,7 +170,7 @@ export function usePitch(enabled: boolean, options?: UsePitchOptions): LivePitch
     lastPublish.current = now;
 
     if (!frame.voiced || frame.frequency <= 0) {
-      setHeard((current) => (current.voiced ? SILENT : current));
+      if (readingRef.current.voiced) publishReading(SILENT);
       return;
     }
 
@@ -158,7 +180,7 @@ export function usePitch(enabled: boolean, options?: UsePitchOptions): LivePitch
       : midiToFrequency(target.current);
     const deviation = centsBetween(frame.frequency, targetHz);
 
-    setHeard({
+    publishReading({
       frequency: frame.frequency,
       heard: midiToPitchName(nearestMidi),
       cents: deviation,
@@ -167,7 +189,7 @@ export function usePitch(enabled: boolean, options?: UsePitchOptions): LivePitch
       band: frame.band,
       clarity: frame.clarity,
     });
-  }, [engine, cents, level, tracking, smoother, tunerSmoother, tunerMode]);
+  }, [engine, cents, level, tracking, smoother, tunerSmoother, tunerMode, publishReading]);
 
   const mic = useMicSource(onSamples, enabled);
 
@@ -177,20 +199,25 @@ export function usePitch(enabled: boolean, options?: UsePitchOptions): LivePitch
 
   useEffect(() => {
     if (enabled) return;
-    // Shared values are not React state, so clearing them here costs nothing;
-    // the text reading is derived below rather than set.
     engine.reset();
     smoother.reset();
     tunerSmoother.reset();
     cents.set(0);
     level.set(0);
     tracking.set(0);
-  }, [enabled, engine, smoother, tunerSmoother, cents, level, tracking]);
+    publishReading(SILENT);
+  }, [enabled, engine, smoother, tunerSmoother, cents, level, tracking, publishReading]);
 
-  // Derived rather than stored: when the microphone is off there is nothing to
-  // report, and that is a fact about `enabled`, not a state transition.
-  const reading = enabled ? heard : SILENT;
-
-  return { cents, level, tracking, reading, mic, setTarget };
+  return {
+    cents,
+    level,
+    tracking,
+    get reading() {
+      return enabled ? readingRef.current : SILENT;
+    },
+    mic,
+    setTarget,
+    subscribeReading,
+  };
 }
 

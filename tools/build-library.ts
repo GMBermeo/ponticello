@@ -1,17 +1,17 @@
 import { readdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { parseMidi } from '../src/domain/midi';
-import { arrangeMidi } from '../src/domain/arrangement';
+import { arrangeMidi, bassLine, harmonicGuide, rebaseLine } from '../src/domain/arrangement';
 import { instrumentForProgram } from '../src/domain/backing';
-import { DEFAULT_WEIGHTS, solveFingering } from '../src/domain/fingering';
+import { firstPositionFingering } from '../src/domain/fingering';
 import { difficultyOf } from '../src/domain/difficulty';
+import { detectKey, keyName } from '../src/domain/key';
 import type { DifficultyTier } from '../src/domain/schema';
-// Note: the emitted template references @/domain/cello, @/domain/schema and
-// @/domain/fingering. Those are imports in the *generated* file, not here.
 
 
 function parseSongInfo(filename: string, category: 'study' | 'classical' | 'song') {
-  const stem = filename.replace(/\.midi?$/i, '');
+  const stem = filename.replace(/\.midi?$/i, '').replace(/[—–]/g, '-');
   const id = stem.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
   if (category === 'classical') {
@@ -74,9 +74,31 @@ interface CompactScoreData {
   difficulty: DifficultyTier;
   /** Share of notes in [1st/half, 2nd-4th, 5th-thumb], as whole percents. */
   positions: [number, number, number];
+  /**
+   * Key of the arranged line, as `keyName` spells it — "G major", "E minor".
+   *
+   * Detected here rather than left as a placeholder, because it is *read* and
+   * not only displayed: `generateAccompaniment` parses this string for the
+   * tonic of the practice drone. It used to say "ADAPTIVE" for all 258 songs,
+   * and `tonicPitchClass` reads the leading letter of that as an A — so every
+   * drone and every generated chord in the app was in A major, whatever the
+   * song was in.
+   */
+  key: string;
+  /** True when the key wants flats, so B flat major is not spelled A sharp. */
+  preferFlats: boolean;
   category: 'study' | 'classical' | 'song';
   // [midiNumber, startTimeMs, durationMs]
   notes: [number, number, number][];
+  /**
+   * Held harmonic roots on the C and G strings, same encoding and timeline as
+   * `notes`, for the Beginner level to play instead of a thinned melody.
+   * Cheap to ship: one note per half-bar, merged, so a five-minute song adds
+   * a couple of hundred triples against the melody's thousands.
+   */
+  guide: [number, number, number][];
+  /** Source bass/lower voice for Intermediate, on the same timeline. */
+  bass: [number, number, number][];
   // [name, instrument, role, gain, [[midi, startMs, durMs, vel], ...]]
   backingParts: [string, string, string, number, [number, number, number, number][]][];
 }
@@ -118,32 +140,66 @@ function thinTrack<T extends { velocity: number }>(notes: T[], cap: number): T[]
   return out;
 }
 
+/**
+ * Which library this build ships.
+ *
+ * `full` is everything the owner has arranged: the public-domain pieces, the
+ * original etudes, and every song that has a folder in `_MIDIS/arranged` —
+ * that folder is the curated list, so a MIDI sitting in `downloaded` without
+ * an arrangement is not shipped. `free` is only what anyone may redistribute:
+ * the public-domain pieces and the etudes written for this repo. Copyrighted
+ * songs never enter a `free` build, whatever else is on disk.
+ *
+ *   npm run build:library -- --edition=free
+ */
+type Edition = 'full' | 'free';
+
+const editionArg = process.argv.find((arg) => arg.startsWith('--edition='))?.split('=')[1] ?? 'full';
+if (editionArg !== 'full' && editionArg !== 'free') {
+  throw new Error(`Unknown edition "${editionArg}". Use --edition=full or --edition=free.`);
+}
+const edition: Edition = editionArg;
+
+const ARRANGED_DIR = '_MIDIS/arranged';
+const arrangedIds = existsSync(ARRANGED_DIR)
+  ? new Set(readdirSync(ARRANGED_DIR).filter((name) => !name.startsWith('.')))
+  : null;
+if (edition === 'full' && !arrangedIds) {
+  throw new Error(`The full edition is defined by ${ARRANGED_DIR}, which does not exist.`);
+}
+
 const categories: { dir: string; cat: 'study' | 'classical' | 'song' }[] = [
   { dir: '_MIDIS/public-domain', cat: 'classical' },
   { dir: '_MIDIS/etudes', cat: 'study' },
-  { dir: '_MIDIS/downloaded', cat: 'song' },
+  ...(edition === 'full' ? [{ dir: '_MIDIS/downloaded', cat: 'song' as const }] : []),
 ];
 
 const compactList: CompactScoreData[] = [];
+const sourceHashes = new Map<string, string>();
 const difficulties: { id: string; tier: DifficultyTier; score: number }[] = [];
 const quality: { id: string; track: number; trackName: string; distinct: number; movement: number; shift: number; foldedPct: number }[] = [];
 
 for (const { dir, cat } of categories) {
   if (!existsSync(dir)) continue;
-  const files = readdirSync(dir).filter(f => f.endsWith('.mid') || f.endsWith('.midi'));
+  const files = readdirSync(dir).filter(f => f.endsWith('.mid') || f.endsWith('.midi')).sort();
   for (const f of files) {
     const path = join(dir, f);
     const bytes = new Uint8Array(readFileSync(path));
+    const info = parseSongInfo(f, cat);
+    if (cat === 'song' && !arrangedIds?.has(info.id)) continue;
+    const hash = createHash('sha256').update(bytes).digest('hex');
+    if (sourceHashes.get(info.id) === hash) continue;
+    if (sourceHashes.has(info.id)) throw new Error(`Different MIDI sources share id ${info.id}`);
+    sourceHashes.set(info.id, hash);
     const parsed = parseMidi(bytes);
     if (parsed.notes.length === 0) continue;
 
     // The same arranger runs here and on-device: motif-aware riff/theme source
-    // ranking, root-guide fallback, one coherent octave move, and C2–A5 range.
+    // ranking, root-guide fallback, one coherent octave move, and a low first-position range.
     const arranged = arrangeMidi(parsed, { level: 'Expert' });
     if (arranged.notes.length === 0) continue;
 
     const soloTrack = arranged.sourceTrack;
-    const info = parseSongInfo(f, cat);
     const timeSignature = parsed.timeSignature;
     const bpm = parsed.bpm || 80;
     const originTime = arranged.originMs;
@@ -154,6 +210,15 @@ for (const { dir, cat } of categories) {
       Math.max(1, Math.round(note.durationMs)),
     ]);
     const foldedPct = Math.round((100 * arranged.foldedNotes) / compactNotes.length);
+
+    // Rebased onto the same zero as the melody, so a player switching level
+    // mid-practice does not find the bars have moved.
+    const compactLine = (line: ReturnType<typeof bassLine>): [number, number, number][] =>
+      rebaseLine(line, originTime, arranged.sourceEndMs).map((note) => [
+        note.midiNumber, Math.round(note.startTimeMs), Math.max(1, Math.round(note.durationMs)),
+      ]);
+    const guideNotes = compactLine(harmonicGuide(parsed, arranged.sourceEndMs));
+    const bassNotes = compactLine(bassLine(parsed, arranged.sourceEndMs));
 
     quality.push({
       id: info.id,
@@ -173,7 +238,28 @@ for (const { dir, cat } of categories) {
     // draw a list. See src/domain/difficulty.ts for the weighting.
     const events = compactNotes.map(([midiNumber, startTimeMs, durationMs]) =>
       ({ midiNumber, startTimeMs, durationMs }));
-    const solvedStates = solveFingering(events, DEFAULT_WEIGHTS).states;
+
+    // Read from the arranged line plus every pitched note in the source.
+    //
+    // Melody alone leaves a key ambiguous, and melody-plus-guide is worse than
+    // it sounds: the guide is a few hundred re-struck roots, so it outweighs
+    // everything else and the Krumhansl profile reads the progression's most
+    // common root as the tonic — Back in Black came out "A major" because its
+    // roots are E, A and D. Measured against the key of the whole texture,
+    // melody alone agrees on 162 of 260 songs, melody plus guide on 195, and
+    // the texture on 244. The label is read and not merely shown
+    // (`generateAccompaniment` parses it for the drone, and the fingerboard
+    // overlay draws the scale from it), so it is worth getting right.
+    const percussion = new Set(parsed.tracks.filter((track) => track.isPercussion)
+      .map((track) => track.index));
+    const detected = detectKey([
+      ...events,
+      ...parsed.notes
+        .filter((note) => !percussion.has(note.track) && note.startTimeMs < arranged.sourceEndMs)
+        .map((note) => ({ midiNumber: note.midiNumber, durationMs: note.durationMs })),
+    ]);
+    const key = keyName(detected.tonic, detected.mode);
+    const solvedStates = events.map((event) => firstPositionFingering(event.midiNumber));
     const report = difficultyOf(events, solvedStates);
     const difficulty: DifficultyTier = report.tier;
     difficulties.push({ id: info.id, tier: report.tier, score: report.score });
@@ -224,7 +310,7 @@ for (const { dir, cat } of categories) {
         });
 
       if (tNotes.length === 0) continue;
-      const inst = isSolo ? 'cello' : instrumentForProgram(track.program, track.isPercussion);
+      const inst = instrumentForProgram(track.program, track.isPercussion);
       const role = isSolo ? 'solo' : 'accompaniment';
       const gain = isSolo ? 0.85 : 0.5;
       const name = (track.name || `Track ${track.index + 1}`).trim().slice(0, 40);
@@ -240,8 +326,12 @@ for (const { dir, cat } of categories) {
       meter: timeSignature,
       difficulty,
       positions,
+      key,
+      preferFlats: key.includes('\u266d'),
       category: info.category,
       notes: compactNotes,
+      guide: guideNotes,
+      bass: bassNotes,
       backingParts,
     });
   }
@@ -250,133 +340,52 @@ for (const { dir, cat } of categories) {
 console.log(`Writing ${compactList.length} compact scores to src/scores/bundledSongs.json...`);
 writeFileSync('src/scores/bundledSongs.json', JSON.stringify(compactList));
 
-const outTs = `/**
- * Bundled Release 1.2 Scores and Backing Tracks.
- * Auto-generated by tools/build-library.ts from _MIDIS.
- * Songs store one full C2–A5 cello line; easier levels are derived at runtime.
+// Only the data is generated. `src/scores/bundledSongs.ts`, which inflates it, is ordinary
+// source: it used to be rewritten from a copy of itself held in a template
+// string here, and the two drifted — a rebuild silently dropped a strict-mode
+// fallback and broke the typecheck.
+console.log('Done writing bundledSongs.json.');
+
+// ── Catalogue index and edition stamp ────────────────────────────────────────
+// The library screen lists rows from `catalogIndex.ts` so it never inflates
+// tens of megabytes of songs to draw a list. It has to be written by the same
+// run as the JSON, or the list and the songs behind it disagree.
+const { toCompactRow } = await import('../src/scores/index');
+const rows = compactList.map((entry) => toCompactRow(entry));
+writeFileSync('src/scores/catalogIndex.ts', `import type { LibraryRow } from './index';
+
+/**
+ * Precomputed catalog index for the bundled songs. Generated by
+ * tools/build-library.ts (${edition} edition) — do not edit by hand.
  */
+export const BUNDLED_CATALOG_ROWS: readonly LibraryRow[] = ${JSON.stringify(rows)};
+`);
 
-import { CelloSongScore, CelloNote, CelloMeasure, DifficultyTier, measureDurationMs } from '@/domain/schema';
-import { BackingTrack, BackingPart, InstrumentName, PartRole } from '@/domain/backing';
-import { midiToPitchName, midiToFrequency } from '@/domain/cello';
-import { DEFAULT_WEIGHTS, solveFingering } from '@/domain/fingering';
-import rawData from './bundledSongs.json';
-
-
-export interface CompactScoreDef {
-  id: string;
-  title: string;
-  composer: string;
-  origin: string;
-  bpm: number;
-  meter: [number, number];
-  difficulty: DifficultyTier;
-  /** Share of notes in [1st/half, 2nd-4th, 5th-thumb], as whole percents. */
-  positions: [number, number, number];
-  category: 'study' | 'classical' | 'song';
-  notes: [number, number, number][];
-  backingParts: [string, string, string, number, [number, number, number, number][]][];
+const songCount = compactList.filter((entry) => entry.category === 'song').length;
+writeFileSync('src/scores/libraryEdition.ts', `/**
+ * Which library this build carries. Generated by tools/build-library.ts — do
+ * not edit by hand. Shown in the app so an installed build says what it is.
+ */
+export interface LibraryEdition {
+  /** Widened on purpose: code that compares editions must compile in both builds. */
+  id: 'full' | 'free';
+  label: string;
+  detail: string;
+  bundledCount: number;
+  songCount: number;
 }
 
-export const COMPACT_SCORES: CompactScoreDef[] = rawData as CompactScoreDef[];
-
-export function inflateScore(raw: CompactScoreDef): CelloSongScore {
-  const barDurationMs = measureDurationMs(raw.meter, raw.bpm);
-  const totalMs = raw.notes.reduce((max, n) => Math.max(max, n[1] + n[2]), 0);
-  const barCount = Math.max(1, Math.ceil(totalMs / barDurationMs));
-
-  const measures: CelloMeasure[] = Array.from({ length: barCount }, (_, index) => ({
-    index,
-    startBarTimeMs: index * barDurationMs,
-    durationMs: barDurationMs,
-    timeSignature: raw.meter,
-    tempoBpm: raw.bpm,
-  }));
-
-  // Fingering happens after source choice and range fitting. The normal solver
-  // weights preserve phrase ergonomics across the full C2–A5 compass; easier
-  // runtime levels are re-fingered after their own density/register reduction.
-  const solved = solveFingering(
-    raw.notes.map(([midiNumber, startTimeMs, durationMs]) =>
-      ({ midiNumber, startTimeMs, durationMs })),
-    DEFAULT_WEIGHTS,
-  ).states;
-
-  const notes: CelloNote[] = raw.notes.map(([midiNumber, startTimeMs, durationMs], i) => {
-    const state = solved[i];
-    const measureIndex = Math.min(barCount - 1, Math.floor(startTimeMs / barDurationMs));
-    return {
-      id: \`\${raw.id}-\${i + 1}\`,
-      startTimeMs,
-      durationMs: Math.max(1, Math.min(durationMs, barCount * barDurationMs - startTimeMs)),
-      pitchName: midiToPitchName(midiNumber),
-      midiNumber,
-      frequency: Math.round(midiToFrequency(midiNumber) * 100) / 100,
-      string: state.string,
-      finger: state.finger,
-      position: state.position,
-      extension: state.extension,
-      articulation: 'arco',
-      tie: false,
-      measureIndex,
-      bowDirection: i % 2 === 0 ? 'down' : 'up',
-    };
-  });
-
-  return {
-    schemaVersion: '1.0.0',
-    id: raw.id,
-    metadata: {
-      title: raw.title,
-      composer: raw.composer,
-      origin: raw.origin,
-      keySignature: 'ADAPTIVE',
-      timeSignature: raw.meter.join('/'),
-      bpm: raw.bpm,
-      difficulty: raw.difficulty,
-      tonic: 'C',
-      teaches: 'Full C2–A5 cello line. Choose Beginner, Intermediate, Advanced, or Full on the practice sheet.',
-      rights: raw.category === 'classical' ? 'Public domain' : raw.category === 'study' ? 'Original study' : 'Study reduction \u2014 personal practice, analysis and research',
-    },
-    measures,
-    notes,
-  };
-}
-
-export function inflateBacking(raw: CompactScoreDef): BackingTrack {
-  const parts: BackingPart[] = raw.backingParts.map(([name, inst, role, gain, tNotes], idx) => ({
-    id: \`\${raw.id}-p\${idx}\`,
-    name,
-    instrument: inst as InstrumentName,
-    role: role as PartRole,
-    gain,
-    muted: false,
-    notes: tNotes.map(([midiNumber, startTimeMs, durationMs, velocity]) => ({
-      midiNumber,
-      startTimeMs,
-      durationMs,
-      velocity,
-    })),
-  }));
-
-  const durationMs = parts.reduce(
-    (max, part) => part.notes.reduce((m, n) => Math.max(m, n.startTimeMs + n.durationMs), max),
-    0,
-  );
-
-  return {
-    id: raw.id,
-    name: raw.title,
-    source: 'imported',
-    parts,
-    bpm: raw.bpm,
-    durationMs,
-  };
-}
-`;
-
-writeFileSync('src/scores/bundledSongs.ts', outTs);
-console.log('Done writing compact bundledSongs.ts and bundledSongs.json!');
+export const LIBRARY_EDITION: LibraryEdition = ${JSON.stringify({
+    id: edition,
+    label: edition === 'full' ? 'Full library' : 'Free library',
+    detail: edition === 'full'
+      ? `${compactList.length} bundled pieces, including ${songCount} arranged songs for personal practice`
+      : `${compactList.length} bundled public-domain pieces and original etudes — free to share`,
+    bundledCount: compactList.length,
+    songCount,
+  }, null, 2)};
+`);
+console.log(`Edition: ${edition} — ${compactList.length} pieces (${songCount} songs). Wrote catalogIndex.ts and libraryEdition.ts.`);
 
 // ── Run report ───────────────────────────────────────────────────────────────
 const tiers = difficulties.reduce<Record<string, number>>((acc, d) => {

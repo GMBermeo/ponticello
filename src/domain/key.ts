@@ -156,6 +156,44 @@ export function songPitchClasses(score: CelloSongScore): PitchClass[] {
   return [...present].sort((a, b) => a - b);
 }
 
+/**
+ * Exact string and semitone stopping points actually played in the song.
+ * Unlike `fingerboardMarkers(songPitchClasses(score))`, this only returns notes
+ * the score actually asks the player to stop or play, preventing dots from appearing
+ * in positions or octaves never touched by the piece (e.g. on 1st position studies).
+ */
+export function songPlayedNotes(
+  score: CelloSongScore,
+  options: { tonic?: PitchClass; preferFlats?: boolean } = {},
+): FingerboardMarker[] {
+  const { tonic, preferFlats = false } = options;
+  const seen = new Set<string>();
+  const markers: FingerboardMarker[] = [];
+
+  for (const note of score.notes) {
+    const semitones = note.midiNumber - OPEN_STRING_MIDI[note.string];
+    if (semitones < 0) continue;
+    const key = `${note.string}-${semitones}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const pitchClass = ((note.midiNumber % 12) + 12) % 12;
+    markers.push({
+      string: note.string,
+      semitones,
+      midiNumber: note.midiNumber,
+      pitchName: midiToPitchName(note.midiNumber, preferFlats),
+      pitchClass,
+      isTonic: tonic !== undefined && pitchClass === ((tonic % 12) + 12) % 12,
+    });
+  }
+
+  return markers.sort((a, b) => {
+    if (a.string !== b.string) return a.string.localeCompare(b.string);
+    return a.semitones - b.semitones;
+  });
+}
+
 /** One placeable note on the fingerboard: a stopping point on a string. */
 export interface FingerboardMarker {
   string: CelloString;

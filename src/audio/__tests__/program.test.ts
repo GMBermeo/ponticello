@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { BackingPart } from '@/domain/backing';
 import { loopOffsetSeconds, practiceLoop } from '@/domain/loop';
 import { CelloSongScore } from '@/domain/schema';
-import { buildProgram, estimatePeak, notesActiveAtOffset } from '../backing/program';
+import { buildProgram, estimatePeak, notesActiveAtOffset, resolveAudibleProgram } from '../backing/program';
 import { renderProgramInto } from '../synth';
 
 function score(bars: number, bpm = 120): CelloSongScore {
@@ -173,4 +173,37 @@ describe('resolving parts into a program', () => {
     expect(loopOffsetSeconds(loop4, oneLoop + 500)).toBeCloseTo(0.5, 5);
     expect(loopOffsetSeconds(loop4, -500)).toBeCloseTo((oneLoop - 500) / 1000, 5);
   });
+
+  describe('resolveAudibleProgram', () => {
+    it('resolves parts and builds program in a single step', () => {
+      const s = score(4);
+      s.notes = [{
+        id: 'n1',
+        midiNumber: 43,
+        pitchName: 'G2',
+        frequency: 98,
+        startTimeMs: 0,
+        durationMs: 500,
+        string: 'G',
+        finger: '0',
+        position: '1st',
+        extension: 'none',
+        articulation: 'arco',
+        tie: false,
+        measureIndex: 0,
+      }];
+      const res = resolveAudibleProgram({
+        score: s,
+        backing: null,
+        loop: loop4,
+        listenMode: 'solo',
+        accompaniment: 'none',
+      });
+      expect(res.soloParts).toHaveLength(1);
+      expect(res.audibleParts).toHaveLength(1);
+      expect(res.program.notes.length).toBeGreaterThan(0);
+      expect(res.program.durationSec).toBeCloseTo(loop4.realDurationMs / 1000, 3);
+    });
+  });
 });
+

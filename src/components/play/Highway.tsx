@@ -3,14 +3,14 @@ import { View } from 'react-native';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 
 import { CelloNote, CelloSongScore } from '@/domain/schema';
-import { OPEN_STRING_MIDI, STRING_ORDER } from '@/domain/cello';
+import { DISPLAY_STRING_ORDER, OPEN_STRING_MIDI } from '@/domain/cello';
 import { TapeSet, tapeForSemitones } from '@/domain/tapes';
 import { FlowAxis } from '@/state/settings';
 import { Theme, useTheme } from '@/theme/ThemeProvider';
 import { alpha } from '@/theme/tokens';
 import { Label, Num } from '../ui/primitives';
-import { flowWindow, laneGeometry, visibleSlice } from './flow';
-import { Playhead } from './usePlayhead';
+import { flowWindow, laneGeometry, timeAlongOffset, visibleSlice } from './flow';
+import { Playhead, usePlayheadPosition } from './usePlayhead';
 
 /**
  * Highway vision — notes travel down four string lanes to a hit line.
@@ -66,7 +66,7 @@ export interface HighwayProps {
   axis?: FlowAxis;
 }
 
-export function Highway({
+export const Highway = memo(function Highway({
   score, playhead, tapeSets, showFingerings, height, width, axis = 'vertical',
 }: HighwayProps) {
   const theme = useTheme();
@@ -105,7 +105,8 @@ export function Highway({
    * second, and `flowWindow` is generous enough on both sides to cover the
    * travel between updates.
    */
-  const anchorMs = score.notes[playhead.activeIndex]?.startTimeMs ?? playhead.loopStartMs;
+  const position = usePlayheadPosition(playhead);
+  const anchorMs = position.windowMs;
   const visibleMs = timeExtent / pxPerMs;
   const window = useMemo(
     () => flowWindow(anchorMs, Math.max(visibleMs, LOOKAHEAD_MS), horizontal ? 0.74 : 0.8),
@@ -132,15 +133,13 @@ export function Highway({
         note,
         index,
         lane: lanes.laneAt(note.string),
-        along: horizontal
-          ? hitAt + note.startTimeMs * pxPerMs
-          : hitAt - note.startTimeMs * pxPerMs,
+        along: timeAlongOffset(note.startTimeMs, axis, hitAt, pxPerMs),
         length: Math.max(theme.s(22), note.durationMs * pxPerMs),
         tapeColor: tapeColorFor(note, tapeSets, theme),
       });
     }
     return out;
-  }, [score, window, lanes, hitAt, pxPerMs, tapeSets, theme, horizontal]);
+  }, [score, window, lanes, hitAt, pxPerMs, tapeSets, theme, axis]);
 
   const field = useAnimatedStyle(() => {
     const shift = playhead.timeMs.get() * pxPerMs;
@@ -160,7 +159,7 @@ export function Highway({
       </View>
 
       {/* Lanes. */}
-      {STRING_ORDER.map((string) => (
+      {DISPLAY_STRING_ORDER.map((string) => (
         <View
           key={string}
           style={horizontal
@@ -196,7 +195,7 @@ export function Highway({
             horizontal={horizontal}
             tapeColor={item.tapeColor}
             showFinger={showFingerings}
-            state={noteState(item.index, playhead.activeIndex)}
+            state={noteState(item.index, position.activeIndex)}
           />
         ))}
       </Animated.View>
@@ -207,7 +206,7 @@ export function Highway({
           ? {
             position: 'absolute',
             top: 0,
-            height: lanes.laneStep * STRING_ORDER.length - gap,
+            height: lanes.laneStep * DISPLAY_STRING_ORDER.length - gap,
             left: hitAt,
             width: theme.rule(3),
             backgroundColor: chrome.accent,
@@ -215,7 +214,7 @@ export function Highway({
           : {
             position: 'absolute',
             left: 0,
-            width: lanes.laneStep * STRING_ORDER.length - gap,
+            width: lanes.laneStep * DISPLAY_STRING_ORDER.length - gap,
             top: hitAt,
             height: theme.rule(3),
             backgroundColor: chrome.accent,
@@ -230,7 +229,7 @@ export function Highway({
       </View>
 
       {/* String names beside each lane. */}
-      {STRING_ORDER.map((string) => (
+      {DISPLAY_STRING_ORDER.map((string) => (
         <View
           key={string}
           style={horizontal
@@ -250,7 +249,7 @@ export function Highway({
       ))}
     </View>
   );
-}
+});
 
 /**
  * A single note. Memoised on its own props: the field re-renders only when the

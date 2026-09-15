@@ -11,17 +11,25 @@
  * from a file the app never had to ship.
  */
 
-import { arrangeMidi } from './arrangement';
+import { arrangeMidi, bassLine, harmonicGuide, rebaseLine } from './arrangement';
 import { BackingTrack, backingFromMidi, soloPartFromScore } from './backing';
 import { midiToFrequency, midiToPitchName } from './cello';
 import { difficultyOf } from './difficulty';
-import { detectShifts, RawNoteEvent, solveFingering } from './fingering';
+import { detectKey, keyName } from './key';
+import { detectShifts, firstPositionFingering, RawNoteEvent } from './fingering';
 import { ParsedMidi } from './midi';
 import { CelloMeasure, CelloNote, CelloSongScore, measureDurationMs } from './schema';
 
 export interface ImportedPiece {
   score: CelloSongScore;
   backing: BackingTrack;
+  /**
+   * Held harmonic roots for the Beginner level, on the same timeline as
+   * `score`. Built here rather than stored, like everything else about an
+   * imported piece — the file is what is kept.
+   */
+  guide: RawNoteEvent[];
+  bass: RawNoteEvent[];
   /** Notes dropped because no cello can play them. */
   skippedNotes: number;
   shiftCount: number;
@@ -72,7 +80,13 @@ export function importScore(parsed: ParsedMidi, options: ImportScoreOptions): Im
 
   if (events.length === 0) throw new Error('Nothing in that track lands in the requested score window.');
 
-  const { states } = solveFingering(events);
+  // A real key, not the word "IMPORTED": `generateAccompaniment` parses this
+  // string for the tonic of the drone, and "IMPORTED" has always come back as
+  // C whatever the file was in.
+  const detected = detectKey(events);
+  const key = keyName(detected.tonic, detected.mode);
+
+  const states = events.map((event) => firstPositionFingering(event.midiNumber));
   const shifts = detectShifts(events, states);
   const difficulty = difficultyOf(events, states);
 
@@ -90,8 +104,7 @@ export function importScore(parsed: ParsedMidi, options: ImportScoreOptions): Im
   const notes: CelloNote[] = events.map((event, i) => {
     const state = states[i];
     if (!state) {
-      // The solver returns one state per event; a mismatch is a bug in it
-      // rather than bad input, and should not reach the score.
+      // Every arranged event must have a first-position fingering.
       throw new Error(`No fingering was found for note ${i + 1}.`);
     }
     return {
@@ -99,7 +112,7 @@ export function importScore(parsed: ParsedMidi, options: ImportScoreOptions): Im
       startTimeMs: Math.round(event.startTimeMs),
       // Never let a note spill past the final bar line; the schema rejects it.
       durationMs: Math.max(1, Math.min(event.durationMs, barCount * barDurationMs - event.startTimeMs)),
-      pitchName: midiToPitchName(event.midiNumber),
+      pitchName: midiToPitchName(event.midiNumber, key.includes('\u266d')),
       midiNumber: event.midiNumber,
       frequency: Math.round(midiToFrequency(event.midiNumber) * 100) / 100,
       string: state.string,
@@ -120,12 +133,13 @@ export function importScore(parsed: ParsedMidi, options: ImportScoreOptions): Im
       title,
       composer,
       origin: 'IMPORTED · MIDI',
-      keySignature: 'IMPORTED',
+      keySignature: key,
       timeSignature: timeSignature.join('/'),
       bpm,
       difficulty: difficulty.tier,
-      tonic: 'C',
-      teaches: `Imported ${arranged.sourceKind} line, fitted to C2–A5 with one coherent octave policy. Choose an easier arrangement level on the practice sheet if needed.`,
+      tonic: key.split(' ')[0] ?? 'C',
+      preferFlats: key.includes('\u266d'),
+      teaches: `Imported ${arranged.sourceKind} line, fitted to low first position with octave displacement. Choose an easier arrangement level on the practice sheet if needed.`,
       rights: 'Imported by you. Nothing about this file is distributed with the app.',
     },
     measures,
@@ -144,5 +158,11 @@ export function importScore(parsed: ParsedMidi, options: ImportScoreOptions): Im
     soloNotes: soloPartFromScore(score).notes,
   });
 
-  return { score, backing, skippedNotes, shiftCount: shifts.length };
+  // Same rebase and time scale as the melody above, so switching level does
+  // not move the bars under the player.
+  const windowEnd = Math.min(arranged.sourceEndMs, sourceWindowEndMs);
+  const guide = rebaseLine(harmonicGuide(parsed, arranged.sourceEndMs), arranged.originMs, windowEnd, timeScale);
+  const bass = rebaseLine(bassLine(parsed, arranged.sourceEndMs), arranged.originMs, windowEnd, timeScale);
+
+  return { score, backing, guide, bass, skippedNotes, shiftCount: shifts.length };
 }

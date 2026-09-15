@@ -15,16 +15,28 @@
 
 import { CelloSongScore, DifficultyTier, scoreDurationMs, measureDurationMs } from '@/domain/schema';
 import { BackingTrack } from '@/domain/backing';
-import { midiToPitchName } from '@/domain/cello';
+import { RawNoteEvent } from '@/domain/fingering';
+import { CelloString, midiToPitchName } from '@/domain/cello';
+import { KeyMode, PitchClass } from '@/domain/key';
+import { KeyDemand, keyDemand, openStringTonic } from '@/domain/keyCensus';
 
 import { BWV1007_PRELUDE } from './bach';
+import { LIBRARY_KEY_CENSUS } from './keyCensus';
 import { STUDIES, STUDIES_BACKINGS } from './studies';
+import { SCALE_DRILLS, SCALE_DRILL_BACKINGS, SCALE_DRILL_KEYS } from './scaleDrills';
 import { COMPACT_SCORES, inflateBacking, inflateScore, CompactScoreDef } from './bundledSongs';
+import { BUNDLED_CATALOG_ROWS } from './catalogIndex';
 
-export { COMPACT_SCORES };
+export { COMPACT_SCORES, BUNDLED_CATALOG_ROWS };
 
-// Core authored studies & Bach
-export const CORE_SCORES: CelloSongScore[] = [...STUDIES, BWV1007_PRELUDE];
+/**
+ * Core authored material: the tape studies, the scale drills, and the Bach.
+ *
+ * Order matters in one place — the library screen's opening suggestion reads
+ * `LIBRARY_ROWS[0]`, which has to stay the open-string warm-up — so the
+ * studies lead and everything else follows.
+ */
+export const CORE_SCORES: CelloSongScore[] = [...STUDIES, ...SCALE_DRILLS, BWV1007_PRELUDE];
 
 const SCORE_CACHE = new Map<string, CelloSongScore>();
 for (const s of CORE_SCORES) {
@@ -58,9 +70,29 @@ export function isAdaptiveBundledScore(id: string | undefined): boolean {
   return id !== undefined && COMPACT_MAP.has(id);
 }
 
+/**
+ * The song's stored harmonic guide — held roots the Beginner level plays
+ * instead of a thinned melody. See `harmonicGuide` in `domain/arrangement`.
+ */
+export function getGuideLine(id: string | undefined): RawNoteEvent[] | undefined {
+  if (!id) return undefined;
+  const compact = COMPACT_MAP.get(id);
+  if (!compact?.guide?.length) return undefined;
+  return compact.guide.map(([midiNumber, startTimeMs, durationMs]) =>
+    ({ midiNumber, startTimeMs, durationMs }));
+}
+
+/** The original bass/lower voice for a moving Intermediate accompaniment. */
+export function getBassLine(id: string | undefined): RawNoteEvent[] | undefined {
+  const compact = id ? COMPACT_MAP.get(id) : undefined;
+  return compact?.bass?.map(([midiNumber, startTimeMs, durationMs]) =>
+    ({ midiNumber, startTimeMs, durationMs }));
+}
+
 export function getBundledBacking(id: string | undefined): BackingTrack | undefined {
   if (!id) return undefined;
   if (STUDIES_BACKINGS[id]) return STUDIES_BACKINGS[id];
+  if (SCALE_DRILL_BACKINGS[id]) return SCALE_DRILL_BACKINGS[id];
   const compact = COMPACT_MAP.get(id);
   if (compact) {
     return inflateBacking(compact);
@@ -89,7 +121,7 @@ function rangeOf(score: CelloSongScore): string {
   const midi = score.notes.map((n) => n.midiNumber);
   const low = score.notes[midi.indexOf(Math.min(...midi))];
   const high = score.notes[midi.indexOf(Math.max(...midi))];
-  return `${low.pitchName} – ${high.pitchName}`;
+  return `${low?.pitchName ?? 'C2'} – ${high?.pitchName ?? 'A3'}`;
 }
 
 /** Share of notes in each position band, for the practice sheet's load bars. */
@@ -132,7 +164,7 @@ function toCoreRow(score: CelloSongScore): LibraryRow {
   };
 }
 
-function toCompactRow(c: CompactScoreDef): LibraryRow {
+export function toCompactRow(c: CompactScoreDef): LibraryRow {
   const midis = c.notes.map((n) => n[0]);
   const minMidi = Math.min(...midis);
   const maxMidi = Math.max(...midis);
@@ -145,8 +177,8 @@ function toCompactRow(c: CompactScoreDef): LibraryRow {
     title: c.title,
     composer: c.composer,
     origin: c.origin,
-    keySignature: c.positions[0] === 100 ? '1ST POS' : 'MIXED POS',
-    range: `${midiToPitchName(minMidi)} – ${midiToPitchName(maxMidi)}`,
+    keySignature: c.key.toUpperCase(),
+    range: `${midiToPitchName(minMidi, c.preferFlats)} – ${midiToPitchName(maxMidi, c.preferFlats)}`,
     tempo: `♩ ${c.bpm}`,
     difficulty: c.difficulty,
     category: c.category,
@@ -165,12 +197,105 @@ function toCompactRow(c: CompactScoreDef): LibraryRow {
 
 export const LIBRARY_ROWS: LibraryRow[] = [
   ...CORE_SCORES.map(toCoreRow),
-  ...COMPACT_SCORES.map(toCompactRow),
+  ...BUNDLED_CATALOG_ROWS,
 ];
 
 export function durationOf(id: string): number {
   const score = getScore(id);
   return score ? scoreDurationMs(score) : 0;
+}
+
+// ─── Keys: what the library asks for, and what is drilled ────────────────────
+
+export { LIBRARY_KEY_CENSUS };
+
+export interface KeyPracticeRow {
+  /** Canonical key label, e.g. `"B♭ major"`. */
+  key: string;
+  tonic: PitchClass;
+  mode: KeyMode;
+  /** Set when the tonic is an open string, so a drone can be checked by ear. */
+  openString: CelloString | null;
+  /** Songs in the library in this key. */
+  songs: number;
+  /** Share of the library, 0–1. */
+  share: number;
+  /** 1 is the key the library uses most; null if the library no longer uses it. */
+  rank: number | null;
+  demand: KeyDemand;
+  /** The drills authored for this key, easiest first. */
+  drills: LibraryRow[];
+}
+
+const ROWS_BY_ID: Record<string, LibraryRow> =
+  Object.fromEntries(CORE_SCORES.map(toCoreRow).map((row) => [row.id, row]));
+
+/**
+ * Every key the library uses, most-used first, with the drills it has.
+ *
+ * This is the join the scales screen is built on, and the reason the drills are
+ * authored per key rather than per row: the census decides the order and the
+ * billing at runtime, so a rebuilt library re-sorts the screen and re-labels
+ * the demand without anybody re-authoring a note. A key the census ranks highly
+ * but that has no drills yet still gets a row — an empty one, which is the
+ * honest way to show a gap rather than hiding it.
+ */
+export const KEY_PRACTICE_ROWS: KeyPracticeRow[] = (() => {
+  const drillsByKey = new Map<string, LibraryRow[]>();
+  for (const score of SCALE_DRILLS) {
+    const drill = SCALE_DRILL_KEYS[score.id];
+    const row = ROWS_BY_ID[score.id];
+    if (!drill || !row) continue;
+    const list = drillsByKey.get(drill.key);
+    if (list) list.push(row);
+    else drillsByKey.set(drill.key, [row]);
+  }
+
+  const rows: KeyPracticeRow[] = LIBRARY_KEY_CENSUS.entries.map((entry) => ({
+    key: entry.key,
+    tonic: entry.tonic,
+    mode: entry.mode,
+    openString: entry.openString,
+    songs: entry.songs,
+    share: entry.share,
+    rank: entry.rank,
+    demand: keyDemand(entry.share),
+    drills: drillsByKey.get(entry.key) ?? [],
+  }));
+
+  // A drill whose key has dropped out of the library entirely still belongs on
+  // the screen — the player may have learnt it — but it goes to the bottom.
+  for (const [key, drills] of drillsByKey) {
+    if (rows.some((row) => row.key === key)) continue;
+    const first = drills[0];
+    const meta = first ? SCALE_DRILL_KEYS[first.id] : undefined;
+    if (!meta) continue;
+    rows.push({
+      key,
+      tonic: meta.tonic,
+      mode: meta.mode,
+      openString: openStringTonic(meta.tonic),
+      songs: 0,
+      share: 0,
+      rank: null,
+      demand: 'rare',
+      drills,
+    });
+  }
+
+  return rows;
+})();
+
+/** Drills for one key, easiest first. */
+export function drillsForKey(key: string): LibraryRow[] {
+  return KEY_PRACTICE_ROWS.find((row) => row.key === key)?.drills ?? [];
+}
+
+/** The census row behind a scale drill, for the practice sheet's "why". */
+export function censusForDrill(id: string | undefined): KeyPracticeRow | undefined {
+  const drill = id ? SCALE_DRILL_KEYS[id] : undefined;
+  if (!drill) return undefined;
+  return KEY_PRACTICE_ROWS.find((row) => row.key === drill.key);
 }
 
 

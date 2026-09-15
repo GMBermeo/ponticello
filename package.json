@@ -1,7 +1,7 @@
 {
   "name": "ponticello",
   "main": "expo-router/entry",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",
     "@expo/ui": "~57.0.12",
@@ -51,12 +51,18 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.strict.json",
+    "build:library": "vite-node --config vitest.config.ts tools/build-library.ts -- --edition=full",
+    "audit:arrangements": "vite-node --config vitest.config.ts tools/audit-arrangements.ts",
+    "arrange:ollama": "vite-node tools/ollama-arranger.ts --",
     "convert": "vite-node tools/convert-score.ts --",
     "apk": "bash tools/build-apk.sh",
     "proxy": "node tools/dev-proxy.mjs",
     "typecheck:strict": "tsc --noEmit -p tsconfig.strict.json",
     "ipa": "eas build --platform ios --profile device",
-    "ipa:simulator": "eas build --platform ios --profile preview"
+    "ipa:simulator": "eas build --platform ios --profile preview",
+    "build:library:free": "vite-node --config vitest.config.ts tools/build-library.ts -- --edition=free",
+    "release:full": "bash tools/build-release.sh full",
+    "release:free": "bash tools/build-release.sh free"
   },
   "private": true
 }

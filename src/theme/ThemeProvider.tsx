@@ -67,14 +67,14 @@ export function MenuTheme({ children }: { children: React.ReactNode }) {
  * ones from closing up entirely.
  */
 export function labelTracking(fontSize: number): number {
-  return Math.max(0.4, fontSize * 0.085);
+  return Math.max(0.3, fontSize * 0.055);
 }
 
 /** The uppercase tracked micro-label that structures every section. */
 export function labelStyle(theme: Theme, color?: string): TextStyle {
   const fontSize = theme.font(12);
   return {
-    fontFamily: FONT.heavy,
+    fontFamily: FONT.semibold,
     fontSize,
     letterSpacing: labelTracking(fontSize),
     textTransform: 'uppercase',
@@ -84,9 +84,9 @@ export function labelStyle(theme: Theme, color?: string): TextStyle {
 
 export function titleStyle(theme: Theme, size = 24, color?: string): TextStyle {
   return {
-    fontFamily: FONT.heavy,
+    fontFamily: size >= 24 ? FONT.heavy : FONT.semibold,
     fontSize: theme.font(size),
-    letterSpacing: TRACKING.tight,
+    letterSpacing: size >= 24 ? TRACKING.tight : 0,
     color: color ?? theme.chrome.ink,
   };
 }

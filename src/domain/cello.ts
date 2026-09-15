@@ -13,8 +13,14 @@ export const A4_HZ = 440;
 
 export type CelloString = 'C' | 'G' | 'D' | 'A';
 
-/** Low → high. Also the left-to-right lane order on the highway. */
+/** Low → high. Also the musical string order used in solvers and pitch lookups. */
 export const STRING_ORDER: readonly CelloString[] = ['C', 'G', 'D', 'A'] as const;
+
+/**
+ * Visual display order from left to right: A → D → G → C.
+ * Matches the cellist's physical perspective looking down at the fingerboard.
+ */
+export const DISPLAY_STRING_ORDER: readonly CelloString[] = ['A', 'D', 'G', 'C'] as const;
 
 /** Open-string MIDI numbers (middle C = C4 = 60). */
 export const OPEN_STRING_MIDI: Record<CelloString, number> = {
@@ -179,4 +185,131 @@ export function defaultStringFor(midi: number): CelloString | null {
     if (n !== null && n <= 19) return s;
   }
   return null;
+}
+
+// ─── Cello note catalog & score notation info ────────────────────────────────
+
+export interface CelloNoteInfo {
+  midi: number;
+  pitchName: string;
+  letter: string;
+  accidental: '♯' | '♭' | null;
+  octave: number;
+  /** Diatonic staff step relative to the bass clef bottom line (G2 = 0). */
+  staffStep: number;
+  /** Ledger line positions in half-steps/steps: -2, -4... or 10, 12... */
+  ledgerLines: number[];
+  defaultString: CelloString | null;
+  semitones: number | null;
+}
+
+const BASS_BOTTOM_LINE = 18; // G2 diatonic offset: octave 2 * 7 + G(4) = 18
+const LETTER_STEP: Record<string, number> = { C: 0, D: 1, E: 2, F: 3, G: 4, A: 5, B: 6 };
+const SHARP_LETTERS: { [pc: number]: { letter: string; accidental: '♯' | null } } = {
+  0: { letter: 'C', accidental: null },
+  1: { letter: 'C', accidental: '♯' },
+  2: { letter: 'D', accidental: null },
+  3: { letter: 'D', accidental: '♯' },
+  4: { letter: 'E', accidental: null },
+  5: { letter: 'F', accidental: null },
+  6: { letter: 'F', accidental: '♯' },
+  7: { letter: 'G', accidental: null },
+  8: { letter: 'G', accidental: '♯' },
+  9: { letter: 'A', accidental: null },
+  10: { letter: 'A', accidental: '♯' },
+  11: { letter: 'B', accidental: null },
+};
+
+const FLAT_LETTERS: { [pc: number]: { letter: string; accidental: '♭' | null } } = {
+  0: { letter: 'C', accidental: null },
+  1: { letter: 'D', accidental: '♭' },
+  2: { letter: 'D', accidental: null },
+  3: { letter: 'E', accidental: '♭' },
+  4: { letter: 'E', accidental: null },
+  5: { letter: 'F', accidental: null },
+  6: { letter: 'G', accidental: '♭' },
+  7: { letter: 'G', accidental: null },
+  8: { letter: 'A', accidental: '♭' },
+  9: { letter: 'A', accidental: null },
+  10: { letter: 'B', accidental: '♭' },
+  11: { letter: 'B', accidental: null },
+};
+
+function createNoteInfo(midi: number, preferFlats = false): CelloNoteInfo {
+  const pc = ((midi % 12) + 12) % 12;
+  const spec = (preferFlats ? FLAT_LETTERS[pc] : SHARP_LETTERS[pc]) ?? { letter: 'C', accidental: null };
+  const octave = Math.floor(midi / 12) - 1;
+  const letterOffset = LETTER_STEP[spec.letter] ?? 0;
+  const diatonic = octave * 7 + letterOffset;
+  const staffStep = diatonic - BASS_BOTTOM_LINE;
+
+  const ledgerLines: number[] = [];
+  for (let s = 10; s <= staffStep; s += 2) ledgerLines.push(s);
+  for (let s = -2; s >= staffStep; s -= 2) ledgerLines.push(s);
+
+  const defString = defaultStringFor(midi);
+  const semitones = defString ? semitonesFor(defString, midi) : null;
+
+  return {
+    midi,
+    pitchName: midiToPitchName(midi, preferFlats),
+    letter: spec.letter,
+    accidental: spec.accidental,
+    octave,
+    staffStep,
+    ledgerLines,
+    defaultString: defString,
+    semitones,
+  };
+}
+
+function buildCelloNotesCatalog(): Record<number, CelloNoteInfo> {
+  const catalog: Record<number, CelloNoteInfo> = {};
+  // Standard cello range: C2 (36) to C6 (84)
+  for (let midi = 36; midi <= 84; midi++) {
+    catalog[midi] = createNoteInfo(midi, false);
+  }
+  return catalog;
+}
+
+/**
+ * Constant catalog of all standard notes on the cello (MIDI 36 / C2 through MIDI 84 / C6),
+ * indexed by MIDI number for instant lookup.
+ */
+export const CELLO_NOTES: Record<number, CelloNoteInfo> = buildCelloNotesCatalog();
+
+export function getCelloNote(midi: number, preferFlats = false): CelloNoteInfo {
+  const cached = CELLO_NOTES[midi];
+  if (!preferFlats && cached) {
+    return cached;
+  }
+  return createNoteInfo(midi, preferFlats);
+}
+
+/**
+ * Calculates the ideal fingerboard drawing extent (maxMm) based on the positions and semitones
+ * actually used in the piece:
+ * - 1st position only (<= 6 semitones): ~220 mm (zooms in, visually separating notes)
+ * - Up to 4th position (<= 10 semitones): ~330 mm (omits 8va/thumb position)
+ * - Upper / thumb positions: 440 mm (full board)
+ */
+export function calculateFretboardMaxMm(
+  notes: readonly { string: CelloString; midiNumber: number; position?: CelloPosition }[],
+): number {
+  if (!notes || notes.length === 0) return 440;
+
+  let maxSemitones = 0;
+  let hasThumbOrHigh = false;
+
+  for (const n of notes) {
+    const semitones = n.midiNumber - OPEN_STRING_MIDI[n.string];
+    if (semitones > maxSemitones) maxSemitones = semitones;
+    if (n.position === 'Thumb' || n.position === '5th' || n.position === '6th' || n.position === '7th') {
+      hasThumbOrHigh = true;
+    }
+  }
+
+  if (hasThumbOrHigh || maxSemitones > 10) return 440;
+  if (maxSemitones <= 6) return 220;
+  return 330;
 }

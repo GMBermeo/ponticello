@@ -17,7 +17,9 @@
  * Pure: no React, no React Native, no Web Audio. See AGENTS.md.
  */
 
-import { BackingPart, InstrumentName } from '@/domain/backing';
+import {
+  AudiblePartsQuery, AudiblePartsResult, BackingPart, InstrumentName, resolveAudibleParts,
+} from '@/domain/backing';
 import { PracticeLoop } from '@/domain/loop';
 import { VOICES } from '../voices';
 
@@ -130,6 +132,78 @@ export function estimatePeak(notes: readonly ScheduledNote[]): number {
   return Math.sqrt(Math.max(0, peak));
 }
 
+/**
+ * Most voices allowed to sound at once.
+ *
+ * The busiest file in the library, `les-miserables-theme`, stacks fifteen MIDI
+ * tracks with piano chords on top, and at its loudest bars that is more than
+ * sixty overlapping notes. Every one is an oscillator, a gain node and a set of
+ * automation events on web, and inner-loop work for every sample on native —
+ * all to reproduce a reference texture under a cello nobody can pick sixty
+ * voices out of. Thirty-two keeps every part audible and puts a ceiling on the
+ * cost of the densest bar, which is where the stutter was.
+ */
+export const MAX_POLYPHONY = 32;
+
+/**
+ * Voice stealing, done once when the program is built.
+ *
+ * Walks the sorted notes keeping the set that is still sounding (hold plus
+ * release). When a new note would exceed `max`, the quietest sounding voice
+ * — the new note included — loses: if that is an older note it is cut short at
+ * the new onset, exactly as a hardware synth steals a voice; if it is the new
+ * note, it is dropped. Loudness decides because a thinned backing should keep
+ * the accents a player is listening for.
+ *
+ * Returns a new array; the input is not modified. Truncated notes are copies.
+ */
+export function limitPolyphony(
+  notes: readonly ScheduledNote[], max: number = MAX_POLYPHONY,
+): ScheduledNote[] {
+  if (max <= 0) return [];
+  const out: (ScheduledNote | null)[] = [];
+  /** Indices into `out` of voices that may still be sounding. */
+  let sounding: number[] = [];
+  const endOf = (note: ScheduledNote) =>
+    note.atSec + note.holdSec + VOICES[note.instrument].releaseMs / 1000;
+
+  for (const note of notes) {
+    sounding = sounding.filter((index) => {
+      const voice = out[index];
+      return voice !== null && endOf(voice) > note.atSec;
+    });
+
+    if (sounding.length < max) {
+      sounding.push(out.length);
+      out.push(note);
+      continue;
+    }
+
+    let quietest = sounding[0];
+    for (const index of sounding) {
+      if ((out[index] as ScheduledNote).amplitude < (out[quietest] as ScheduledNote).amplitude) {
+        quietest = index;
+      }
+    }
+    const victim = out[quietest] as ScheduledNote;
+    if (note.amplitude <= victim.amplitude) continue;
+
+    // The stolen voice must be *silent* by the new onset, release included, or
+    // the ceiling is only a ceiling on attacks. A voice with no room left for
+    // a hold never really sounded; drop it rather than keep a click.
+    // A millisecond of margin, so float error cannot leave the tail ending a
+    // hair after the onset it was cut for.
+    const releaseSec = VOICES[victim.instrument].releaseMs / 1000;
+    const holdSec = Math.min(victim.holdSec, note.atSec - victim.atSec - releaseSec - 0.001);
+    out[quietest] = holdSec > 0.02 ? { ...victim, holdSec } : null;
+    sounding = sounding.filter((index) => index !== quietest);
+    sounding.push(out.length);
+    out.push(note);
+  }
+
+  return out.filter((note): note is ScheduledNote => note !== null);
+}
+
 export interface ProgramOptions {
   /** Identifies the music, so an equivalent program keeps the same key. */
   id: string;
@@ -207,11 +281,38 @@ export function buildProgram({ id, parts, loop }: ProgramOptions): BackingProgra
   // collapse to the same key just because gain protection normalises them.
   const key = contentKey(id, notes, durationSec);
 
+  // Bounded before anything else looks at the notes, so the level estimate
+  // below measures the voices that will actually sound.
+  const voiced = limitPolyphony(notes);
+
   // One trim for the whole program, applied here rather than at playback, so
   // the two adapters cannot disagree about how loud the same music is.
-  const peak = estimatePeak(notes);
+  const peak = estimatePeak(voiced);
   const trim = peak > 0 ? Math.min(1, TARGET_PEAK / peak) : 1;
-  if (trim < 1) for (const note of notes) note.amplitude *= trim;
+  if (trim < 1) for (const note of voiced) note.amplitude *= trim;
 
-  return { key, notes, durationSec };
+  return { key, notes: voiced, durationSec };
+}
+
+export interface AudibleProgramQuery extends AudiblePartsQuery {}
+
+export interface AudibleProgramResult extends AudiblePartsResult {
+  program: BackingProgram;
+}
+
+/**
+ * Consolidates part resolution and backing program compilation into a single
+ * pure function, eliminating cascaded useMemos in the React layer.
+ */
+export function resolveAudibleProgram(query: AudibleProgramQuery): AudibleProgramResult {
+  const partsResult = resolveAudibleParts(query);
+  const program = buildProgram({
+    id: `${query.score?.id ?? 'none'}:${query.listenMode}:${query.accompaniment}`,
+    parts: partsResult.audibleParts,
+    loop: query.loop,
+  });
+  return {
+    ...partsResult,
+    program,
+  };
 }

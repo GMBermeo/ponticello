@@ -5,62 +5,33 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Platform, Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Fingerboard, FingerboardScaleNote, FingerboardStringLabels } from '@/components/Fingerboard';
 import { ListenChip } from '@/components/play/ListenControl';
+import { trackChoiceSummary } from '@/components/play/TrackPicker';
 import { Highway } from '@/components/play/Highway';
-import { CentsRail, LevelMeter } from '@/components/play/Meters';
 import { ScorePage } from '@/components/play/ScorePage';
 import { TabVision } from '@/components/play/TabVision';
-import { usePlayhead } from '@/components/play/usePlayhead';
+import { TunerStrip } from '@/components/play/TunerStrip';
+import { Playhead, usePlayhead } from '@/components/play/usePlayhead';
 import { useMeasuredSize } from '@/components/useMeasuredSize';
-import { Segmented } from '@/components/ui/controls';
-import { Grow, Label, Row, Rule, Title } from '@/components/ui/primitives';
+import { Label, Row, Rule, Title } from '@/components/ui/primitives';
 import { usePitch } from '@/audio/usePitch';
 import { useBacking } from '@/audio/useBacking';
-import { ListenMode } from '@/audio/backing/types';
-import { OPEN_STRING_MIDI } from '@/domain/cello';
-import { detectSongKey, fingerboardMarkers, songPitchClasses } from '@/domain/key';
+import { calculateFretboardMaxMm } from '@/domain/cello';
+import { detectSongKey, fingerboardMarkers, songPlayedNotes } from '@/domain/key';
 import { practiceLoop } from '@/domain/loop';
 import { usePiece } from '@/state/usePiece';
 import { useSession } from '@/state/session';
-import { NoteOverlayMode, useSettings, VisionName } from '@/state/settings';
+import {
+  useAudioPreferences,
+  useSettingsSelector,
+  useTapeSettings,
+  useTrackChoice,
+  useVisionPreferences,
+} from '@/state/settings';
 import { ThemeProvider, useTheme } from '@/theme/ThemeProvider';
-
-const VISION_SEGMENTS = [
-  { value: 'tab' as const, label: 'TAB' },
-  { value: 'score' as const, label: 'SCORE' },
-  { value: 'highway' as const, label: 'HWY', hint: 'Highway' },
-];
-
-/**
- * Short labels: the play screen is landscape and this control sits beside the
- * vision switcher, so it has to earn its width. The full wording lives on the
- * practice sheet, where there is room to explain it.
- */
-const LISTEN_SEGMENTS = [
-  { value: 'off' as const, label: 'OFF', hint: 'Listen: off' },
-  { value: 'backing' as const, label: 'BACK', hint: 'Listen: backing only' },
-  { value: 'solo' as const, label: 'CELLO', hint: 'Listen: written cello part' },
-  { value: 'both' as const, label: 'BOTH', hint: 'Listen: backing and cello' },
-];
-
-/** Fingerboard note overlay mode switcher on the top bar. */
-const OVERLAY_SEGMENTS = [
-  { value: 'key' as const, label: 'KEY', hint: 'Show key notes for improvising' },
-  { value: 'song' as const, label: 'SONG', hint: 'Show all notes in song' },
-];
-
-/** Compact labels for the fingerboard note-overlay toggle. */
-const OVERLAY_LABEL: Record<NoteOverlayMode, string> = {
-  off: 'KEY',
-  key: 'KEY',
-  song: 'SONG',
-};
-
-/** Toggle between KEY and SONG notes overlay. */
-function nextOverlayMode(mode: NoteOverlayMode): NoteOverlayMode {
-  return mode === 'song' ? 'key' : 'song';
-}
+import { PlayTopBar } from '@/components/play/PlayTopBar';
+import { PlayControlBar } from '@/components/play/PlayControlBar';
+import { PlayFingerboardColumn } from '@/components/play/PlayFingerboardColumn';
 
 const KEEP_AWAKE_TAG = 'ponticello-play';
 
@@ -70,21 +41,20 @@ const KEEP_AWAKE_TAG = 'ponticello-play';
  * Two sets, because the screen has to work held either way up. Landscape has
  * room for the fingerboard panel at a size you can read at arm's length;
  * portrait — an unfolded Fold held vertically, or any phone — has to buy that
- * width back from somewhere, and the panels are the right place to buy it from
+ * width back from somewhere, and the panel is the right place to buy it from
  * because the vision in the middle is the thing being read.
  */
 const FINGERBOARD_WIDTH = 152;
 const FINGERBOARD_WIDTH_TALL = 104;
-const CENTS_WIDTH = 96;
-const CENTS_WIDTH_TALL = 72;
-const TOP_BAR = 56;
-const CONTROL_BAR = 46;
 const STATUS_BAR = 36;
 
+/** How often the audio's own position is compared with the picture. */
+const AUDIO_LOCK_MS = 250;
+
 export default function PlayRoute() {
-  const { settings } = useSettings();
+  const chrome = useSettingsSelector((s) => s.chrome);
   return (
-    <ThemeProvider chrome={settings.chrome}>
+    <ThemeProvider chrome={chrome}>
       <PlayScreen />
     </ThemeProvider>
   );
@@ -93,22 +63,29 @@ export default function PlayRoute() {
 /**
  * Play screen.
  *
- * Three things never move, whichever vision is showing: the fingerboard panel
- * on the left, the cents rail on the right, and the status strip along the
- * bottom. Switching vision changes the middle and nothing else, so the two
- * readings you check mid-phrase — where is my hand, how far off am I — are
- * always in the same place.
+ * The fingerboard panel on the left and the status strip along the bottom
+ * never move, whichever vision is showing. The microphone is a tuner and only a
+ * tuner: it listens while the transport is paused, across the top of the play
+ * area, and switches off the moment you press play.
+ *
+ * Nothing on this component changes while the music runs. The note and bar
+ * are subscribed to by the leaves that draw them (see `usePlayheadPosition`),
+ * so a note change re-renders a badge and a label rather than this whole tree.
  */
 function PlayScreen() {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { settings, update } = useSettings();
+
+  const choice = useTrackChoice(id);
+  const { listenMode, accompaniment, backingVolume } = useAudioPreferences();
+  const { vision, showFingerings, showTapes, highwayAxis, tabAxis } = useVisionPreferences();
+  const { tapeSets } = useTapeSettings();
+  const noteOverlayMode = useSettingsSelector((s) => s.noteOverlay);
   const { setup } = useSession();
 
   const [visionSize, onVisionLayout, visionRef] = useMeasuredSize();
-  const [boardSize, onBoardLayout, boardRef] = useMeasuredSize();
 
   // Practising is the one activity where the screen must not dim: the player's
   // hands are busy and nothing is touching the glass for minutes at a time.
@@ -120,21 +97,17 @@ function PlayScreen() {
     return () => { deactivateKeepAwake(KEEP_AWAKE_TAG).catch(() => {}); };
   }, []);
 
-  // The play screen used to force landscape. It no longer does: an unfolded
-  // Fold is a tall screen that people hold vertically, and locking rotation
-  // meant either turning the device or reading the interface sideways. The
-  // layout below adapts instead, which is the only version of "works on that
-  // device" worth having.
+  // The layout adapts to either orientation rather than forcing one: an
+  // unfolded Fold is a tall screen that people hold vertically.
   useEffect(() => {
     if (Platform.OS === 'web') return;
     ScreenOrientation.unlockAsync().catch(() => {});
   }, []);
 
-  const { score, backing: importedBacking, adaptive } = usePiece(id, setup.arrangementLevel);
+  const { score, backing: importedBacking, adaptive, line } = usePiece(id, setup.arrangementLevel, choice);
 
   // Resolved once, here, and handed to both the transport and the
-  // accompaniment. They used to work the window out separately and disagree
-  // about it, which is why the backing never lined up with the notes.
+  // accompaniment, so there is no second derivation to disagree with.
   const loop = useMemo(
     () => practiceLoop(score ?? EMPTY_SCORE, {
       loopFromBar: setup.loopFromBar,
@@ -176,70 +149,58 @@ function PlayScreen() {
     restartPlayhead();
   }, [pausePlayhead, restartPlayhead]);
 
-  /**
-   * The microphone is closed while the transport runs, unless the player has
-   * asked otherwise in Settings.
-   *
-   * This is the fix the user proposed for the stutter, and it is the right one.
-   * The pitch engine runs on the JS thread — about 375 analysis frames a second
-   * — and publishes a React state update twelve times a second. Because that
-   * state is read here, at the top of the play screen, every one of those
-   * updates re-rendered the entire screen including the note field. With the
-   * field windowed that is no longer catastrophic, but it is still twelve
-   * renders a second bought for a reading nobody can act on mid-phrase: while
-   * the backing is carrying you along you are watching the notes, not the
-   * needle. Intonation feedback is where it is useful — stopped on a bar,
-   * working the pitch.
-   */
-  const micActive = settings.micWhilePlaying || !playhead.playing;
-  const pitch = usePitch(micActive);
-  const activeNote = score?.notes[playhead.activeIndex];
+  // Browsers may hold input while a permission prompt is pending, so on web
+  // the microphone is asked for from a player action. Everywhere, it is only
+  // ever open while paused: the pitch engine is real work on the JS thread
+  // and has no business running beside the note field.
+  const [micEnabled, setMicEnabled] = useState(Platform.OS !== 'web');
+  const micActive = micEnabled && !playRequested;
+  const pitch = usePitch(micActive, { tunerMode: true });
+  const { setTarget } = pitch;
+  // A tuner reads the nearest semitone, not the score's next note.
+  useEffect(() => { setTarget(null); }, [setTarget]);
+  const enableMic = useCallback(() => setMicEnabled(true), []);
 
   const backing = useBacking({
     score: score ?? null,
     backing: importedBacking,
-    listenMode: settings.listenMode,
-    accompaniment: settings.accompaniment,
+    listenMode,
+    accompaniment,
     loop,
     playing: playRequested,
     transportRevision: playhead.revision,
-    volume: settings.backingVolume,
+    volume: backingVolume,
     scoreTimeMs: playhead.scoreTimeMs,
     onPlaybackWillStart: handlePlaybackWillStart,
     onPlaybackStarted: handlePlaybackStarted,
   });
 
-  // Point the cents calculation at whatever the player is supposed to be on.
-  useEffect(() => {
-    pitch.setTarget(activeNote?.midiNumber ?? null);
-  }, [activeNote?.midiNumber, pitch]);
-
-  const centsText = useMemo(() => {
-    if (!pitch.reading.voiced) return '—';
-    const rounded = Math.round(pitch.reading.cents);
-    return `${rounded > 0 ? '+' : rounded < 0 ? '−' : ''}${Math.abs(rounded)}¢`;
-  }, [pitch.reading]);
+  useAudioLock(playhead, backing.audioScoreTimeMs, playRequested);
 
   /**
    * Faint fingerboard overlay markers. `key` shows the whole detected key to
    * improvise in; `song` shows only the pitch classes the piece actually uses.
    * Capped at 19 semitones to match the 440 mm the panel draws, and recomputed
-   * only when the score or mode changes — never per frame. Computed before the
-   * no-score early return so the hook order is stable.
+   * only when the score or mode changes — never per frame.
    */
   const songKey = useMemo(() => (score ? detectSongKey(score) : null), [score]);
   const noteOverlay = useMemo(() => {
-    if (!score || !songKey || settings.noteOverlay === 'off') return undefined;
+    if (!score || !songKey || noteOverlayMode === 'off') return undefined;
     const preferFlats = score.metadata.preferFlats ?? songKey.name.includes('♭');
-    const classes = settings.noteOverlay === 'key'
-      ? songKey.scale
-      : songPitchClasses(score);
-    return fingerboardMarkers(classes, {
+    if (noteOverlayMode === 'song') {
+      return songPlayedNotes(score, { tonic: songKey.tonic, preferFlats });
+    }
+    return fingerboardMarkers(songKey.scale, {
       maxSemitones: 19,
       tonic: songKey.tonic,
       preferFlats,
     });
-  }, [settings.noteOverlay, score, songKey]);
+  }, [noteOverlayMode, score, songKey]);
+
+  const fretboardMaxMm = useMemo(() => {
+    if (!score) return 440;
+    return calculateFretboardMaxMm(score.notes);
+  }, [score]);
 
   if (!score) {
     return (
@@ -252,10 +213,6 @@ function PlayScreen() {
     );
   }
 
-  const activeSemitones = activeNote
-    ? activeNote.midiNumber - OPEN_STRING_MIDI[activeNote.string]
-    : 0;
-
   /**
    * True when the title row cannot also carry both switchers — a phone, or an
    * unfolded Fold held vertically. Derived from the resolved scale rather than
@@ -263,7 +220,14 @@ function PlayScreen() {
    */
   const narrow = !theme.scale.landscape || theme.scale.compact;
   const fingerboardWidth = narrow ? FINGERBOARD_WIDTH_TALL : FINGERBOARD_WIDTH;
-  const centsWidth = narrow ? CENTS_WIDTH_TALL : CENTS_WIDTH;
+  const visionWidth = visionSize.width - theme.s(20);
+  const visionHeight = visionSize.height - theme.s(12);
+
+  const micStatus = playRequested
+    ? 'Microphone off while playing'
+    : !micEnabled
+      ? 'Microphone off'
+      : pitch.mic.live ? 'Tuner listening' : micLabel(pitch.mic.status);
 
   return (
     <View
@@ -276,180 +240,30 @@ function PlayScreen() {
         paddingBottom: insets.bottom,
       }}
     >
-      {/* Top bar */}
-      <Row padX={10} gap={10} style={{ height: theme.s(TOP_BAR) }}>
-        <Pressable
-          onPress={() => router.back()}
-          accessibilityRole="button"
-          accessibilityLabel="End session"
-          style={{ width: theme.tap, height: theme.tap, alignItems: 'center', justifyContent: 'center' }}
-        >
-          <Title size={22} color={theme.chrome.ink}>×</Title>
-        </Pressable>
-
-        {/*
-          Narrow: the title takes the slack, because there is no switcher row
-          beside it to compete with. Wide: it sizes to its content up to a cap,
-          and `<Grow />` below absorbs the slack instead — giving it `flex` there
-          shrinks it to whatever the switchers leave over, which truncates a
-          title that would otherwise have fitted.
-        */}
-        <View style={narrow
-          ? { flex: 1, minWidth: 0 }
-          : { minWidth: 0, maxWidth: theme.s(210), flexShrink: 1 }}
-        >
-          <Title size={15} numberOfLines={1}>{score.metadata.title}</Title>
-          <Label size={10} numberOfLines={1}>
-            {`m.${playhead.measureIndex + 1} · ${activeNote?.position ?? '1st'} pos · loop m.${setup.loopFromBar}–${setup.loopToBar}`}
-          </Label>
-        </View>
-
-        {/*
-          On a wide screen the switchers ride in the title row. On a narrow one
-          they drop to their own row below: the transport is the control you
-          reach for mid-phrase, and it was being pushed off the right-hand edge
-          entirely, which made the screen unusable rather than merely cramped.
-        */}
-        {narrow ? null : (
-          <>
-            <Segmented
-              segments={VISION_SEGMENTS}
-              value={settings.vision}
-              onChange={(vision: VisionName) => update({ vision })}
-              compact
-            />
-            <Segmented
-              segments={LISTEN_SEGMENTS}
-              value={settings.listenMode}
-              onChange={(listenMode: ListenMode) => update({ listenMode })}
-              compact
-            />
-            <Segmented
-              segments={OVERLAY_SEGMENTS}
-              value={settings.noteOverlay === 'song' ? 'song' : 'key'}
-              onChange={(noteOverlay: NoteOverlayMode) => update({ noteOverlay })}
-              compact
-            />
-            <Grow />
-          </>
-        )}
-
-        <Pressable
-          onPress={restartPlayback}
-          accessibilityRole="button"
-          accessibilityLabel="Restart the loop"
-          style={{ minWidth: theme.tap, height: theme.tap, alignItems: 'center', justifyContent: 'center' }}
-        >
-          <Label size={11} color={theme.chrome.dim}>↺</Label>
-        </Pressable>
-        <Pressable
-          onPress={togglePlayback}
-          accessibilityRole="button"
-          accessibilityLabel={playRequested ? 'Pause' : 'Play'}
-          style={{ minWidth: theme.tap, height: theme.tap, alignItems: 'center', justifyContent: 'center' }}
-        >
-          <Title size={16} color={theme.chrome.accent}>{playRequested ? '❙❙' : '▶'}</Title>
-        </Pressable>
-      </Row>
-      <Rule weight={2} />
-
-      {narrow ? (
-        <>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{
-              alignItems: 'center',
-              gap: theme.s(10),
-              paddingHorizontal: theme.s(10),
-            }}
-            style={{ height: theme.s(CONTROL_BAR), flexGrow: 0 }}
-          >
-            <Segmented
-              segments={VISION_SEGMENTS}
-              value={settings.vision}
-              onChange={(vision: VisionName) => update({ vision })}
-              compact
-            />
-            <Segmented
-              segments={LISTEN_SEGMENTS}
-              value={settings.listenMode}
-              onChange={(listenMode: ListenMode) => update({ listenMode })}
-              compact
-            />
-            <Segmented
-              segments={OVERLAY_SEGMENTS}
-              value={settings.noteOverlay === 'song' ? 'song' : 'key'}
-              onChange={(noteOverlay: NoteOverlayMode) => update({ noteOverlay })}
-              compact
-            />
-          </ScrollView>
-          <Rule weight={2} />
-        </>
-      ) : null}
+      <PlayTopBar
+        title={score.metadata.title}
+        playhead={playhead}
+        loopFromBar={setup.loopFromBar}
+        loopToBar={setup.loopToBar}
+        playRequested={playRequested}
+        onEndSession={() => router.canGoBack() ? router.back() : router.replace(`/song/${id}`)}
+        onRestart={restartPlayback}
+        onTogglePlay={togglePlayback}
+      />
+      <Rule />
+      <PlayControlBar />
+      <Rule />
 
       {/* Body */}
       <View style={{ flex: 1, flexDirection: 'row', minHeight: 0 }}>
-        <View
-          style={{
-            width: theme.s(fingerboardWidth),
-            paddingHorizontal: theme.s(8),
-            paddingTop: theme.s(6),
-            borderRightWidth: theme.rule(2),
-            borderColor: theme.chrome.line,
-          }}
-        >
-          {/* Panel header: label plus note-overlay toggle button. */}
-          <Row gap={6} style={{ alignItems: 'center' }}>
-            <Label size={10} numberOfLines={1}>{narrow ? 'BOARD' : 'FINGERBOARD'}</Label>
-            <Grow />
-            <Pressable
-              onPress={() => update({ noteOverlay: nextOverlayMode(settings.noteOverlay) })}
-              accessibilityRole="button"
-              accessibilityLabel={`Note overlay: ${OVERLAY_LABEL[settings.noteOverlay]}`}
-              hitSlop={8}
-              style={{
-                paddingHorizontal: theme.s(6),
-                paddingVertical: theme.s(3),
-                borderWidth: theme.rule(1),
-                borderColor: theme.chrome.accent,
-                backgroundColor: theme.chrome.accentWash,
-              }}
-            >
-              <Label
-                size={9}
-                color={theme.chrome.accent}
-              >
-                {OVERLAY_LABEL[settings.noteOverlay]}
-              </Label>
-            </Pressable>
-          </Row>
-          <Label size={9} color={theme.chrome.dim} numberOfLines={1}>
-            {settings.noteOverlay === 'song'
-              ? 'SONG NOTES'
-              : `KEY · ${(songKey?.name ?? '').toUpperCase()}`}
-          </Label>
-          <View ref={boardRef} style={{ flex: 1, marginTop: theme.s(6) }} onLayout={onBoardLayout}>
-            <Fingerboard
-              height={boardSize.height}
-              maxMm={440}
-              tapeSets={settings.tapeSets}
-              showTapes={settings.showTapes}
-              showLandmarks={settings.cueDensity === 'full'}
-              noteOverlay={noteOverlay}
-              gutter={46}
-              compact
-              invert={settings.boardView === 'player'}
-              active={activeNote ? {
-                string: activeNote.string,
-                semitones: activeSemitones,
-                finger: activeNote.finger,
-              } : null}
-            />
-          </View>
-          <FingerboardStringLabels compact activeString={activeNote?.string ?? null} />
-          <FingerboardScaleNote />
-        </View>
+        <PlayFingerboardColumn
+          width={fingerboardWidth}
+          fretboardMaxMm={fretboardMaxMm}
+          songKeyName={songKey?.name}
+          noteOverlay={noteOverlay}
+          score={score}
+          playhead={playhead}
+        />
 
         <View
           ref={visionRef}
@@ -464,62 +278,56 @@ function PlayScreen() {
         >
           {visionSize.height === 0 ? null : (
             <>
-              {settings.vision === 'highway' ? (
+              {vision === 'highway' ? (
                 <Highway
                   score={score}
                   playhead={playhead}
-                  tapeSets={settings.showTapes ? settings.tapeSets : []}
-                  showFingerings={settings.showFingerings}
-                  height={visionSize.height - theme.s(12)}
-                  width={visionSize.width - theme.s(20)}
-                  axis={settings.highwayAxis}
+                  tapeSets={showTapes ? tapeSets : []}
+                  showFingerings={showFingerings}
+                  height={visionHeight}
+                  width={visionWidth}
+                  axis={highwayAxis}
                 />
               ) : null}
-              {settings.vision === 'tab' ? (
+              {vision === 'tab' ? (
                 <TabVision
                   score={score}
                   playhead={playhead}
-                  tapeSets={settings.showTapes ? settings.tapeSets : []}
-                  showFingerings={settings.showFingerings}
-                  height={visionSize.height - theme.s(12)}
-                  width={visionSize.width - theme.s(20)}
-                  axis={settings.tabAxis}
+                  tapeSets={showTapes ? tapeSets : []}
+                  showFingerings={showFingerings}
+                  height={visionHeight}
+                  width={visionWidth}
+                  axis={tabAxis}
                 />
               ) : null}
-              {settings.vision === 'score' ? (
+              {vision === 'score' ? (
                 <ScorePage
                   score={score}
                   playhead={playhead}
-                  height={visionSize.height - theme.s(12)}
-                  width={visionSize.width - theme.s(20)}
-                  showFingerings={settings.showFingerings}
+                  height={visionHeight}
+                  width={visionWidth}
+                  showFingerings={showFingerings}
                 />
               ) : null}
             </>
           )}
-        </View>
 
-        <View
-          style={{
-            width: theme.s(centsWidth),
-            paddingHorizontal: theme.s(8),
-            paddingTop: theme.s(6),
-            borderLeftWidth: theme.rule(2),
-            borderColor: theme.chrome.line,
-          }}
-        >
-          <CentsRail
-            cents={pitch.cents}
-            verdict={pitch.reading.verdict}
-            centsText={centsText}
-            listening={pitch.mic.live && pitch.reading.voiced}
-          />
+          {/* Laid over the top of the play area rather than above it, so
+              pausing does not resize — and re-lay out — the vision. */}
+          {playRequested ? null : (
+            <View
+              pointerEvents="box-none"
+              style={{ position: 'absolute', top: theme.s(6), left: theme.s(10), right: theme.s(10) }}
+            >
+              <TunerStrip pitch={pitch} micEnabled={micEnabled} onEnableMic={enableMic} />
+            </View>
+          )}
         </View>
       </View>
 
       {/* Status strip */}
-      <Rule weight={2} />
-      <Row padX={10} gap={10} style={{ height: theme.s(STATUS_BAR) }}>
+      <Rule />
+      <Row padX={10} gap={10} style={{ minHeight: Math.max(theme.tap, theme.s(STATUS_BAR)) }}>
         {/*
           Scrolls rather than clips. These are readings, not controls, so losing
           the tail off the right-hand edge was survivable — but it also silently
@@ -531,27 +339,64 @@ function PlayScreen() {
           contentContainerStyle={{ alignItems: 'center', gap: theme.s(14) }}
           style={{ flex: 1 }}
         >
-          <StatusChip
-            label={pitch.mic.live
-              ? `MIC LIVE · ${Math.round(pitch.mic.sampleRate / 1000)} kHz`
-              : (micActive ? micLabel(pitch.mic.status) : 'MIC PAUSED WHILE PLAYING')}
-            tone={pitch.mic.live ? 'accent' : 'dim'}
-          />
-          <StatusChip label={`${setup.tempoPercent}% TEMPO`} />
+          <StatusChip label={micStatus} tone={!playRequested && pitch.mic.live ? 'accent' : 'dim'} />
+          <StatusChip label={`${setup.tempoPercent}% tempo`} />
           <StatusChip label={adaptive
-            ? `${setup.arrangementLevel.toUpperCase()} ARRANGEMENT`
-            : 'AUTHORED SCORE'} />
-          <StatusChip label={settings.showFingerings ? 'FINGERINGS ON' : 'FINGERINGS HIDDEN'} />
-          <StatusChip label={settings.showTapes ? 'TAPES ON' : 'TAPES OFF'} />
-          <ListenChip mode={settings.listenMode} rendering={backing.rendering} />
-          {pitch.reading.voiced ? (
-            <StatusChip label={`HEARD ${pitch.reading.heard} · ${pitch.reading.band.toUpperCase()} BAND`} />
-          ) : null}
+            ? `${setup.arrangementLevel === 'Expert' ? 'Full' : setup.arrangementLevel} arrangement`
+            : 'Authored score'} />
+          {/* Which part you are on, in the accent, because mid-session the one
+              thing worth knowing about a non-default line is that it is one. */}
+          {adaptive && line.partId
+            ? <StatusChip label={trackChoiceSummary(line)} tone="accent" />
+            : null}
+          {line.fit && line.fit.reseated > 0
+            ? <StatusChip label={`${line.fit.reseated} notes moved an octave`} />
+            : null}
+          <ListenChip mode={listenMode} rendering={backing.rendering} />
         </ScrollView>
-        <LevelMeter level={pitch.level} height={13} />
       </Row>
     </View>
   );
+}
+
+/**
+ * Keeps the picture on the audio.
+ *
+ * Four times a second, while music is sounding, the adapter's own position is
+ * handed to the playhead, which eases its anchor onto it. The audio clock is
+ * the reference because it is the one the player hears; see
+ * `domain/transportClock.ts` for the policy.
+ */
+function useAudioLock(
+  playhead: Pick<Playhead, 'syncToAudio' | 'scoreTimeMs'>,
+  audioScoreTimeMs: () => number | null,
+  active: boolean,
+) {
+  const { syncToAudio, scoreTimeMs } = playhead;
+  useEffect(() => {
+    if (!active) return;
+    const handle = setInterval(() => {
+      const audioMs = audioScoreTimeMs();
+      if (audioMs === null) return;
+      if (__DEV__) recordSync(scoreTimeMs(), audioMs);
+      syncToAudio(audioMs);
+    }, AUDIO_LOCK_MS);
+    return () => clearInterval(handle);
+  }, [active, audioScoreTimeMs, scoreTimeMs, syncToAudio]);
+}
+
+/**
+ * Development-only sync telemetry, readable from a debugger as
+ * `globalThis.__ponticelloSync`. It is how playback is verified in a browser:
+ * the error between what is drawn and what is heard, sampled as the lock runs.
+ */
+function recordSync(visualMs: number, audioMs: number) {
+  const store = globalThis as { __ponticelloSync?: { samples: number[]; last: number } };
+  const sync = store.__ponticelloSync ?? { samples: [], last: 0 };
+  sync.last = audioMs - visualMs;
+  sync.samples.push(sync.last);
+  if (sync.samples.length > 2400) sync.samples.shift();
+  store.__ponticelloSync = sync;
 }
 
 function StatusChip({ label, tone = 'dim' }: { label: string; tone?: 'dim' | 'accent' }) {
@@ -562,21 +407,22 @@ function StatusChip({ label, tone = 'dim' }: { label: string; tone?: 'dim' | 'ac
         style={{
           width: theme.s(6),
           height: theme.s(6),
+          borderRadius: theme.s(3),
           backgroundColor: tone === 'accent' ? theme.chrome.accent : theme.chrome.lineSoft,
         }}
       />
-      <Label size={10}>{label}</Label>
+      <Label size={11} style={{ textTransform: 'none', letterSpacing: 0 }}>{label}</Label>
     </Row>
   );
 }
 
 function micLabel(status: string): string {
   switch (status) {
-    case 'denied': return 'MIC REFUSED';
-    case 'requesting': return 'ASKING FOR MIC';
-    case 'unavailable': return 'NO MIC ON THIS PLATFORM';
-    case 'error': return 'MIC ERROR';
-    default: return 'MIC IDLE';
+    case 'denied': return 'Microphone permission needed';
+    case 'requesting': return 'Waiting for microphone';
+    case 'unavailable': return 'Microphone unavailable';
+    case 'error': return 'Check microphone connection';
+    default: return 'Microphone idle';
   }
 }
 

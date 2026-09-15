@@ -1,36 +1,39 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 
 import { ListenControl } from '@/components/play/ListenControl';
-import { Button, Segmented, Stepper, Toggle } from '@/components/ui/controls';
+import { TrackPicker, trackChoiceSummary } from '@/components/play/TrackPicker';
+import { KeyCensusNote } from '@/components/practice/KeyCensus';
+import { Button, Disclosure, Segmented, Stepper, Toggle } from '@/components/ui/controls';
 import {
-  Body, Grow, Kicker, Label, Num, Row, Rule, Stack, Title,
+  Body, Kicker, Label, Num, Row, Stack, Title,
 } from '@/components/ui/primitives';
 import { Screen, ScreenHeader } from '@/components/ui/Screen';
-import { LIBRARY_ROWS } from '@/scores';
-import { usePiece } from '@/state/usePiece';
+import { LIBRARY_KEY_CENSUS, censusForDrill } from '@/scores';
+import { firstPositionVerdict } from '@/scores/scaleDrills';
+import { usePiece, useTrackOptions } from '@/state/usePiece';
 import { useSession } from '@/state/session';
 import { useBacking } from '@/audio/useBacking';
 import { ArrangementLevel } from '@/domain/arrangement';
 import { AccompanimentStyle } from '@/domain/backing';
 import { practiceLoop } from '@/domain/loop';
 import { ListenMode } from '@/audio/backing/types';
-import { BoardView, FlowAxis, useSettings, VisionName } from '@/state/settings';
+import { BoardView, FlowAxis, useSettings, useTrackChoice, VisionName } from '@/state/settings';
 import { useTheme } from '@/theme/ThemeProvider';
 import { ChromeName } from '@/theme/tokens';
 
 const ARRANGEMENT_SEGMENTS = [
-  { value: 'Beginner' as const, label: 'EASY', hint: 'Up to about 2.5 notes per second; first-position range' },
-  { value: 'Intermediate' as const, label: 'PRACTICE', hint: 'Up to about 4 notes per second; moderate register' },
-  { value: 'Advanced' as const, label: 'ADV', hint: 'Up to about 6 notes per second; upper positions allowed' },
-  { value: 'Expert' as const, label: 'FULL', hint: 'Every selected riff or theme note' },
+  { value: 'Beginner' as const, label: 'Beginner', hint: 'Held bass notes and gentle drones. A low, spacious part with time to move.' },
+  { value: 'Intermediate' as const, label: 'Intermediate', hint: 'A simple bass accompaniment in the lower register, with rests for hand changes.' },
+  { value: 'Advanced' as const, label: 'Advanced', hint: 'A more detailed melody, lowered for the cello and kept in first position.' },
+  { value: 'Expert' as const, label: 'Full', hint: 'The fullest melody arrangement, still lowered into a comfortable first-position range.' },
 ];
 
 const VISIONS = [
-  { value: 'tab' as const, label: 'TAB' },
-  { value: 'score' as const, label: 'SCORE' },
-  { value: 'highway' as const, label: 'HIGHWAY' },
+  { value: 'tab' as const, label: 'Tab' },
+  { value: 'score' as const, label: 'Score' },
+  { value: 'highway' as const, label: 'Highway' },
 ];
 
 /**
@@ -43,24 +46,24 @@ const VISIONS = [
  * chosen, the low C string stays at the bottom or the left.
  */
 const HIGHWAY_AXES = [
-  { value: 'vertical' as const, label: 'FALLING', hint: 'Notes fall from the top' },
-  { value: 'horizontal' as const, label: 'SIDEWAYS', hint: 'Notes arrive from the right' },
+  { value: 'vertical' as const, label: 'Falling', hint: 'Notes fall from the top' },
+  { value: 'horizontal' as const, label: 'Sideways', hint: 'Notes arrive from the right' },
 ];
 
 const TAB_AXES = [
-  { value: 'horizontal' as const, label: 'STAVE', hint: 'Four lines, time left to right' },
-  { value: 'vertical' as const, label: 'FALLING', hint: 'Four columns, notes fall from the top' },
+  { value: 'horizontal' as const, label: 'Stave', hint: 'Four lines, time left to right' },
+  { value: 'vertical' as const, label: 'Falling', hint: 'Four columns, notes fall from the top' },
 ];
 
 const BOARD_VIEWS = [
-  { value: 'player' as const, label: 'PLAYER', hint: 'Nut at the bottom, as you see it' },
-  { value: 'reader' as const, label: 'DIAGRAM', hint: 'Nut at the top, as it is printed' },
+  { value: 'player' as const, label: 'Player', hint: 'Nut at the bottom, as you see it' },
+  { value: 'reader' as const, label: 'Diagram', hint: 'Nut at the top, as it is printed' },
 ];
 
 const CHROMES = [
-  { value: 'paper' as const, label: 'PAPER' },
-  { value: 'quiet' as const, label: 'QUIET' },
-  { value: 'neon' as const, label: 'NEON' },
+  { value: 'paper' as const, label: 'Paper' },
+  { value: 'quiet' as const, label: 'Quiet' },
+  { value: 'neon' as const, label: 'Neon' },
 ];
 
 /**
@@ -75,8 +78,10 @@ export default function SongScreen() {
   const theme = useTheme();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { settings, update } = useSettings();
+  const { settings, update, setTrackChoice } = useSettings();
   const { setup, update: updateSetup, openSong } = useSession();
+  // Subscribed, not read through a getter: see `useTrackChoice`.
+  const choice = useTrackChoice(id);
   // Preview lets you hear the accompaniment before committing to a session —
   // choosing between a drone and a pulse is a listening decision.
   //
@@ -86,10 +91,14 @@ export default function SongScreen() {
   const [previewFor, setPreviewFor] = useState<string | null>(null);
   const previewing = previewFor === id && settings.listenMode !== 'off';
 
-  const { row, score, backing, adaptive } = usePiece(id, setup.arrangementLevel);
+  const piece = usePiece(id, setup.arrangementLevel, choice);
+  const { row, score, backing, adaptive, line } = piece;
+  const trackOptions = useTrackOptions(piece, setup.arrangementLevel);
+  // Set only for a scale drill: the census row for its key, so the sheet can
+  // say how much of the player's own library the key is worth.
+  const keyRow = censusForDrill(id);
   const fixedBacking = backing?.parts.some((part) => part.role === 'accompaniment') ?? false;
   const barCount = score?.measures.length ?? 0;
-  const index = LIBRARY_ROWS.findIndex((r) => r.id === id) + 1;
 
   useEffect(() => {
     if (id && barCount > 0) openSong(id, barCount);
@@ -116,18 +125,6 @@ export default function SongScreen() {
     volume: settings.backingVolume,
   });
 
-  const meta = useMemo(() => {
-    if (!row) return [];
-    return [
-      { k: 'KEY', v: row.keySignature },
-      { k: 'METER', v: score?.metadata.timeSignature ?? '—' },
-      { k: 'TEMPO', v: row.tempo },
-      { k: 'RANGE', v: row.range },
-      { k: 'DIFFICULTY', v: row.difficulty.toUpperCase() },
-      { k: 'BARS', v: barCount === 0 ? '—' : String(barCount) },
-    ];
-  }, [row, score, barCount]);
-
   if (!row) {
     return (
       <Screen>
@@ -141,305 +138,120 @@ export default function SongScreen() {
   }
 
   const wide = !theme.scale.compact;
-  const loopSpan = `m.${setup.loopFromBar}–${setup.loopToBar}`;
+  const bpm = Math.round((score?.metadata.bpm ?? 60) * setup.tempoPercent / 100);
+  const arrangement = ARRANGEMENT_SEGMENTS.find((segment) => segment.value === setup.arrangementLevel);
 
   return (
     <Screen scroll={false} padded={false}>
-      <ScreenHeader backLabel="LIBRARY" meta={`${index} / ${LIBRARY_ROWS.length}`} />
-
-      <View style={{ flex: 1, flexDirection: wide ? 'row' : 'column' }}>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Screen padded={false}>
-            <Stack padX={20} padY={16} gap={4}>
-              <Kicker size={10}>{row.origin}</Kicker>
-              <Title size={30}>{row.title}</Title>
-              <Label size={12} style={{ textTransform: 'none' }}>{row.composer}</Label>
-            </Stack>
-            <Rule />
-
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-              {meta.map((item) => (
-                <View
-                  key={item.k}
-                  style={{
-                    // Two columns rather than three: at a third of the pane
-                    // "INTERMEDIATE" breaks mid-word, and a hyphenless break
-                    // in a one-word value reads as a rendering fault.
-                    width: '50%',
-                    paddingHorizontal: theme.s(14),
-                    paddingVertical: theme.s(10),
-                    borderRightWidth: theme.rule(1),
-                    borderBottomWidth: theme.rule(1),
-                    borderColor: theme.chrome.lineSoft,
-                  }}
-                >
-                  <Label size={9}>{item.k}</Label>
-                  <Num size={15} style={{ marginTop: theme.s(3) }}>{item.v}</Num>
-                </View>
-              ))}
-            </View>
-
-            <Stack padX={20} padY={16} gap={8}>
-              <Label size={11}>WHAT THIS TEACHES</Label>
-              <Body size={14} color={theme.chrome.ink}>{row.note}</Body>
-            </Stack>
-            <Rule />
-
-            <Stack padX={20} padY={16} gap={10}>
-              <Label size={11}>LEFT-HAND POSITION LOAD</Label>
-              {row.distribution.map(([label, percent], i) => (
-                <View key={label}>
-                  <Row>
-                    <Label size={10}>{label.toUpperCase()}</Label>
-                    <Grow />
-                    <Num size={11} color={theme.chrome.dim}>{`${percent}%`}</Num>
-                  </Row>
-                  <View
-                    style={{
-                      height: theme.s(7),
-                      marginTop: theme.s(4),
-                      backgroundColor: theme.chrome.surface,
-                    }}
-                  >
-                    <View
-                      style={{
-                        height: '100%',
-                        width: `${percent}%`,
-                        backgroundColor: i === 0
-                          ? theme.chrome.ink
-                          : i === 1 ? theme.chrome.dim : theme.chrome.accent,
-                      }}
-                    />
-                  </View>
-                </View>
-              ))}
-            </Stack>
-          </Screen>
-        </View>
-
-        {wide ? <Rule weight={2} vertical /> : null}
-
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Screen padded={false}>
-            <Stack padX={20} padY={16} gap={12}>
-              <Label size={11}>VISION</Label>
-              <Segmented
-                segments={VISIONS}
-                value={settings.vision}
-                onChange={(vision: VisionName) => update({ vision })}
-                grow
-              />
-              <Body size={12} color={theme.chrome.dim}>
-                {VISION_BLURB[settings.vision]}
+      <ScreenHeader backLabel="Library" meta="Practice setup" />
+      <ScrollView contentContainerStyle={{ padding: theme.s(24), paddingBottom: theme.s(30) }} keyboardShouldPersistTaps="handled">
+        <View style={{ flexDirection: wide ? 'row' : 'column', gap: theme.s(wide ? 32 : 24) }}>
+          <Stack gap={14} style={wide ? { width: theme.s(260) } : undefined}>
+            <Kicker size={11}>{row.composer}</Kicker>
+            <Title accessibilityRole="header" size={30}>{row.title}</Title>
+            <Body size={14} color={theme.chrome.dim}>{row.keySignature} · {score?.metadata.timeSignature ?? 'Meter unavailable'} · {barCount} bars</Body>
+            {/* What you are about to play. When the player has taken a source
+                part, this describes *that* rather than the arrangement they
+                overruled — including what the octave shift cost, so the
+                consequence is in the place they already read. */}
+            <View style={{ backgroundColor: theme.chrome.surface, padding: theme.s(16), borderRadius: theme.s(10), gap: theme.s(8) }}>
+              <Label size={11}>{adaptive ? 'Your cello part' : 'About this study'}</Label>
+              <Title size={19}>
+                {!adaptive ? row.difficulty
+                  : line.partId ? trackChoiceSummary(line)
+                    : `${arrangement?.label} arrangement`}
+              </Title>
+              <Body size={14} color={theme.chrome.dim}>
+                {!adaptive ? row.note
+                  : line.fit ? line.fit.reason
+                    : arrangement?.hint}
               </Body>
+              <Body size={13} color={theme.chrome.dim}>Range {row.range}</Body>
+            </View>
+            {keyRow ? <KeyCensusNote row={keyRow} of={LIBRARY_KEY_CENSUS.counted}
+              verdict={firstPositionVerdict(keyRow.tonic, keyRow.mode).note} /> : null}
+            {wide ? <Body size={13} color={theme.chrome.dim}>Start slowly. Repeat a few bars until the movements feel familiar.</Body> : null}
+          </Stack>
 
-              {/* Only the axis of the vision actually selected — offering all
-                  three at once is three controls for one decision. */}
-              {settings.vision === 'highway' ? (
-                <>
-                  <Rule />
-                  <Label size={10}>HIGHWAY DIRECTION</Label>
-                  <Segmented
-                    segments={HIGHWAY_AXES}
-                    value={settings.highwayAxis}
-                    onChange={(highwayAxis: FlowAxis) => update({ highwayAxis })}
-                    grow
-                    compact
-                  />
-                </>
-              ) : null}
-              {settings.vision === 'tab' ? (
-                <>
-                  <Rule />
-                  <Label size={10}>TAB DIRECTION</Label>
-                  <Segmented
-                    segments={TAB_AXES}
-                    value={settings.tabAxis}
-                    onChange={(tabAxis: FlowAxis) => update({ tabAxis })}
-                    grow
-                    compact
-                  />
-                </>
-              ) : null}
-
-              <Rule />
-              <Label size={10}>FINGERBOARD PANEL</Label>
-              <Segmented
-                segments={BOARD_VIEWS}
-                value={settings.boardView}
-                onChange={(boardView: BoardView) => update({ boardView })}
-                grow
-                compact
-              />
-            </Stack>
-            <Rule weight={2} />
-
-            <Stack padX={20} padY={16} gap={14}>
-              <Label size={11}>PRACTICE SETUP</Label>
-
-              {adaptive ? (
-                <>
-                  <Label size={10}>ARRANGEMENT DETAIL</Label>
-                  <Segmented
-                    segments={ARRANGEMENT_SEGMENTS}
-                    value={setup.arrangementLevel}
-                    onChange={(arrangementLevel: ArrangementLevel) => updateSetup({ arrangementLevel })}
-                    grow
-                    compact
-                  />
-                  <Body size={12} color={theme.chrome.dim}>
-                    {ARRANGEMENT_SEGMENTS.find((segment) => segment.value === setup.arrangementLevel)?.hint}
-                  </Body>
-                  <Rule />
-                </>
-              ) : null}
-
-              <Row gap={10}>
-                <Body size={14} style={{ flex: 1 }}>Loop from</Body>
-                <Stepper
-                  label="loop start bar"
-                  value={setup.loopFromBar}
-                  display={`m.${setup.loopFromBar}`}
-                  canDecrement={setup.loopFromBar > 1}
-                  canIncrement={setup.loopFromBar < setup.loopToBar}
+          <View style={{ flex: wide ? 1 : undefined, minWidth: 0, gap: theme.s(18) }}>
+            <Title size={20}>Make it your practice</Title>
+            {adaptive ? <Stack gap={8}>
+              <Label size={11}>Arrangement</Label>
+              <Segmented accessibilityLabel="Arrangement difficulty" segments={ARRANGEMENT_SEGMENTS} value={setup.arrangementLevel}
+                onChange={(arrangementLevel: ArrangementLevel) => updateSetup({ arrangementLevel })} grow compact />
+            </Stack> : null}
+            {/* Immediately under the difficulty, because they are one decision:
+                which line am I playing, and can I reach it. */}
+            {adaptive && id ? <TrackPicker options={trackOptions} line={line} choice={choice}
+              level={setup.arrangementLevel} onChange={(next) => setTrackChoice(id, next)} /> : null}
+            <Row gap={12}>
+              <View style={{ flex: 1 }}><Title size={15}>Tempo</Title><Body size={12} color={theme.chrome.dim}>{bpm} BPM · {setup.tempoPercent}% of original</Body></View>
+              <Stepper label="tempo" value={setup.tempoPercent} display={`${setup.tempoPercent}%`}
+                canDecrement={setup.tempoPercent > 40} canIncrement={setup.tempoPercent < 120}
+                onDecrement={() => updateSetup({ tempoPercent: setup.tempoPercent - 5 })}
+                onIncrement={() => updateSetup({ tempoPercent: setup.tempoPercent + 5 })} />
+            </Row>
+            <Stack gap={8}>
+              <Row><Title size={15} style={{ flex: 1 }}>Practice loop</Title><Body size={12} color={theme.chrome.dim}>{setup.loopToBar - setup.loopFromBar + 1} bars selected</Body></Row>
+              <Row gap={12}>
+                <Body size={14} style={{ flex: 1 }}>From bar</Body>
+                <Stepper label="loop start bar" value={setup.loopFromBar}
+                  canDecrement={setup.loopFromBar > 1} canIncrement={setup.loopFromBar < setup.loopToBar}
                   onDecrement={() => updateSetup({ loopFromBar: setup.loopFromBar - 1 })}
-                  onIncrement={() => updateSetup({ loopFromBar: setup.loopFromBar + 1 })}
-                />
+                  onIncrement={() => updateSetup({ loopFromBar: setup.loopFromBar + 1 })} />
               </Row>
-              <Row gap={10}>
-                <Body size={14} style={{ flex: 1 }}>Loop to</Body>
-                <Stepper
-                  label="loop end bar"
-                  value={setup.loopToBar}
-                  display={`m.${setup.loopToBar}`}
-                  canDecrement={setup.loopToBar > setup.loopFromBar}
-                  canIncrement={setup.loopToBar < barCount}
+              <Row gap={12}>
+                <Body size={14} style={{ flex: 1 }}>To bar</Body>
+                <Stepper label="loop end bar" value={setup.loopToBar}
+                  canDecrement={setup.loopToBar > setup.loopFromBar} canIncrement={setup.loopToBar < barCount}
                   onDecrement={() => updateSetup({ loopToBar: setup.loopToBar - 1 })}
-                  onIncrement={() => updateSetup({ loopToBar: setup.loopToBar + 1 })}
-                />
+                  onIncrement={() => updateSetup({ loopToBar: setup.loopToBar + 1 })} />
               </Row>
-              <Row gap={10}>
-                <Body size={14} style={{ flex: 1 }}>Tempo</Body>
-                <Stepper
-                  label="tempo"
-                  value={setup.tempoPercent}
-                  display={`${setup.tempoPercent}%`}
-                  canDecrement={setup.tempoPercent > 40}
-                  canIncrement={setup.tempoPercent < 120}
-                  onDecrement={() => updateSetup({ tempoPercent: setup.tempoPercent - 5 })}
-                  onIncrement={() => updateSetup({ tempoPercent: setup.tempoPercent + 5 })}
-                />
-              </Row>
-
-              <Rule />
-              <Toggle
-                label="Show fingerings"
-                hint="turn off to test yourself — rhythm and stave stay"
-                value={settings.showFingerings}
-                onChange={(showFingerings) => update({ showFingerings })}
-              />
-              <Rule />
-              <Toggle
-                label="Show my tapes"
-                hint="colour every note by the tape it lands on"
-                value={settings.showTapes}
-                onChange={(showTapes) => update({ showTapes })}
-              />
-              <Rule />
-              <Toggle
-                label="Full scaffolding"
-                hint="every landmark and bracket, not just the loud ones"
-                value={settings.cueDensity === 'full'}
-                onChange={(full) => update({ cueDensity: full ? 'full' : 'essentials' })}
-              />
-              <Rule />
-              <Toggle
-                label="Listen to me while playing"
-                hint="off keeps playback smooth — intonation still reads when paused"
-                value={settings.micWhilePlaying}
-                onChange={(micWhilePlaying) => update({ micWhilePlaying })}
-              />
             </Stack>
-
-            <Rule weight={2} />
-            <Stack padX={20} padY={16} gap={12}>
-              <ListenControl
-                mode={settings.listenMode}
-                onModeChange={(listenMode: ListenMode) => update({ listenMode })}
-                style={settings.accompaniment}
-                onStyleChange={(accompaniment: AccompanimentStyle) => update({ accompaniment })}
-                volume={settings.backingVolume}
-                onVolumeChange={(backingVolume) => update({ backingVolume })}
-                rendering={listen.rendering}
-                error={listen.error}
-                audibleParts={listen.audibleParts}
-                fixedBacking={fixedBacking}
-                hasSolo={listen.hasSolo}
-              />
-              {settings.listenMode === 'off' ? null : (
-                <Button
-                  label={previewing ? 'Stop preview' : 'Preview'}
-                  hint={listen.rendering ? 'PREPARING' : `${(listen.loopDurationMs / 1000).toFixed(1)}s LOOP`}
-                  onPress={() => setPreviewFor(previewing ? null : (id ?? null))}
-                  disabled={!listen.ready && !previewing}
-                />
-              )}
+            <Stack gap={8}>
+              <Label size={11}>Read the music as</Label>
+              <Segmented accessibilityLabel="Music view" segments={VISIONS} value={settings.vision} onChange={(vision: VisionName) => update({ vision })} grow />
+              <Body size={12} color={theme.chrome.dim}>{VISION_BLURB[settings.vision]}</Body>
             </Stack>
-
-            <Rule weight={2} />
-            <Stack padX={20} padY={16} gap={10}>
-              <Label size={11}>PLAY SCREEN CHROME</Label>
-              <Segmented
-                segments={CHROMES}
-                value={settings.chrome}
-                onChange={(chrome: ChromeName) => update({ chrome })}
-                grow
-                compact
-              />
-            </Stack>
-
-            <Rule weight={2} />
-            <Stack padX={20} padY={16} gap={8}>
-              {row.playable ? (
-                <>
-                  <Button
-                    label="START SESSION"
-                    hint="LANDSCAPE"
-                    tone="accent"
-                    onPress={() => router.push(`/play/${row.id}`)}
-                  />
-                  <Label size={10} style={{ textTransform: 'none' }}>
-                    {`Loop ${loopSpan} at ${setup.tempoPercent}% · ${adaptive ? `${setup.arrangementLevel.toLowerCase()} arrangement` : 'authored score'} · fingerings ${settings.showFingerings ? 'on' : 'hidden'}`}
-                  </Label>
-                </>
-              ) : (
-                <>
-                  <View
-                    style={{
-                      borderWidth: theme.rule(1),
-                      borderColor: theme.chrome.line,
-                      padding: theme.s(14),
-                    }}
-                  >
-                    <Label size={10} color={theme.chrome.accent}>NO SCORE BUNDLED</Label>
-                    <Body size={13} style={{ marginTop: theme.s(6) }}>{row.note}</Body>
-                  </View>
-                  <Label size={10} style={{ textTransform: 'none' }}>
-                    Convert a licensed copy with tools/convert-score.ts and drop the JSON into
-                    src/scores to fill this row in.
-                  </Label>
-                </>
-              )}
-            </Stack>
-          </Screen>
+            <View>
+              <Disclosure title="Display preferences" summary={`${settings.showFingerings ? 'Fingerings on' : 'Fingerings hidden'} · ${settings.chrome} theme`}>
+                {settings.vision === 'highway' ? <><Label size={11}>Highway direction</Label><Segmented accessibilityLabel="Highway direction" segments={HIGHWAY_AXES} value={settings.highwayAxis} onChange={(highwayAxis: FlowAxis) => update({ highwayAxis })} grow /></> : null}
+                {settings.vision === 'tab' ? <><Label size={11}>Tab direction</Label><Segmented accessibilityLabel="Tab direction" segments={TAB_AXES} value={settings.tabAxis} onChange={(tabAxis: FlowAxis) => update({ tabAxis })} grow /></> : null}
+                <Label size={11}>Fingerboard orientation</Label>
+                <Segmented accessibilityLabel="Fingerboard orientation" segments={BOARD_VIEWS} value={settings.boardView} onChange={(boardView: BoardView) => update({ boardView })} grow />
+                <Toggle label="Show fingerings" hint="Hide the numbers when you want to test yourself." value={settings.showFingerings} onChange={(showFingerings) => update({ showFingerings })} />
+                <Toggle label="Show my tapes" hint="Match each note to your fingerboard tape colours." value={settings.showTapes} onChange={(showTapes) => update({ showTapes })} />
+                <Toggle label="Show all position guides" hint="Include every fingerboard landmark and bracket." value={settings.cueDensity === 'full'} onChange={(full) => update({ cueDensity: full ? 'full' : 'essentials' })} />
+                <Label size={11}>Practice theme</Label>
+                <Segmented accessibilityLabel="Practice theme" segments={CHROMES} value={settings.chrome} onChange={(chrome: ChromeName) => update({ chrome })} grow />
+              </Disclosure>
+              <Disclosure title="Sound & listening" summary={settings.listenMode === 'off' ? 'Accompaniment off' : settings.listenMode === 'solo' ? 'Cello guide on' : settings.listenMode === 'both' ? 'Backing and cello guide on' : 'Backing track on'}>
+                <ListenControl mode={settings.listenMode} onModeChange={(listenMode: ListenMode) => update({ listenMode })}
+                  style={settings.accompaniment} onStyleChange={(accompaniment: AccompanimentStyle) => update({ accompaniment })}
+                  volume={settings.backingVolume} onVolumeChange={(backingVolume) => update({ backingVolume })}
+                  rendering={listen.rendering} error={listen.error} audibleParts={listen.audibleParts} fixedBacking={fixedBacking} hasSolo={listen.hasSolo} />
+                {settings.listenMode === 'off' ? null : <Button label={previewing ? 'Stop preview' : 'Preview this loop'}
+                  hint={listen.rendering ? 'Preparing…' : `${(listen.loopDurationMs / 1000).toFixed(1)}s`}
+                  onPress={() => setPreviewFor(previewing ? null : (id ?? null))} disabled={!listen.ready && !previewing} />}
+              </Disclosure>
+              <Disclosure title="Score details" summary={row.origin}>
+                <Body size={13} color={theme.chrome.dim}>{row.note}</Body>
+                {row.distribution.map(([label, percent]) => <Row key={label}><Body size={13} style={{ flex: 1 }}>{label}</Body><Num size={13}>{percent}%</Num></Row>)}
+              </Disclosure>
+            </View>
+          </View>
         </View>
-      </View>
+      </ScrollView>
+      <Row padX={24} padY={14} gap={16} style={{ borderTopWidth: theme.rule(1), borderColor: theme.chrome.lineSoft, backgroundColor: theme.chrome.bg }}>
+        <View style={{ flex: 1 }}><Title size={14}>{`Bars ${setup.loopFromBar}–${setup.loopToBar}`}</Title><Body size={12} color={theme.chrome.dim} numberOfLines={1}>{bpm} BPM{adaptive ? ` · ${arrangement?.label}` : ''}{adaptive && line.partId ? ` · ${trackChoiceSummary(line)}` : ''}</Body></View>
+        <Button label={row.playable ? 'Start practice' : 'Import a score'} hint="→" tone="accent" onPress={() => { setPreviewFor(null); router.push(row.playable ? `/play/${row.id}` : '/settings/import'); }} />
+      </Row>
     </Screen>
   );
 }
 
 const VISION_BLURB: Record<VisionName, string> = {
-  tab: 'Four lines, one per string, with finger numbers on them. Shows the hand rather than the pitch — the fastest read when you are still learning where notes live.',
-  score: 'Bass clef notation with a live intonation trace over it. Read this when you want to practise reading, or to see how far under the note you are sitting.',
-  highway: 'Notes travel down — or across — four string lanes to a hit line. Best for rhythm and string crossings; the tape colour rides on each note as it arrives.',
+  tab: 'Four string lines with finger numbers. A clear guide to where your hand goes.',
+  score: 'Bass clef notation for practising your music reading.',
+  highway: 'Follow the notes along four string lanes to practise rhythm and crossings.',
 };

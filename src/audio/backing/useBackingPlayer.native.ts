@@ -226,6 +226,23 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
     if (playerRef.current) playerRef.current.volume = volume;
   }, []);
 
+  // The player's own head, which is the truth about a looped file — including
+  // any gap the platform leaves at the loop point, which a clock of our own
+  // would never see.
+  const positionSeconds = useCallback((): number | null => {
+    const player = playerRef.current;
+    if (!player) return null;
+    try {
+      if (!player.playing) return null;
+      const duration = durationRef.current;
+      const position = player.currentTime;
+      if (!Number.isFinite(position) || duration <= 0) return null;
+      return ((position % duration) + duration) % duration;
+    } catch {
+      return null;
+    }
+  }, []);
+
   useEffect(() => {
     if (!enabled) stop();
   }, [enabled, stop]);
@@ -236,7 +253,7 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
     release();
   }, [release]);
 
-  return { load, play, stop, setVolume, ready, progress, error };
+  return { load, play, stop, setVolume, positionSeconds, ready, progress, error };
 }
 
 /** Fade lengths are in samples; 8 ms is short enough to be inaudible as a fade. */

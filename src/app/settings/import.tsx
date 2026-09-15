@@ -103,12 +103,12 @@ export default function ImportScreen() {
 
   return (
     <Screen scroll={false} padded={false}>
-      <ScreenHeader backLabel="LIBRARY" meta="YOUR OWN FILES · NOTHING LEAVES THE DEVICE" />
+      <ScreenHeader backLabel="Library" meta="Import music" />
 
       <Screen padded={false}>
         <Stack padX={22} padY={18} gap={10}>
           <Kicker size={10}>ADD A PIECE</Kicker>
-          <Title size={30}>Import a MIDI file</Title>
+          <Title accessibilityRole="header" size={30}>Import a MIDI file</Title>
           <Body size={14} color={chrome.dim}>
             Pick a file, say which track is the cello, and the app works out a fingering for that
             line and turns everything else into a backing track you can play over. The file stays

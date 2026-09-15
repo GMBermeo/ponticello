@@ -1,4 +1,4 @@
-import { View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 
 import { Fingerboard, FingerboardScaleNote, FingerboardStringLabels } from '@/components/Fingerboard';
 import { Button, PressableRow, Stepper } from '@/components/ui/controls';
@@ -27,19 +27,20 @@ export default function TapesScreen() {
 
   return (
     <Screen scroll={false} padded={false}>
-      <ScreenHeader backLabel="LIBRARY" meta="EDIT THE TAPES ON YOUR OWN CELLO" />
+      <ScreenHeader backLabel="Library" meta="Fingerboard tapes" />
 
-      <View style={{ flex: 1, flexDirection: wide ? 'row' : 'column' }}>
-        <View style={{ flex: 1.3, minWidth: 0 }}>
-          <Screen padded={false}>
+      <ScrollView contentContainerStyle={{ paddingBottom: theme.s(24) }}>
+      <View style={{ flexDirection: wide ? 'row' : 'column' }}>
+        <View style={{ flex: wide ? 1.3 : undefined, minWidth: 0 }}>
+          <View>
             <Stack padX={22} padY={16} gap={6}>
-              <Title size={26}>My tapes</Title>
-              <Body size={13} color={theme.chrome.dim}>
+              <Title accessibilityRole="header" size={30}>My tapes</Title>
+              <Body size={14} color={theme.chrome.dim}>
                 Each tape is a distance from the nut, written here in semitones because that is
                 what fixes the note. Move one and every screen in the app moves with it.
               </Body>
             </Stack>
-            <Rule weight={2} />
+            <Rule weight={1} />
 
             {settings.tapeSets.map((set) => (
               <TapeSetEditor key={set.id} set={set} onChange={replaceTapeSet} />
@@ -52,13 +53,13 @@ export default function TapesScreen() {
                 blue · green · green · yellow in thumb position.
               </Body>
             </Stack>
-          </Screen>
+          </View>
         </View>
 
-        {wide ? <Rule weight={2} vertical /> : null}
+        {wide ? <Rule weight={1} vertical /> : null}
 
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Screen padded={false}>
+        <View style={{ flex: wide ? 1 : undefined, minWidth: 0 }}>
+          <View>
             <Stack padX={22} padY={16} gap={12}>
               <Label size={11}>TO SCALE</Label>
               <Row gap={12} style={{ alignItems: 'flex-start' }}>
@@ -74,9 +75,10 @@ export default function TapesScreen() {
               <FingerboardStringLabels />
               <FingerboardScaleNote />
             </Stack>
-          </Screen>
+          </View>
         </View>
       </View>
+      </ScrollView>
     </Screen>
   );
 }
@@ -101,55 +103,37 @@ function TapeSetEditor({
 
       {set.tapes.map((tape) => (
         <View key={tape.id}>
-          <Row padX={22} padY={12} gap={12} style={{ alignItems: 'flex-start' }}>
-            <View style={{ width: theme.s(46), height: theme.s(14), backgroundColor: chrome.tapes[tape.color] }} />
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Title size={15}>{`${TAPE_COLOR_LABEL[tape.color]} · ${tape.caption}`}</Title>
-              <Label size={10}>
-                {`${stopDistanceMm(tape.semitones).toFixed(1)} MM FROM THE NUT · ${tape.semitones} SEMITONES`}
-              </Label>
-              <Row gap={10} style={{ marginTop: theme.s(5), flexWrap: 'wrap' }}>
-                {STRING_ORDER.map((string) => (
-                  <Num key={string} size={11} color={chrome.strings[string]}>
-                    {midiToPitchName(midiAt(string, tape.semitones))}
-                  </Num>
-                ))}
-              </Row>
-              <Row gap={5} style={{ marginTop: theme.s(7) }}>
-                {COLORS.map((color) => (
-                  <PressableRow
-                    key={color}
-                    accessibilityLabel={`Set ${tape.caption} to ${TAPE_COLOR_LABEL[color]}`}
-                    onPress={() => patch(tape.id, { color })}
-                  >
-                    <View
-                      style={{
-                        width: theme.s(26),
-                        height: theme.s(18),
-                        backgroundColor: chrome.tapes[color],
-                        borderWidth: theme.rule(tape.color === color ? 2 : 1),
-                        borderColor: tape.color === color ? chrome.ink : chrome.lineSoft,
-                      }}
-                    />
-                  </PressableRow>
-                ))}
-              </Row>
-            </View>
-            <Stepper
-              label={`${tape.caption} position`}
-              value={tape.semitones}
-              display={`${tape.semitones} st`}
-              canDecrement={tape.semitones > 1}
-              canIncrement={tape.semitones < 24}
-              onDecrement={() => patch(tape.id, { semitones: tape.semitones - 1 })}
-              onIncrement={() => patch(tape.id, { semitones: tape.semitones + 1 })}
-            />
-          </Row>
+          <Stack padX={22} padY={16} gap={12}>
+            <Row gap={12}>
+              <View style={{ width: theme.s(24), height: theme.s(8), borderRadius: theme.s(2), backgroundColor: chrome.tapes[tape.color] }} />
+              <Title size={16}>{`${TAPE_COLOR_LABEL[tape.color]} · ${tape.caption}`}</Title>
+            </Row>
+            <Body size={13} color={chrome.dim}>{`${stopDistanceMm(tape.semitones).toFixed(1)} mm from the nut`}</Body>
+            <Row gap={12} style={{ flexWrap: 'wrap' }}>
+              {STRING_ORDER.map((string) => <Num key={string} size={13} color={chrome.strings[string]}>{midiToPitchName(midiAt(string, tape.semitones))}</Num>)}
+            </Row>
+            <Row gap={5} style={{ flexWrap: 'wrap' }}>
+              {COLORS.map((color) => <PressableRow key={color}
+                accessibilityLabel={`Set ${tape.caption} to ${TAPE_COLOR_LABEL[color]}${tape.color === color ? ', selected' : ''}`}
+                selected={tape.color === color} onPress={() => patch(tape.id, { color })}
+                style={{ minWidth: theme.tap, alignItems: 'center', justifyContent: 'center', gap: theme.s(4), borderWidth: theme.rule(1), borderRadius: theme.s(6), borderColor: tape.color === color ? chrome.ink : 'transparent' }}>
+                <View style={{ width: theme.s(24), height: theme.s(8), backgroundColor: chrome.tapes[color] }} />
+                <Body size={10} color={chrome.dim}>{TAPE_COLOR_LABEL[color]}</Body>
+              </PressableRow>)}
+            </Row>
+            <Row gap={12}>
+              <Body size={14} style={{ flex: 1 }}>Position</Body>
+              <Stepper label={`${tape.caption} position`} value={tape.semitones} display={`${tape.semitones} st`}
+                canDecrement={tape.semitones > 1} canIncrement={tape.semitones < 24}
+                onDecrement={() => patch(tape.id, { semitones: tape.semitones - 1 })}
+                onIncrement={() => patch(tape.id, { semitones: tape.semitones + 1 })} />
+            </Row>
+          </Stack>
           <Rule />
         </View>
       ))}
       <View style={{ height: theme.s(4) }} />
-      <Rule weight={2} />
+      <Rule weight={1} />
     </View>
   );
 }

@@ -39,7 +39,7 @@ export function DeviceCanvas({ children }: { children: React.ReactNode }) {
   if (width < 900 || height < 560) return <>{children}</>;
 
   return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#d8d6d5' }}>
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#e4e6df' }}>
       <View
         accessibilityLabel={`Galaxy Z Fold 5 inner display preview, ${FOLD5_PX.width} by ${FOLD5_PX.height} pixels`}
         style={{
@@ -48,7 +48,8 @@ export function DeviceCanvas({ children }: { children: React.ReactNode }) {
           backgroundColor: PAPER,
           overflow: 'hidden',
           borderWidth: 1 / frame.fit,
-          borderColor: 'rgba(32,30,29,0.35)',
+          borderColor: '#c5ccc3',
+          borderRadius: 12,
           transform: [{ scale: frame.fit }],
         }}
       >

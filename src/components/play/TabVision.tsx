@@ -2,15 +2,15 @@ import { memo, useMemo } from 'react';
 import { View } from 'react-native';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 
-import { OPEN_STRING_MIDI, STRING_ORDER } from '@/domain/cello';
+import { DISPLAY_STRING_ORDER, OPEN_STRING_MIDI } from '@/domain/cello';
 import { CelloNote, CelloSongScore } from '@/domain/schema';
 import { TapeSet, tapeForSemitones } from '@/domain/tapes';
 import { FlowAxis } from '@/state/settings';
 import { Theme, useTheme } from '@/theme/ThemeProvider';
 import { alpha } from '@/theme/tokens';
 import { Label, Num } from '../ui/primitives';
-import { flowWindow, laneGeometry, visibleSlice } from './flow';
-import { Playhead } from './usePlayhead';
+import { flowWindow, laneGeometry, timeAlongOffset, visibleSlice } from './flow';
+import { Playhead, usePlayheadPosition } from './usePlayhead';
 
 /**
  * Tab vision — a four-line stave, one line per string, with finger numbers on
@@ -59,7 +59,7 @@ export interface TabVisionProps {
   axis?: FlowAxis;
 }
 
-export function TabVision({
+export const TabVision = memo(function TabVision({
   score, playhead, tapeSets, showFingerings, height, width, axis = 'horizontal',
 }: TabVisionProps) {
   const theme = useTheme();
@@ -88,17 +88,18 @@ export function TabVision({
   /** Cross-axis offset of a string's line or column. */
   const laneAt = (string: string) => (vertical
     ? lanes.laneAt(string as never) + lanes.laneSize / 2
-    // Horizontal: index 0 is the C string and has to be the *bottom* line.
-    : staveTop + (3 - Math.max(0, STRING_ORDER.indexOf(string as never))) * rowHeight);
+    // Horizontal: row 0 is the A string (top) and row 3 is the C string (bottom).
+    : staveTop + Math.max(0, DISPLAY_STRING_ORDER.indexOf(string as never)) * rowHeight);
 
   /** Time-axis offset of a score time, at time zero. */
-  const alongAt = (ms: number) => (vertical ? hitAt - ms * pxPerMs : hitAt + ms * pxPerMs);
+  const alongAt = (ms: number) => timeAlongOffset(ms, axis, hitAt, pxPerMs);
 
   /** Labels and rules that sit just off the stave, on the cross axis. */
   const bracketOffset = vertical ? theme.s(30) : theme.s(42);
   const barLabelOffset = vertical ? theme.s(14) : theme.s(24);
 
-  const anchorMs = score.notes[playhead.activeIndex]?.startTimeMs ?? playhead.loopStartMs;
+  const position = usePlayheadPosition(playhead);
+  const anchorMs = position.windowMs;
   const visibleMs = timeExtent / pxPerMs;
   const window = useMemo(
     () => flowWindow(
@@ -178,13 +179,13 @@ export function TabVision({
 
   /** Cross-axis span the stave occupies, for rules that run its whole width. */
   const staveSpan = vertical
-    ? { from: lanes.laneAt('C') + lanes.laneSize / 2, to: lanes.laneAt('A') + lanes.laneSize / 2 }
+    ? { from: lanes.laneAt('A') + lanes.laneSize / 2, to: lanes.laneAt('C') + lanes.laneSize / 2 }
     : { from: staveTop, to: staveTop + staveHeight };
 
   return (
     <View style={{ height, width, overflow: 'hidden' }}>
       {/* Stave lines, one per string, tinted in that string's colour. */}
-      {STRING_ORDER.map((string) => {
+      {DISPLAY_STRING_ORDER.map((string) => {
         const lane = laneAt(string);
         return (
           <View key={string}>
@@ -329,8 +330,8 @@ export function TabVision({
             vertical={vertical}
             tapeColor={item.tapeColor}
             showFinger={showFingerings}
-            active={item.index === playhead.activeIndex}
-            played={item.index < playhead.activeIndex}
+            active={item.index === position.activeIndex}
+            played={item.index < position.activeIndex}
           />
         ))}
       </Animated.View>
@@ -357,7 +358,7 @@ export function TabVision({
       />
     </View>
   );
-}
+});
 
 const TabBadge = memo(function TabBadge({
   note, along, lane, vertical, tapeColor, showFinger, active, played,
@@ -379,6 +380,9 @@ const TabBadge = memo(function TabBadge({
   const w = theme.s(BADGE.width);
   const h = theme.s(BADGE.height);
 
+  const fret = Math.max(0, note.midiNumber - OPEN_STRING_MIDI[note.string]);
+  const hasTape = tapeColor !== null;
+
   return (
     <View
       style={{
@@ -389,27 +393,17 @@ const TabBadge = memo(function TabBadge({
         height: h,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: active ? stringColor : chrome.bg,
+        backgroundColor: hasTape ? tapeColor : (active ? stringColor : chrome.bg),
         borderWidth: theme.rule(2),
-        borderColor: played ? chrome.lineSoft : stringColor,
+        borderColor: hasTape ? '#FFFFFF' : (played ? chrome.lineSoft : stringColor),
         opacity: played ? 0.45 : 1,
       }}
     >
-      {/* Tape colour as an underline, so it reads without crowding the number. */}
-      {tapeColor === null ? null : (
-        <View
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            bottom: 0,
-            height: theme.s(4),
-            backgroundColor: tapeColor,
-          }}
-        />
-      )}
-      <Num size={13} color={active ? chrome.bg : (played ? chrome.dim : stringColor)}>
-        {showFinger ? note.finger : '·'}
+      <Num
+        size={13}
+        color={hasTape ? tapeTextColor(tapeColor) : (active ? chrome.bg : (played ? chrome.dim : stringColor))}
+      >
+        {showFinger ? fret : '·'}
       </Num>
       {note.bowDirection === 'down' || note.bowDirection === 'up' ? (
         <View
@@ -449,6 +443,21 @@ function tapeColorFor(
   if (semitones === 0) return null;
   const tape = tapeForSemitones(tapeSets, semitones);
   return tape ? theme.chrome.tapes[tape.color] : null;
+}
+
+/**
+ * Text colour for numbers drawn over a solid tape fill. Chooses black or white
+ * based on the relative luminance of the tape colour so the number is always legible.
+ */
+function tapeTextColor(hex: string): string {
+  const raw = hex.replace('#', '');
+  const h = raw.length === 3 ? raw.split('').map((c) => c + c).join('') : raw;
+  const r = parseInt(h.substring(0, 2), 16) / 255;
+  const g = parseInt(h.substring(2, 4), 16) / 255;
+  const b = parseInt(h.substring(4, 6), 16) / 255;
+  const toLinear = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const L = 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+  return L > 0.18 ? '#000000' : '#FFFFFF';
 }
 
 /** Exported for the tutorial, which draws a still frame of this stave. */

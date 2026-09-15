@@ -9,7 +9,7 @@ import { Grow, Label, Rule } from './primitives';
 /**
  * Screen scaffold: chrome background, safe-area padding, and the design's
  * standard header — a back affordance on the left, a quiet meta line on the
- * right, and a 2 px rule underneath dividing it from the body.
+ * right, and a quiet separator above the body.
  */
 export function Screen({
   children, scroll = true, contentStyle, padded = true,
@@ -31,7 +31,7 @@ export function Screen({
 
   const body: StyleProp<ViewStyle> = [
     padded ? { paddingHorizontal: theme.s(22) } : null,
-    { paddingBottom: insets.bottom + theme.s(28) },
+    { paddingBottom: insets.bottom + (scroll ? theme.s(28) : 0) },
     contentStyle,
   ];
 
@@ -44,7 +44,7 @@ export function Screen({
       <ScrollView
         contentContainerStyle={body}
         // Long practice sheets read better without bounce fighting the thumb.
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator
       >
         {children}
       </ScrollView>
@@ -92,7 +92,7 @@ export function ScreenHeader({
               opacity: pressed ? 0.6 : 1,
             }]}
           >
-            <Label size={12} color={theme.chrome.accent}>{`← ${backLabel}`}</Label>
+            <Label size={14} style={{ textTransform: 'none', letterSpacing: 0 }} color={theme.chrome.ink}>{`← ${backLabel}`}</Label>
           </Pressable>
         )}
         {children}
@@ -100,7 +100,7 @@ export function ScreenHeader({
         {meta === undefined ? null : <Label size={11}>{meta}</Label>}
         <View style={{ width: theme.s(10) }} />
       </View>
-      <Rule weight={2} />
+      <Rule />
     </View>
   );
 }

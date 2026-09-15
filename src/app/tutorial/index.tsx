@@ -58,11 +58,11 @@ export default function TutorialScreen() {
 
   return (
     <Screen scroll={false} padded={false}>
-      <ScreenHeader backLabel="LIBRARY" meta="STATIC · NO MICROPHONE NEEDED" />
+      <ScreenHeader backLabel="Library" meta="Reading guide" />
 
       <View style={{ flex: 1, flexDirection: wide ? 'row' : 'column' }}>
         {wide ? (
-          <View style={{ width: theme.s(210), borderRightWidth: theme.rule(2), borderColor: chrome.line }}>
+          <View style={{ width: theme.s(210), borderRightWidth: theme.rule(1), borderColor: chrome.lineSoft }}>
             <Stack padX={18} padY={16} gap={4}>
               <Label size={11}>HOW TO READ THIS</Label>
             </Stack>
@@ -76,7 +76,7 @@ export default function TutorialScreen() {
                 <Row padX={18} padY={10} gap={10}>
                   <Num size={11} color={chrome.dim}>{String(index + 1).padStart(2, '0')}</Num>
                   <Label
-                    size={11}
+                    size={13}
                     numberOfLines={2}
                     color={active === section.id ? chrome.accent : chrome.ink}
                     style={{ flex: 1, textTransform: 'none' }}
@@ -97,7 +97,7 @@ export default function TutorialScreen() {
         >
           <Stack padY={18} gap={8}>
             <Kicker size={11}>FOUR MINUTES · READ IT WITH THE CELLO IN FRONT OF YOU</Kicker>
-            <Title size={34}>How to read this</Title>
+            <Title accessibilityRole="header" size={30}>Reading guide</Title>
             <Body size={15} color={chrome.dim}>
               Three ways of showing the same four strings, one fingerboard panel that never
               moves, and one number that tells you whether you are in tune. Nothing here is a
@@ -110,7 +110,7 @@ export default function TutorialScreen() {
             <Body size={15}>
               The nut is the notched ridge at the top of the fingerboard, where the strings
               leave the pegbox. Every distance in this app is measured from it, and the
-              fingerboard panel always draws it at the top.
+              diagram below uses Player orientation: the nut is at the bottom, as you see it while playing. Choose Diagram in display preferences to put it at the top.
             </Body>
             <Body size={15}>
               Play a string without touching it at all and you get its <B>open</B> note —

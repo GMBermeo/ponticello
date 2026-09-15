@@ -8,8 +8,8 @@ import {
 import { CelloSongScore } from '@/domain/schema';
 import { useTheme } from '@/theme/ThemeProvider';
 import { Label } from '../ui/primitives';
-import { staffStep } from './ScoreVision';
-import { Playhead } from './usePlayhead';
+import { staffStep } from './staff';
+import { Playhead, usePlayheadPosition } from './usePlayhead';
 
 /**
  * The page.
@@ -163,11 +163,13 @@ export function ScorePage({ score, playhead, height, width, showFingerings }: Sc
   const TOP_MARGIN = gap * 8;
   const pageHeight = Math.max(height, TOP_MARGIN + systems.length * systemHeight + gap * 4);
 
+  const position = usePlayheadPosition(playhead);
+
   // ── Follow the music ──────────────────────────────────────────────────────
   // Only while playing. Paused, the page belongs to the reader: they may want
   // to look ahead at the awkward bar four systems down without it snapping back.
   const activeSystem = useMemo(() => {
-    const found = locateMeasure(engraved, playhead.measureIndex);
+    const found = locateMeasure(engraved, position.measureIndex);
     if (!found) return 0;
     let seen = 0;
     for (let s = 0; s < systems.length; s++) {
@@ -178,7 +180,7 @@ export function ScorePage({ score, playhead, height, width, showFingerings }: Sc
       }
     }
     return 0;
-  }, [engraved, systems, playhead.measureIndex]);
+  }, [engraved, systems, position.measureIndex]);
 
   useEffect(() => {
     if (!playhead.playing) return;
@@ -224,7 +226,7 @@ export function ScorePage({ score, playhead, height, width, showFingerings }: Sc
                   laid={laid}
                   gap={gap}
                   chrome={chrome}
-                  activeIndex={playhead.activeIndex}
+                  activeIndex={position.activeIndex}
                   showFingerings={showFingerings}
                   openRepeat={system.firstInBlock[i] && engraved.blocks[system.blockOf[i]].times > 1}
                   closeRepeat={system.lastInBlock[i] && engraved.blocks[system.blockOf[i]].times > 1}

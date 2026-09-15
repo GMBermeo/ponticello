@@ -1,10 +1,11 @@
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { View } from 'react-native';
 
 import {
-  CelloFinger, CelloString, LANDMARKS, midiAt, midiToPitchName, STRING_ORDER,
-  stopDistanceMm, STRING_LENGTH_MM,
+  CelloFinger, CelloString, DISPLAY_STRING_ORDER, LANDMARKS, midiAt, midiToPitchName,
+  OPEN_STRING_MIDI, stopDistanceMm,
 } from '@/domain/cello';
+import { CelloNote } from '@/domain/schema';
 import { TapeSet, tapeGeometry } from '@/domain/tapes';
 import { useTheme } from '@/theme/ThemeProvider';
 import { alpha } from '@/theme/tokens';
@@ -33,6 +34,24 @@ import { Label, Num } from './ui/primitives';
  * `invert={false}` restores the printed-diagram orientation.
  */
 
+export interface FingerboardMarker {
+  string: CelloString;
+  semitones: number;
+  finger?: CelloFinger;
+}
+
+export type FingerboardTarget = CelloNote | FingerboardMarker;
+
+export function resolveFingerboardMarker(target?: FingerboardTarget | null): FingerboardMarker | null {
+  if (!target) return null;
+  if ('semitones' in target) return target;
+  return {
+    string: target.string,
+    semitones: target.midiNumber - OPEN_STRING_MIDI[target.string],
+    finger: target.finger,
+  };
+}
+
 export interface FingerboardProps {
   /** Height of the drawing in device-independent pixels — usually measured. */
   height: number;
@@ -55,8 +74,10 @@ export interface FingerboardProps {
     pitchName: string;
     isTonic: boolean;
   }[];
-  /** Highlight one stopped note. */
-  active?: { string: CelloString; semitones: number; finger: CelloFinger } | null;
+  /** Highlight one stopped note. Accepts either a CelloNote or precomputed FingerboardMarker. */
+  active?: FingerboardTarget | null;
+  /** Next note to be played, rendered in a black square for preparation. Accepts either a CelloNote or precomputed FingerboardMarker. */
+  next?: FingerboardTarget | null;
   /** Width of the left gutter that holds landmark labels, in design units. */
   gutter?: number;
   compact?: boolean;
@@ -67,13 +88,16 @@ export interface FingerboardProps {
   invert?: boolean;
 }
 
-export function Fingerboard({
+export const Fingerboard = memo(function Fingerboard({
   height, maxMm = 400, tapeSets, showTapes = true, showLandmarks = true,
-  showNoteNames = false, noteOverlay, active = null, gutter = 46, compact = false,
+  showNoteNames = false, noteOverlay, active = null, next = null, gutter = 46, compact = false,
   invert = true,
 }: FingerboardProps) {
   const theme = useTheme();
   const { chrome } = theme;
+
+  const resolvedActive = resolveFingerboardMarker(active);
+  const resolvedNext = resolveFingerboardMarker(next);
 
   const layout = useMemo(() => {
     const drawHeight = height;
@@ -104,8 +128,8 @@ export function Fingerboard({
   );
 
   const stringGap = theme.s(compact ? 15 : 26);
-  const railsWidth = stringGap * (STRING_ORDER.length - 1);
-  const railX = (string: CelloString) => STRING_ORDER.indexOf(string) * stringGap;
+  const railsWidth = stringGap * (DISPLAY_STRING_ORDER.length - 1);
+  const railX = (string: CelloString) => DISPLAY_STRING_ORDER.indexOf(string) * stringGap;
 
   return (
     <View style={{ height: layout.drawHeight, flexDirection: 'row' }}>
@@ -147,7 +171,7 @@ export function Fingerboard({
         )) : null}
 
         {/* String rails. */}
-        {STRING_ORDER.map((string) => (
+        {DISPLAY_STRING_ORDER.map((string) => (
           <View
             key={string}
             style={{
@@ -157,7 +181,7 @@ export function Fingerboard({
               left: railX(string),
               width: theme.rule(string === 'C' ? 3 : 2),
               backgroundColor: chrome.strings[string],
-              opacity: active && active.string !== string ? 0.35 : 0.9,
+              opacity: resolvedActive && resolvedActive.string !== string ? 0.35 : 0.9,
             }}
           />
         ))}
@@ -178,12 +202,12 @@ export function Fingerboard({
         )) : null}
 
         {/* Faint scale/song overlay: stopping points across all four strings.
-            Drawn before the active note so the live marker sits on top. */}
+            Drawn before the active note so the live marker sits on top.
+            Use light dots on dark themes and ink on paper for clear visibility. */}
         {noteOverlay ? noteOverlay
           .filter((marker) => stopDistanceMm(marker.semitones) <= maxMm)
           .map((marker) => {
             const dot = theme.s(compact ? (marker.isTonic ? 10 : 8) : (marker.isTonic ? 13 : 10));
-            const color = chrome.strings[marker.string];
             return (
               <View
                 key={`ov-${marker.string}-${marker.semitones}`}
@@ -194,35 +218,54 @@ export function Fingerboard({
                   width: dot,
                   height: dot,
                   borderRadius: dot / 2,
-                  backgroundColor: alpha(color, marker.isTonic ? 0.55 : 0.28),
-                  borderWidth: theme.rule(marker.isTonic ? 1.5 : 1),
-                  borderColor: alpha(color, marker.isTonic ? 0.9 : 0.5),
+                  backgroundColor: chrome.dark ? '#FFFFFF' : chrome.ink,
+                  opacity: marker.isTonic ? 0.95 : 0.7,
+                  borderWidth: theme.rule(1),
+                  borderColor: chrome.dark ? '#FFFFFF' : chrome.ink,
                 }}
               />
             );
           }) : null}
 
-        {/* The note under the hand right now. */}
-        {active ? (
+        {/* Next note to be played: solid black square without border and white finger number */}
+        {resolvedNext ? (
           <View
             style={{
               position: 'absolute',
-              left: railX(active.string) - theme.s(compact ? 8 : 11),
-              top: layout.y(stopDistanceMm(active.semitones)) - theme.s(compact ? 9 : 12),
+              left: railX(resolvedNext.string) - theme.s(compact ? 8 : 11),
+              top: layout.y(stopDistanceMm(resolvedNext.semitones)) - theme.s(compact ? 9 : 12),
               width: theme.s(compact ? 20 : 26),
               height: theme.s(compact ? 20 : 26),
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: chrome.strings[active.string],
+              backgroundColor: '#000000',
             }}
           >
-            <Num size={compact ? 11 : 14} color={chrome.bg}>{active.finger}</Num>
+            <Num size={compact ? 11 : 14} color="#FFFFFF">{resolvedNext.finger}</Num>
+          </View>
+        ) : null}
+
+        {/* The note under the hand right now. */}
+        {resolvedActive ? (
+          <View
+            style={{
+              position: 'absolute',
+              left: railX(resolvedActive.string) - theme.s(compact ? 8 : 11),
+              top: layout.y(stopDistanceMm(resolvedActive.semitones)) - theme.s(compact ? 9 : 12),
+              width: theme.s(compact ? 20 : 26),
+              height: theme.s(compact ? 20 : 26),
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: chrome.strings[resolvedActive.string],
+            }}
+          >
+            <Num size={compact ? 11 : 14} color={chrome.bg}>{resolvedActive.finger}</Num>
           </View>
         ) : null}
       </View>
 
       {/* Note names for whichever string is in play — the tutorial's payload. */}
-      {showNoteNames && active ? (
+      {showNoteNames && resolvedActive ? (
         <View style={{ flex: 1, marginLeft: theme.s(10) }}>
           {tapes.map((tape) => (
             <View
@@ -236,7 +279,7 @@ export function Fingerboard({
               }}
             >
               <Num size={13} color={chrome.tapes[tape.color]}>
-                {midiToPitchName(midiAt(active.string, tape.semitones))}
+                {midiToPitchName(midiAt(resolvedActive.string, tape.semitones))}
               </Num>
               <Label size={9}>{tape.caption}</Label>
             </View>
@@ -245,7 +288,7 @@ export function Fingerboard({
       ) : null}
     </View>
   );
-}
+});
 
 /** String name labels, drawn under a fingerboard at matching spacing. */
 export function FingerboardStringLabels({
@@ -255,8 +298,8 @@ export function FingerboardStringLabels({
   const stringGap = theme.s(compact ? 15 : 26);
   return (
     <View style={{ height: theme.s(16), marginTop: theme.s(4) }}>
-      {STRING_ORDER.map((string) => (
-        <View key={string} style={{ position: 'absolute', left: STRING_ORDER.indexOf(string) * stringGap - theme.s(3) }}>
+      {DISPLAY_STRING_ORDER.map((string) => (
+        <View key={string} style={{ position: 'absolute', left: DISPLAY_STRING_ORDER.indexOf(string) * stringGap - theme.s(3) }}>
           <Num
             size={compact ? 10 : 12}
             color={activeString && activeString !== string
@@ -271,7 +314,7 @@ export function FingerboardStringLabels({
   );
 }
 
-/** Footer caption naming the instrument the drawing is to scale for. */
+/** Footer caption naming the instrument the drawing is to scale for. (Removed per user request) */
 export function FingerboardScaleNote() {
-  return <Label size={9}>{`L ${STRING_LENGTH_MM} MM · TO SCALE`}</Label>;
+  return null;
 }

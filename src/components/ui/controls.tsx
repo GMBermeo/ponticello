@@ -1,272 +1,163 @@
-import React, { useCallback, useMemo } from 'react';
-import { Pressable, StyleProp, View, ViewStyle } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { Platform, Pressable, StyleProp, View, ViewStyle } from 'react-native';
 
 import { useTheme } from '@/theme/ThemeProvider';
-import { Label, Num, Row, Title } from './primitives';
+import { Body, Num, Row, Title } from './primitives';
 
-/**
- * Controls sized for one-handed use with a bow in the other hand: nothing
- * interactive is smaller than the theme's clamped 44 dp target, even where the
- * visual mark is smaller than that.
- */
+/** Shared pointer and keyboard feedback. The outline never changes layout. */
+export function useControlFeedback() {
+  const theme = useTheme();
+  const [focused, setFocused] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  return {
+    events: {
+      onFocus: () => setFocused(true), onBlur: () => setFocused(false),
+      onHoverIn: () => setHovered(true), onHoverOut: () => setHovered(false),
+    },
+    hovered,
+    focusStyle: focused ? {
+      outlineStyle: 'solid', outlineWidth: 2, outlineOffset: -2,
+      outlineColor: theme.chrome.accent,
+    } as ViewStyle : undefined,
+  };
+}
 
-// ─── Button ──────────────────────────────────────────────────────────────────
-
-export function Button({
-  label, hint, onPress, tone = 'default', disabled = false, style,
-}: {
-  label: string;
-  hint?: string;
-  onPress: () => void;
-  tone?: 'default' | 'accent' | 'ghost';
-  disabled?: boolean;
-  style?: StyleProp<ViewStyle>;
+export function Button({ label, hint, onPress, tone = 'default', disabled = false, style, accessibilityLabel, expanded }: {
+  label: string; hint?: string; accessibilityLabel?: string; expanded?: boolean; onPress: () => void;
+  tone?: 'default' | 'accent' | 'ghost'; disabled?: boolean; style?: StyleProp<ViewStyle>;
 }) {
   const theme = useTheme();
   const { chrome } = theme;
-
-  const box = useMemo<ViewStyle>(() => ({
-    minHeight: theme.tap,
-    justifyContent: 'center',
-    paddingHorizontal: theme.s(16),
-    paddingVertical: theme.s(12),
-    backgroundColor: tone === 'accent' ? chrome.accent : 'transparent',
-    borderWidth: tone === 'ghost' ? 0 : theme.rule(1),
-    borderColor: tone === 'accent' ? chrome.accent : chrome.line,
-    opacity: disabled ? 0.4 : 1,
-  }), [theme, chrome, tone, disabled]);
-
-  const labelColor = tone === 'accent' ? chrome.bg : chrome.ink;
-
+  const feedback = useControlFeedback();
+  const color = tone === 'accent' ? chrome.bg : chrome.ink;
   return (
-    <Pressable
-      onPress={disabled ? undefined : onPress}
-      disabled={disabled}
-      accessibilityRole="button"
-      accessibilityLabel={hint ? `${label}. ${hint}` : label}
-      accessibilityState={{ disabled }}
-      style={({ pressed }) => [box, pressed ? PRESSED : null, style]}
-    >
+    <Pressable {...feedback.events} onPress={onPress} disabled={disabled}
+      accessibilityRole="button" accessibilityLabel={accessibilityLabel ?? (hint ? `${label}. ${hint}` : label)}
+      accessibilityState={{ disabled, expanded }} aria-disabled={disabled} aria-expanded={expanded}
+      style={({ pressed }) => [{
+        minHeight: theme.tap, justifyContent: 'center', borderRadius: theme.s(8),
+        paddingHorizontal: theme.s(14), paddingVertical: theme.s(11),
+        backgroundColor: tone === 'accent' ? chrome.accent : feedback.hovered ? chrome.surface : 'transparent',
+        borderWidth: theme.rule(1), borderColor: tone === 'ghost' ? 'transparent' : tone === 'accent' ? chrome.accent : chrome.line,
+        opacity: disabled ? 0.4 : pressed ? 0.72 : 1,
+      }, style, feedback.focusStyle, tone === 'accent' && feedback.focusStyle ? { outlineColor: chrome.bg, outlineOffset: -4 } : undefined]}>
       <Row gap={10}>
-        <Title size={16} color={labelColor}>{label}</Title>
-        {hint === undefined ? null : (
-          <Label size={10} color={tone === 'accent' ? chrome.bg : chrome.dim} style={{ marginLeft: 'auto' }}>
-            {hint}
-          </Label>
-        )}
+        <Title size={15} color={color} style={{ flexShrink: 1 }}>{label}</Title>
+        {hint === undefined ? null : <Body size={12} color={tone === 'accent' ? color : chrome.dim} style={{ marginLeft: 'auto' }}>{hint}</Body>}
       </Row>
     </Pressable>
   );
 }
 
-const PRESSED: ViewStyle = { opacity: 0.62 };
-
-// ─── Toggle ──────────────────────────────────────────────────────────────────
-
-export function Toggle({
-  label, hint, value, onChange,
-}: { label: string; hint?: string; value: boolean; onChange: (next: boolean) => void }) {
+export function Toggle({ label, hint, value, onChange }: {
+  label: string; hint?: string; value: boolean; onChange: (next: boolean) => void;
+}) {
   const theme = useTheme();
   const { chrome } = theme;
-  const handlePress = useCallback(() => onChange(!value), [onChange, value]);
-
-  const track = useMemo<ViewStyle>(() => ({
-    width: theme.s(46),
-    height: theme.s(26),
-    borderWidth: theme.rule(1),
-    borderColor: value ? chrome.accent : chrome.line,
-    backgroundColor: value ? chrome.accentWash : 'transparent',
-    justifyContent: 'center',
-  }), [theme, chrome, value]);
-
-  const knob = useMemo<ViewStyle>(() => ({
-    position: 'absolute',
-    left: theme.s(value ? 25 : 3),
-    width: theme.s(18),
-    height: theme.s(18),
-    backgroundColor: value ? chrome.accent : chrome.line,
-  }), [theme, chrome, value]);
-
+  const feedback = useControlFeedback();
   return (
-    <Pressable
-      onPress={handlePress}
-      accessibilityRole="switch"
-      accessibilityLabel={label}
-      accessibilityHint={hint}
-      accessibilityState={{ checked: value }}
-      style={({ pressed }) => [
-        { flexDirection: 'row', alignItems: 'center', gap: theme.s(12), minHeight: theme.tap },
-        pressed ? PRESSED : null,
-      ]}
-    >
+    <Pressable {...feedback.events} onPress={() => onChange(!value)} accessibilityRole="switch"
+      accessibilityLabel={label} accessibilityHint={hint} accessibilityState={{ checked: value }} aria-checked={value}
+      style={({ pressed }) => [{
+        flexDirection: 'row', alignItems: 'center', gap: theme.s(14), minHeight: theme.tap,
+        paddingVertical: theme.s(6), borderRadius: theme.s(6), opacity: pressed ? 0.7 : 1,
+      }, feedback.focusStyle]}>
       <View style={{ flex: 1 }}>
         <Title size={15}>{label}</Title>
-        {hint === undefined ? null : <Label size={10}>{hint}</Label>}
+        {hint === undefined ? null : <Body size={12} color={chrome.dim} style={{ marginTop: theme.s(3) }}>{hint}</Body>}
       </View>
-      <View style={track}><View style={knob} /></View>
+      <View style={{ width: theme.s(44), height: theme.s(26), borderRadius: theme.s(13), backgroundColor: value ? chrome.accent : chrome.line }}>
+        <View style={{ position: 'absolute', top: theme.s(3), left: theme.s(value ? 21 : 3), width: theme.s(20), height: theme.s(20), borderRadius: theme.s(10), backgroundColor: chrome.bg }} />
+      </View>
     </Pressable>
   );
 }
 
-// ─── Stepper ─────────────────────────────────────────────────────────────────
-
-export function Stepper({
-  label, value, display, onDecrement, onIncrement, canDecrement = true, canIncrement = true,
-}: {
-  label: string;
-  value: number;
-  display?: string;
-  onDecrement: () => void;
-  onIncrement: () => void;
-  canDecrement?: boolean;
-  canIncrement?: boolean;
+export function Stepper({ label, value, display, onDecrement, onIncrement, canDecrement = true, canIncrement = true }: {
+  label: string; value: number; display?: string;
+  onDecrement: () => void; onIncrement: () => void; canDecrement?: boolean; canIncrement?: boolean;
 }) {
   const theme = useTheme();
-  const { chrome } = theme;
-
-  const button = useMemo<ViewStyle>(() => ({
-    minWidth: theme.tap,
-    minHeight: theme.tap,
-    alignItems: 'center',
-    justifyContent: 'center',
-  }), [theme]);
-
-  const frame = useMemo<ViewStyle>(() => ({
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: theme.rule(1),
-    borderColor: chrome.line,
-  }), [theme, chrome]);
-
   return (
-    <View style={frame}>
-      <Pressable
-        onPress={canDecrement ? onDecrement : undefined}
-        disabled={!canDecrement}
-        accessibilityRole="button"
-        accessibilityLabel={`Decrease ${label}`}
-        style={({ pressed }) => [button, { opacity: canDecrement ? (pressed ? 0.6 : 1) : 0.3 }]}
-      >
-        <Title size={20}>–</Title>
-      </Pressable>
-      <View
-        style={{
-          minWidth: theme.s(58),
-          alignItems: 'center',
-          paddingHorizontal: theme.s(6),
-          borderLeftWidth: theme.rule(1),
-          borderRightWidth: theme.rule(1),
-          borderColor: chrome.lineSoft,
-        }}
-        accessibilityLabel={`${label}: ${display ?? value}`}
-      >
+    <Row style={{ borderWidth: theme.rule(1), borderColor: theme.chrome.line, borderRadius: theme.s(8) }}>
+      <Button label="−" accessibilityLabel={`Decrease ${label}`} onPress={onDecrement} disabled={!canDecrement} tone="ghost" style={{ paddingHorizontal: 0, minWidth: theme.tap, alignItems: 'center' }} />
+      <View accessibilityLabel={`${label}: ${display ?? value}`} style={{ minWidth: theme.s(62), alignItems: 'center' }}>
         <Num size={15}>{display ?? String(value)}</Num>
       </View>
-      <Pressable
-        onPress={canIncrement ? onIncrement : undefined}
-        disabled={!canIncrement}
-        accessibilityRole="button"
-        accessibilityLabel={`Increase ${label}`}
-        style={({ pressed }) => [button, { opacity: canIncrement ? (pressed ? 0.6 : 1) : 0.3 }]}
-      >
-        <Title size={20}>+</Title>
-      </Pressable>
+      <Button label="+" accessibilityLabel={`Increase ${label}`} onPress={onIncrement} disabled={!canIncrement} tone="ghost" style={{ paddingHorizontal: 0, minWidth: theme.tap, alignItems: 'center' }} />
+    </Row>
+  );
+}
+
+export interface Segment<T extends string> { value: T; label: string; hint?: string }
+
+export function Segmented<T extends string>({ segments, value, onChange, grow = false, compact = false, accessibilityLabel }: {
+  segments: readonly Segment<T>[]; value: T; onChange: (next: T) => void; grow?: boolean; compact?: boolean; accessibilityLabel?: string;
+}) {
+  const theme = useTheme();
+  const buttons = useRef<(View | null)[]>([]);
+  const selectWithKeyboard = (index: number, key: string) => {
+    const next = key === 'Home' ? 0 : key === 'End' ? segments.length - 1
+      : (index + (key === 'ArrowRight' || key === 'ArrowDown' ? 1 : -1) + segments.length) % segments.length;
+    onChange(segments[next].value);
+    buttons.current[next]?.focus();
+  };
+  return (
+    <View accessibilityRole="radiogroup" accessibilityLabel={accessibilityLabel} style={{ flexDirection: 'row', padding: theme.s(3), borderRadius: theme.s(9), backgroundColor: theme.chrome.surface, alignSelf: grow ? 'stretch' : 'flex-start' }}>
+      {segments.map((segment, index) => <SegmentButton key={segment.value} segment={segment} selected={segment.value === value} onPress={() => onChange(segment.value)} grow={grow} compact={compact} setRef={(node) => { buttons.current[index] = node; }} onArrow={(key) => selectWithKeyboard(index, key)} />)}
     </View>
   );
 }
 
-// ─── Segmented control ───────────────────────────────────────────────────────
-
-export interface Segment<T extends string> {
-  value: T;
-  label: string;
-  /** Spoken label, when the visible one is an abbreviation. */
-  hint?: string;
-}
-
-export function Segmented<T extends string>({
-  segments, value, onChange, grow = false, compact = false,
-}: {
-  segments: readonly Segment<T>[];
-  value: T;
-  onChange: (next: T) => void;
-  grow?: boolean;
-  compact?: boolean;
+function SegmentButton<T extends string>({ segment, selected, onPress, grow, compact, setRef, onArrow }: {
+  segment: Segment<T>; selected: boolean; onPress: () => void; grow: boolean; compact: boolean; setRef: (node: View | null) => void; onArrow: (key: string) => void;
 }) {
   const theme = useTheme();
-  const { chrome } = theme;
-
+  const feedback = useControlFeedback();
   return (
-    <View
-      accessibilityRole="tablist"
-      style={{
-        flexDirection: 'row',
-        borderWidth: theme.rule(1),
-        borderColor: chrome.line,
-        alignSelf: grow ? 'stretch' : 'flex-start',
-        flex: grow ? 1 : undefined,
-      }}
-    >
-      {segments.map((segment, index) => {
-        const selected = segment.value === value;
-        return (
-          <Pressable
-            key={segment.value}
-            onPress={() => onChange(segment.value)}
-            accessibilityRole="tab"
-            accessibilityLabel={segment.hint ?? segment.label}
-            accessibilityState={{ selected }}
-            style={({ pressed }) => [{
-              flex: grow ? 1 : undefined,
-              minHeight: compact ? theme.s(36) : theme.tap,
-              alignItems: 'center',
-              justifyContent: 'center',
-              paddingHorizontal: theme.s(compact ? 10 : 16),
-              backgroundColor: selected ? chrome.accent : 'transparent',
-              borderLeftWidth: index === 0 ? 0 : theme.rule(1),
-              borderColor: chrome.lineSoft,
-              opacity: pressed ? 0.7 : 1,
-            }]}
-          >
-            <Label size={11} color={selected ? chrome.bg : chrome.dim}>{segment.label}</Label>
-          </Pressable>
-        );
-      })}
-    </View>
+    <Pressable ref={setRef} {...feedback.events} onPress={onPress} accessibilityRole="radio"
+      {...(Platform.OS === 'web' ? { tabIndex: selected ? 0 as const : -1 as const, onKeyDown: (event: { key: string; preventDefault: () => void }) => {
+        if (['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) { event.preventDefault(); onArrow(event.key); }
+      } } : {})}
+      accessibilityLabel={segment.label} accessibilityHint={segment.hint} accessibilityState={{ checked: selected }} aria-checked={selected}
+      style={({ pressed }) => [{
+        flex: grow ? 1 : undefined, minWidth: 0, minHeight: theme.tap,
+        alignItems: 'center', justifyContent: 'center', paddingHorizontal: theme.s(compact ? 7 : 11),
+        borderRadius: theme.s(6), backgroundColor: selected ? theme.chrome.bg : feedback.hovered ? theme.chrome.lineSoft : 'transparent',
+        borderWidth: theme.rule(1), borderColor: selected ? theme.chrome.line : 'transparent', opacity: pressed ? 0.7 : 1,
+      }, feedback.focusStyle]}>
+      <Title size={compact ? 12 : 13} color={selected ? theme.chrome.ink : theme.chrome.dim} style={{ textAlign: 'center' }}>{segment.label}</Title>
+    </Pressable>
   );
 }
 
-// ─── Pressable row ───────────────────────────────────────────────────────────
-
-export function PressableRow({
-  onPress, accessibilityLabel, selected = false, disabled = false, children, style,
-}: {
-  onPress?: () => void;
-  accessibilityLabel: string;
-  selected?: boolean;
-  disabled?: boolean;
-  children: React.ReactNode;
-  style?: StyleProp<ViewStyle>;
+export function PressableRow({ onPress, accessibilityLabel, selected, disabled = false, children, style }: {
+  onPress?: () => void; accessibilityLabel: string; selected?: boolean; disabled?: boolean; children: React.ReactNode; style?: StyleProp<ViewStyle>;
 }) {
   const theme = useTheme();
+  const feedback = useControlFeedback();
   return (
-    <Pressable
-      onPress={disabled ? undefined : onPress}
-      disabled={disabled || !onPress}
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      accessibilityState={{ selected, disabled }}
-      style={({ pressed }) => [
-        {
-          minHeight: theme.tap,
-          backgroundColor: selected ? theme.chrome.surface : 'transparent',
-          opacity: disabled ? 0.55 : 1,
-        },
-        pressed && !disabled ? PRESSED : null,
-        style,
-      ]}
-    >
+    <Pressable {...feedback.events} onPress={onPress} disabled={disabled || !onPress} accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel} accessibilityState={{ selected, disabled: disabled || !onPress }} aria-pressed={selected} aria-disabled={disabled || !onPress}
+      style={({ pressed }) => [{ minHeight: theme.tap, backgroundColor: selected || feedback.hovered ? theme.chrome.surface : 'transparent', opacity: disabled ? 0.55 : pressed ? 0.7 : 1 }, style, feedback.focusStyle]}>
       {children}
     </Pressable>
+  );
+}
+
+/** Keep optional setup choices out of the path to starting a practice session. */
+export function Disclosure({ title, summary, children }: { title: string; summary?: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const theme = useTheme();
+  const feedback = useControlFeedback();
+  return (
+    <View style={{ borderTopWidth: theme.rule(1), borderColor: theme.chrome.lineSoft }}>
+      <Pressable {...feedback.events} onPress={() => setOpen(!open)} accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ expanded: open }} aria-expanded={open}
+        style={[{ minHeight: theme.tap, paddingVertical: theme.s(14), flexDirection: 'row', alignItems: 'center', gap: theme.s(12) }, feedback.focusStyle]}>
+        <View style={{ flex: 1 }}><Title size={15}>{title}</Title>{summary ? <Body size={12} color={theme.chrome.dim} style={{ marginTop: theme.s(3) }}>{summary}</Body> : null}</View>
+        <Title size={18} color={theme.chrome.dim}>{open ? '−' : '+'}</Title>
+      </Pressable>
+      {open ? <View style={{ gap: theme.s(12), paddingBottom: theme.s(18) }}>{children}</View> : null}
+    </View>
   );
 }

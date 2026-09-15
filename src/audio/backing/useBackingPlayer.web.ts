@@ -76,6 +76,8 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
   const cycleOriginRef = useRef(0);
   /** Index into `program.notes` of the next note to schedule. */
   const cursorRef = useRef(0);
+  /** Audio-clock time of the first scheduled sound; NaN when stopped. */
+  const startsAtRef = useRef(Number.NaN);
 
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -255,12 +257,26 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
 
   const stop = useCallback(() => {
     playGenerationRef.current++;
+    startsAtRef.current = Number.NaN;
     if (timerRef.current !== null) {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
     silence();
   }, [silence]);
+
+  const positionSeconds = useCallback((): number | null => {
+    const audio = contextRef.current;
+    const program = programRef.current;
+    if (!audio || !program || program.durationSec <= 0 || timerRef.current === null) return null;
+    // What is reaching the speaker now was scheduled `outputLatency` ago.
+    const heard = audio.currentTime - (audio.outputLatency || audio.baseLatency || 0);
+    if (!(heard >= startsAtRef.current)) return null;
+    const duration = program.durationSec;
+    // The scheduler advances the cycle origin up to a lookahead early, so the
+    // raw difference can be negative near the loop point; the modulo folds it.
+    return (((heard - cycleOriginRef.current) % duration) + duration) % duration;
+  }, []);
 
   const load = useCallback(async (program: BackingProgram) => {
     const audio = context();
@@ -299,6 +315,7 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
       // receives that same lead and counts it down on the UI thread.
       const startsAt = audio.currentTime + START_DELAY_SEC;
       cycleOriginRef.current = startsAt - offset;
+      startsAtRef.current = startsAt;
 
       // Restore notes whose onset is behind the playhead but whose hold/release
       // still overlaps it. This is essential for a loop-length drone: without
@@ -346,5 +363,5 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
   }, [stop]);
 
   // Nothing to prepare, so preparation is always finished.
-  return { load, play, stop, setVolume, ready, progress: 1, error };
+  return { load, play, stop, setVolume, positionSeconds, ready, progress: 1, error };
 }

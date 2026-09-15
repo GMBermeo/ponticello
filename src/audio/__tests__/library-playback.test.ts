@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
 import { arrangeScoreForLevel } from '@/domain/arrangement';
-import { BackingPart, generateAccompaniment, soloPartFromScore } from '@/domain/backing';
+import { arrangementBackingParts, BackingPart, generateAccompaniment, soloPartFromScore } from '@/domain/backing';
 import { clipToLoop, loopBudget, practiceLoop } from '@/domain/loop';
+import { getBassLine, getGuideLine } from '@/scores';
 import { COMPACT_SCORES, inflateBacking, inflateScore } from '@/scores/bundledSongs';
 import { buildProgram, estimatePeak } from '../backing/program';
 import { renderProgramInto } from '../synth';
+import { LIBRARY_EDITION } from '@/scores/libraryEdition';
+
+/** Size thresholds describe the full library; the free edition ships a dozen pieces. */
+const FULL_LIBRARY = LIBRARY_EDITION.id === 'full';
 
 /**
  * Every song, one by one.
@@ -41,7 +46,9 @@ interface Outcome {
 /** Resolves a song exactly as `useBacking` does in `listenMode: 'both'`. */
 function resolve(index: number): Outcome {
   const raw = COMPACT_SCORES[index];
-  const score = arrangeScoreForLevel(inflateScore(raw), 'Intermediate');
+  const score = arrangeScoreForLevel(inflateScore(raw), 'Intermediate', {
+    guide: getGuideLine(raw.id), bass: getBassLine(raw.id),
+  });
   const backing = inflateBacking(raw);
 
   // What the player gets on opening a song: the whole piece, written tempo.
@@ -52,7 +59,7 @@ function resolve(index: number): Outcome {
   });
 
   const solo = clipToLoop([soloPartFromScore(score)], loop);
-  const importedAccompaniment = backing.parts.filter((part) => part.role === 'accompaniment');
+  const importedAccompaniment = arrangementBackingParts(backing, score);
   const accompaniment = importedAccompaniment.length > 0
     ? clipToLoop(importedAccompaniment, loop)
     : generateAccompaniment(score, {
@@ -97,7 +104,12 @@ describe('every bundled song plays its backing', () => {
   const outcomes = COMPACT_SCORES.map((_, index) => resolve(index));
 
   it('ships the songs this suite claims to cover', () => {
-    expect(outcomes.length).toBe(258);
+    // Every bundled song, whatever the count happens to be. `build:library`
+    // rebuilds `bundledSongs.json` from `_MIDIS/` and the total moves whenever
+    // the user adds or deletes a file, so pinning a number here fails the suite
+    // for a reason that has nothing to do with playback.
+    expect(outcomes.length).toBe(COMPACT_SCORES.length);
+    expect(outcomes.length).toBeGreaterThan(FULL_LIBRARY ? 200 : 0);
   });
 
   it.each(outcomes.map((o) => [o.id, o] as const))(
@@ -138,6 +150,6 @@ describe('every bundled song plays its backing', () => {
 
     // The regression this whole file exists for: most of the library is longer
     // than the ceiling that used to silence it.
-    expect(overOldCeiling).toBeGreaterThan(200);
+    if (FULL_LIBRARY) expect(overOldCeiling).toBeGreaterThan(200);
   });
 });

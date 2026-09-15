@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import {
-  AccompanimentStyle, BackingPart, BackingTrack, generateAccompaniment, soloPartFromScore,
-} from '@/domain/backing';
-import { clipToLoop, loopBudget, loopOffsetSeconds, PracticeLoop } from '@/domain/loop';
+import { AccompanimentStyle, BackingPart, BackingTrack } from '@/domain/backing';
+import { loopBudget, loopOffsetSeconds, PracticeLoop } from '@/domain/loop';
 import { CelloSongScore } from '@/domain/schema';
-import { buildProgram } from './backing/program';
+import { resolveAudibleProgram } from './backing/program';
 import { backingTransportDecision } from './backing/transport';
 import { ListenMode } from './backing/types';
 import { useBackingPlayer } from './backing/useBackingPlayer';
@@ -76,6 +74,11 @@ export interface BackingState {
   loopDurationMs: number;
   /** How many notes will actually sound. Zero here means silence, and why. */
   noteCount: number;
+  /**
+   * Where the audio is, in *score* milliseconds, or null when nothing is
+   * sounding. The visual clock is locked to this.
+   */
+  audioScoreTimeMs: () => number | null;
 }
 
 export function useBacking(options: UseBackingOptions): BackingState {
@@ -90,6 +93,7 @@ export function useBacking(options: UseBackingOptions): BackingState {
     play: playPlayer,
     stop: stopPlayer,
     setVolume: setPlayerVolume,
+    positionSeconds,
     ready: playerReady,
     progress: playerProgress,
     error: playerError,
@@ -97,50 +101,9 @@ export function useBacking(options: UseBackingOptions): BackingState {
 
   const [preparing, setPreparing] = useState(false);
 
-  const soloParts = useMemo<BackingPart[]>(() => {
-    // The displayed arranged score is authoritative. Imported raw solo events
-    // may use another octave, density level, or source start and must never
-    // disagree with what the player is being asked to bow.
-    if (score) return clipToLoop([soloPartFromScore(score)], loop);
-    const imported = (backing?.parts ?? []).filter((part) => part.role === 'solo');
-    return clipToLoop(imported, loop);
-  }, [backing, score, loop]);
-
-  const accompanimentParts = useMemo<BackingPart[]>(() => {
-    const imported = (backing?.parts ?? []).filter((p) => p.role === 'accompaniment');
-    if (imported.length > 0) return clipToLoop(imported, loop);
-    if (!score) return [];
-    // The generator is handed the window and returns notes already rebased to
-    // it, so it is clipped by construction — running it through `clipToLoop`
-    // again would measure loop-relative times against score-relative bounds.
-    return generateAccompaniment(score, {
-      style: accompaniment,
-      fromBar: loop.fromBar,
-      toBar: loop.toBar,
-    });
-  }, [backing, score, accompaniment, loop]);
-
-  const audibleParts = useMemo(() => {
-    switch (listenMode) {
-      case 'solo': return soloParts;
-      case 'backing': return accompanimentParts;
-      case 'both': return [...accompanimentParts, ...soloParts];
-      default: return [];
-    }
-  }, [listenMode, soloParts, accompanimentParts]);
-
-  /**
-   * The program. Derived, not stored: it is a pure function of the music, the
-   * window and the tempo, so there is nothing here for a stale piece of state
-   * to disagree with.
-   */
-  const program = useMemo(
-    () => buildProgram({
-      id: `${score?.id ?? 'none'}:${listenMode}:${accompaniment}`,
-      parts: audibleParts,
-      loop,
-    }),
-    [score?.id, listenMode, accompaniment, audibleParts, loop],
+  const { soloParts, accompanimentParts, audibleParts, program } = useMemo(
+    () => resolveAudibleProgram({ score, backing, loop, listenMode, accompaniment }),
+    [score, backing, loop, listenMode, accompaniment],
   );
 
   const budget = useMemo(() => loopBudget(loop), [loop]);
@@ -239,6 +202,15 @@ export function useBacking(options: UseBackingOptions): BackingState {
   const error = (wouldSound && !budget.withinBudget ? budget.message : null)
     ?? playerError;
 
+  // Real seconds into the loop, back to the score clock the notes are written
+  // against: the same conversion `loopOffsetSeconds` makes in the other direction.
+  const { fromMs: loopFromMs, tempoScale } = loop;
+  const audioScoreTimeMs = useCallback((): number | null => {
+    if (!currentProgramReady) return null;
+    const seconds = positionSeconds();
+    return seconds === null ? null : loopFromMs + seconds * 1000 * tempoScale;
+  }, [currentProgramReady, loopFromMs, positionSeconds, tempoScale]);
+
   return {
     ready: currentProgramReady,
     rendering: preparing || playerProgress < 1,
@@ -249,5 +221,6 @@ export function useBacking(options: UseBackingOptions): BackingState {
     hasAccompaniment: accompanimentParts.length > 0,
     loopDurationMs: wouldSound ? loop.realDurationMs : 0,
     noteCount: program.notes.length,
+    audioScoreTimeMs,
   };
 }

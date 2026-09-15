@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { OPEN_STRING_MIDI } from '../cello';
 import {
   detectKey, fingerboardMarkers, keyName, pitchClassHistogram, songPitchClasses,
+  songPlayedNotes,
 } from '../key';
 import { CelloSongScore } from '../schema';
 
@@ -115,5 +116,18 @@ describe('fingerboard markers', () => {
   it('spells with flats when asked', () => {
     const [marker] = fingerboardMarkers([1], { maxSemitones: 2, preferFlats: true });
     expect(marker.pitchName.startsWith('Db')).toBe(true);
+  });
+});
+
+describe('songPlayedNotes', () => {
+  it('returns only unique notes actually played in the score', () => {
+    const score = scoreOf([36, 38, 36]); // C2, D2, C2 on C string (semitones 0 and 2)
+    const played = songPlayedNotes(score, { tonic: 0 });
+
+    expect(played).toHaveLength(2);
+    expect(played.map((p) => p.semitones)).toEqual([0, 2]);
+    expect(played[0].string).toBe('C');
+    expect(played[0].isTonic).toBe(true);
+    expect(played[1].isTonic).toBe(false);
   });
 });

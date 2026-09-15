@@ -95,7 +95,7 @@ export class PitchEngine {
 
   constructor(options: PitchEngineOptions = {}) {
     const {
-      sampleRate = 48000, maxFrequency = 1000, minFrequency = 55,
+      sampleRate = 16000, maxFrequency = 1000, minFrequency = 55,
       highBandConfidence = 0.88, useOnsetGate = true,
     } = options;
 

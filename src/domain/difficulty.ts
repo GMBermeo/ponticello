@@ -77,7 +77,7 @@ export interface DifficultyReport {
  * to believe. The obvious weighting puts hand travel and shifting first,
  * because on a cello they *are* first — and the draft that did scored 247 of
  * 258 songs identically, because the library is folded into MIDI 36–63 and
- * `MINIMAL_TRAVEL_WEIGHTS` then anchors the hand so hard that median travel
+ * `ARRANGEMENT_WEIGHTS` then anchors the hand so hard that median travel
  * across the whole library is **zero** millimetres per second and the median
  * shift count is **zero**. Weighting a constant heavily does not make it
  * informative; it only dilutes the factors that vary.
@@ -88,17 +88,27 @@ export interface DifficultyReport {
  * three strings is the thing that actually goes wrong in these arrangements.
  * **Extensions** are a genuine strain and vary widely here.
  *
- * Travel, shifting and register keep real but small weights. They are near-zero
- * across the bundled library by construction — but an imported piece is not
- * folded into first position, and for those they should and do dominate.
+ * Travel and shifting keep real but small weights. They are near-zero across
+ * the bundled library by construction — but an imported piece is not folded
+ * into first position, and for those they should and do dominate.
+ *
+ * **Register is the exception, and it earned its weight the hard way.** At 6
+ * points it could not reach a tier boundary at all: six bundled songs sat
+ * *entirely* in thumb position, one of them from E4 to A5, and the tier this
+ * function printed on them was "Intermediate". A rating that calls a line
+ * nobody with tapes on their fingerboard can touch the second of four tiers is
+ * not a small inaccuracy, it is the rating being wrong about the only thing a
+ * beginner needs it to be right about. Register now carries 18 and cannot be
+ * saturated by upper-neck work alone — reaching the top of it takes thumb
+ * position, which is a different technique rather than more of the same one.
  */
 const WEIGHTS = {
-  speed: 34,
-  crossings: 24,
-  extensions: 16,
+  speed: 28,
+  crossings: 20,
+  register: 18,
+  extensions: 14,
   travel: 10,
   shifting: 10,
-  register: 6,
 } as const;
 
 /**
@@ -114,28 +124,57 @@ const WEIGHTS = {
  * worst case. That makes the tiers relative to *this* library — Expert means
  * the hardest thing here, not the hardest thing on the instrument — which is
  * what a filter on a library screen has to mean to be useful.
+ *
+ * Travel and shifting were measured at 6 mm/s and 0.15 shifts/s, which was
+ * true of a library fingered under `DEFAULT_WEIGHTS`, which is what the build
+ * was doing at the time — while this file's own comments reasoned about
+ * `ARRANGEMENT_WEIGHTS`. With the weighting actually applied, the median song
+ * sits at 1.5 mm/s and the 95th percentile at 40, so the old ceilings pinned
+ * two of six components to maximum for a third of the library. Re-measured.
  */
 const SATURATION = {
   notesPerSec: 5.5,
-  wideCrossingsPerSec: 0.9,
+  wideCrossingsPerSec: 1.1,
   extensionShare: 0.5,
-  travelMmPerSec: 6,
-  shiftsPerSec: 0.15,
+  travelMmPerSec: 42,
+  shiftsPerSec: 0.75,
 } as const;
 
 /**
  * Tier boundaries on the 0–100 score.
  *
- * Placed at roughly the 38th, 72nd and 92nd percentiles of the library, which
- * is what makes the four tiers usable as a filter: a third of the library is
+ * Placed at the 33rd, 67th and 90th percentiles of the library, which is what
+ * makes the four tiers usable as a filter: a third of the library is
  * approachable, a third is the next step, a fifth is a stretch, and Expert is
  * the top tenth. Boundaries chosen from the distribution rather than from round
- * numbers, because a tier that holds 60 % of the library tells a player nothing.
+ * numbers, because a tier that holds 60 % of the library tells a player nothing
+ * — and re-measured whenever the arranger or the weights above change, because
+ * they are percentiles of a distribution and not facts about the cello.
  */
-const TIER_AT = { Intermediate: 11, Advanced: 27, Expert: 45 } as const;
+const TIER_AT = { Intermediate: 11.2, Advanced: 22.8, Expert: 40.3 } as const;
 
 /** Below this, a shift is being made in a hurry rather than prepared. */
 const HURRIED_MS = 200;
+
+/**
+ * Tier floors that no amount of slowness can lower.
+ *
+ * The weighted score answers "how much work is this?", and for almost
+ * everything that is the right question. It is the wrong question about
+ * technique the player has not learned yet: a line in thumb position is not an
+ * easy piece played high up, it is a piece you cannot begin until someone has
+ * taught you to put your thumb on the string, and a slow one is *more*
+ * exposed, not less. Left to the score alone, a placid thumb-position line
+ * came out "Intermediate", which is a rating that tells the exact player it is
+ * aimed at the exact wrong thing.
+ *
+ * So register sets a floor as well as contributing weight. Shares rather than
+ * single notes, so one passing harmonic does not relabel a piece.
+ */
+const TIER_FLOORS: readonly { tier: DifficultyTier; test: (f: DifficultyFactors) => boolean }[] = [
+  { tier: 'Advanced', test: (f) => f.thumbShare >= 0.08 },
+  { tier: 'Intermediate', test: (f) => f.upperShare + f.thumbShare >= 0.12 },
+];
 
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 
@@ -230,8 +269,10 @@ export function difficultyOf(
       'upper positions',
       WEIGHTS.register,
       // Thumb position counts double: it is a different technique, not simply
-      // further up the same one.
-      clamp01(f.upperShare + f.thumbShare * 2),
+      // further up the same one. A line wholly in the upper neck therefore
+      // reaches 0.5 of this component and a line wholly in thumb position
+      // reaches all of it, which is the ordering a cellist would give them.
+      clamp01(f.upperShare * 0.5 + f.thumbShare),
     ],
     [
       'speed',
@@ -251,7 +292,13 @@ export function difficultyOf(
     .sort((a, b) => b[1] * b[2] - a[1] * a[2])
     .map(([name]) => name);
 
-  return { tier: tierFor(score), score, factors: f, drivers };
+  const scored = tierFor(score);
+  const floor = TIER_FLOORS.find((entry) => entry.test(f))?.tier;
+  const tier = floor && DIFFICULTY_TIERS.indexOf(floor) > DIFFICULTY_TIERS.indexOf(scored)
+    ? floor
+    : scored;
+
+  return { tier, score, factors: f, drivers };
 }
 
 export function tierFor(score: number): DifficultyTier {

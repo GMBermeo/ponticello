@@ -3,8 +3,14 @@ import { describe, expect, it } from 'vitest';
 import { ARRANGEMENT_LEVELS, ARRANGEMENT_PROFILES, arrangeScoreForLevel } from '../arrangement';
 import { soloPartFromScore } from '../backing';
 import { midiToFrequency, midiToPitchName, OPEN_STRING_MIDI } from '../cello';
-import { validateScore } from '../schema';
+import { difficultyOf } from '../difficulty';
+import { firstPositionFingering } from '../fingering';
+import { scoreDurationMs, validateScore } from '../schema';
 import { LIBRARY_ROWS, SCORES } from '@/scores';
+import { LIBRARY_EDITION } from '@/scores/libraryEdition';
+
+/** Size thresholds describe the full library; the free edition ships a dozen pieces. */
+const FULL_LIBRARY = LIBRARY_EDITION.id === 'full';
 
 describe('bundled scores', () => {
   it.each(SCORES.map((s) => [s.id, s] as const))('%s passes structural validation', (_id, score) => {
@@ -115,8 +121,12 @@ describe('library rows', () => {
   });
 
   it('validates every compact song and every adaptive arrangement level', async () => {
-    const { COMPACT_SCORES, getScore, getBundledBacking } = await import('@/scores');
-    expect(COMPACT_SCORES).toHaveLength(258);
+    const { COMPACT_SCORES, getScore, getBundledBacking, getGuideLine, getBassLine } = await import('@/scores');
+    // Not a fixed number: `build:library` rewrites `bundledSongs.json` from
+    // whatever is in `_MIDIS/`, so the count moves when the user adds or
+    // deletes a source file. What must hold is that the library is there and
+    // every song in it validates.
+    expect(COMPACT_SCORES.length).toBeGreaterThan(FULL_LIBRARY ? 200 : 0);
 
     for (const item of COMPACT_SCORES) {
       const full = getScore(item.id);
@@ -126,18 +136,52 @@ describe('library rows', () => {
       expect(full.notes.length, item.id).toBeGreaterThan(0);
       expect(full.notes.every((note) => note.midiNumber >= 36 && note.midiNumber <= 81), item.id).toBe(true);
 
-      const versions = ARRANGEMENT_LEVELS.map((level) => arrangeScoreForLevel(full, level));
+      const guide = getGuideLine(item.id);
+      const versions = ARRANGEMENT_LEVELS.map((level) =>
+        arrangeScoreForLevel(full, level, { guide, bass: getBassLine(item.id) }));
+      // Beginner is not on the melody's note-count ladder: it plays the
+      // harmonic guide, a different line whose notes are held roots rather
+      // than melody attacks, so counting them says nothing about which is
+      // easier. The three melody levels still have to be a ladder, and
+      // Beginner still has to be a beginner's line — asserted below.
       const counts = versions.map((score) => score.notes.length);
-      expect(counts[0], item.id).toBeLessThanOrEqual(counts[1] ?? Infinity);
-      expect(counts[1], item.id).toBeLessThanOrEqual(counts[2] ?? Infinity);
       expect(counts[2], item.id).toBeLessThanOrEqual(counts[3] ?? Infinity);
       expect(counts[3], item.id).toBe(full.notes.length);
+
+      const beginner = versions[0]!;
+      const seconds = Math.max(1, scoreDurationMs(beginner) / 1000);
+      expect(beginner.notes.length / seconds, `${item.id} attacks/s`)
+        .toBeLessThanOrEqual(ARRANGEMENT_PROFILES.Beginner.maxNotesPerSecond + 0.01);
+      // Every note under the fingers of a hand that never leaves the tapes.
+      expect(
+        beginner.notes.every((note) => note.position === '1st' || note.position === 'Half'),
+        `${item.id} beginner stays in first position`,
+      ).toBe(true);
+      for (let i = 1; i < beginner.notes.length; i++) {
+        expect(
+          Math.abs(beginner.notes[i]!.midiNumber - beginner.notes[i - 1]!.midiNumber),
+          `${item.id} beginner leap at note ${i}`,
+        ).toBeLessThanOrEqual(ARRANGEMENT_PROFILES.Beginner.maxLeapSemitones);
+      }
 
       for (let index = 0; index < versions.length; index++) {
         const level = ARRANGEMENT_LEVELS[index];
         const version = versions[index];
         if (!level || !version) continue;
         const range = ARRANGEMENT_PROFILES[level].range;
+        const actual = difficultyOf(version.notes, version.notes.map((note) => firstPositionFingering(note.midiNumber)));
+        expect(ARRANGEMENT_LEVELS.indexOf(actual.tier), `${item.id}/${level} measured difficulty`)
+          .toBeLessThanOrEqual(ARRANGEMENT_LEVELS.indexOf(level));
+        for (const note of version.notes) {
+          if (level === 'Beginner' || level === 'Intermediate') expect(note.extension, `${item.id}/${level} extension`).toBe('none');
+          expect(['1st', 'Half'], `${item.id}/${level}/${note.id}`).toContain(note.position);
+          expect(note.midiNumber - OPEN_STRING_MIDI[note.string], `${item.id}/${level} stop`)
+            .toBeLessThanOrEqual(6);
+          if (Object.values(OPEN_STRING_MIDI).includes(note.midiNumber)) {
+            expect(note.finger, `${item.id}/${level} open string`).toBe('0');
+          }
+        }
+        // The guide is written narrower than the level allows, never wider.
         expect(validateScore(version), `${item.id}/${level}`).toEqual([]);
         expect(version.notes.length, `${item.id}/${level}`).toBeGreaterThan(0);
         expect(

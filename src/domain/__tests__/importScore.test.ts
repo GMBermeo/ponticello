@@ -102,6 +102,10 @@ describe('runtime MIDI import arrangement', () => {
     expect(piece.score.notes).toHaveLength(1);
     expect(piece.score.notes[0]!.startTimeMs + piece.score.notes[0]!.durationMs).toBe(2000);
     expect(piece.backing.durationMs).toBe(2000);
+    for (const line of [piece.guide, piece.bass]) {
+      expect(line[0]?.startTimeMs).toBe(0);
+      expect(line.every((note) => note.startTimeMs + note.durationMs <= 2000)).toBe(true);
+    }
     expect(piece.backing.parts.every((part) => part.notes.every(
       (note) => note.startTimeMs + note.durationMs <= 2000,
     ))).toBe(true);

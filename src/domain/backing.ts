@@ -12,6 +12,7 @@
  */
 
 import { midiToPitchName, OPEN_STRING_MIDI } from './cello';
+import { clipToLoop, PracticeLoop } from './loop';
 import { MidiNote, MidiTrack } from './midi';
 import { CelloSongScore } from './schema';
 
@@ -63,6 +64,24 @@ export function partsFor(track: BackingTrack | null, role: PartRole): BackingPar
 }
 
 // ─── The solo line, from the score itself ────────────────────────────────────
+
+/**
+ * Retain the source melody when the player takes an accompanying part.
+ *
+ * A muted part is excluded whatever its role. `partsFor` has always honoured
+ * `muted` and this did not, which meant the flag worked on one path and was
+ * silently ignored on the other — and the path that ignored it is the one the
+ * track picker uses to stop the player bowing along to a recording of the very
+ * line they have chosen to play.
+ */
+export function arrangementBackingParts(
+  backing: BackingTrack | null | undefined, score: CelloSongScore | null | undefined,
+): BackingPart[] {
+  const accompanies = score?.metadata.arrangementRole === 'roots'
+    || score?.metadata.arrangementRole === 'bass';
+  return (backing?.parts ?? [])
+    .filter((part) => !part.muted && (accompanies || part.role === 'accompaniment'));
+}
 
 /**
  * The written cello part as a playable voice.
@@ -422,4 +441,68 @@ export function backingFromMidi(
     bpm: parsed.bpm,
     durationMs: Math.max(0, (endMs - originMs) * timeScale),
   };
+}
+
+// ─── Audible parts resolution ────────────────────────────────────────────────
+
+export type ListenMode = 'off' | 'backing' | 'solo' | 'both';
+
+export interface AudiblePartsQuery {
+  score: CelloSongScore | null;
+  backing: BackingTrack | null;
+  loop: PracticeLoop;
+  listenMode: ListenMode;
+  accompaniment: AccompanimentStyle;
+}
+
+export interface AudiblePartsResult {
+  soloParts: BackingPart[];
+  accompanimentParts: BackingPart[];
+  audibleParts: BackingPart[];
+}
+
+/**
+ * Resolves the solo, accompaniment, and audible backing parts for a given
+ * score, imported backing, loop window, and listen mode.
+ *
+ * Pure domain function: free of React hooks and effects, directly testable.
+ */
+export function resolveAudibleParts(query: AudiblePartsQuery): AudiblePartsResult {
+  const { score, backing, loop, listenMode, accompaniment } = query;
+
+  const soloParts: BackingPart[] = score
+    ? clipToLoop([soloPartFromScore(score)], loop)
+    : clipToLoop((backing?.parts ?? []).filter((part) => part.role === 'solo'), loop);
+
+  let accompanimentParts: BackingPart[];
+  const imported = arrangementBackingParts(backing, score);
+  if (imported.length > 0) {
+    accompanimentParts = clipToLoop(imported, loop);
+  } else if (!score) {
+    accompanimentParts = [];
+  } else {
+    accompanimentParts = generateAccompaniment(score, {
+      style: accompaniment,
+      fromBar: loop.fromBar,
+      toBar: loop.toBar,
+    });
+  }
+
+  let audibleParts: BackingPart[];
+  switch (listenMode) {
+    case 'solo':
+      audibleParts = soloParts;
+      break;
+    case 'backing':
+      audibleParts = accompanimentParts;
+      break;
+    case 'both':
+      audibleParts = [...accompanimentParts, ...soloParts];
+      break;
+    default:
+      audibleParts = [];
+      break;
+  }
+
+  return { soloParts, accompanimentParts, audibleParts };
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { flowWindow, laneGeometry, visibleSlice } from '../flow';
+import { flowWindow, laneGeometry, timeAlongOffset, visibleSlice } from '../flow';
 
 /**
  * The two visions used to lay out every note in the piece as a mounted view.
@@ -43,9 +43,11 @@ describe('windowing the note field', () => {
 });
 
 describe('lane layout', () => {
-  it('puts the low C on the left when time runs downward', () => {
+  it('puts the high A on the left and low C on the right when time runs downward', () => {
     const lanes = laneGeometry('vertical', 400, 10);
-    expect(lanes.laneAt('C')).toBeLessThan(lanes.laneAt('A'));
+    expect(lanes.laneAt('A')).toBeLessThan(lanes.laneAt('D'));
+    expect(lanes.laneAt('D')).toBeLessThan(lanes.laneAt('G'));
+    expect(lanes.laneAt('G')).toBeLessThan(lanes.laneAt('C'));
   });
 
   it('puts the low C at the bottom when time runs sideways', () => {
@@ -62,5 +64,25 @@ describe('lane layout', () => {
       expect(lanes.laneStep).toBeCloseTo(100, 5);
       expect(lanes.laneSize).toBeCloseTo(90, 5);
     }
+  });
+});
+
+describe('time along offset projection', () => {
+  it('projects future events upwards (decreasing along offset) for vertical axis', () => {
+    const hitAt = 400;
+    const pxPerMs = 0.2;
+    const offset0 = timeAlongOffset(0, 'vertical', hitAt, pxPerMs);
+    const offset1000 = timeAlongOffset(1000, 'vertical', hitAt, pxPerMs);
+    expect(offset0).toBe(400);
+    expect(offset1000).toBe(200);
+  });
+
+  it('projects future events to the right (increasing along offset) for horizontal axis', () => {
+    const hitAt = 100;
+    const pxPerMs = 0.2;
+    const offset0 = timeAlongOffset(0, 'horizontal', hitAt, pxPerMs);
+    const offset1000 = timeAlongOffset(1000, 'horizontal', hitAt, pxPerMs);
+    expect(offset0).toBe(100);
+    expect(offset1000).toBe(300);
   });
 });

@@ -55,16 +55,50 @@ export interface MelodyMetrics {
 }
 
 /**
- * The octave displacement that puts the most of a line inside first position.
+ * Highest median pitch an arrangement should settle on by default — A3, the
+ * open A string.
+ *
+ * Fitting inside the compass is not the same as sitting well in it. The solo
+ * compass C2–A5 is nearly four octaves, so a vocal or lead line written at E4
+ * fits it perfectly without being moved, and every note then lands above the
+ * neck: the hand lives in thumb position for a tune that would sit under the
+ * fingers an octave lower. Sixty-odd songs in the library were built that way.
+ *
+ * So a placement whose median climbs past the open A string pays for it, and
+ * the cheapest way not to pay is to come down an octave. Compare
+ * `ARRANGING.md`, step 3: displace by octaves until the median sits near D3–A3.
+ */
+export const MEDIAN_CEILING_MIDI = OPEN_STRING_MIDI.A;
+
+/** Cost per semitone of median above the ceiling, against 100 for a full fit. */
+const ABOVE_CEILING_COST = 1.6;
+
+function medianOf(pitches: readonly number[]): number {
+  const sorted = [...pitches].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)] ?? 0;
+}
+
+/**
+ * The octave displacement that best seats a line in a range.
  *
  * Octave displacement is the cheapest transformation that keeps a tune
  * recognisable, so it is tried before a track is judged out of range — a guitar
  * riff written two octaves above the cello is still that riff.
+ *
+ * Two things are traded: how much of the line lands inside `[low, high]`, and
+ * how far the resulting median climbs above `medianCeiling`. Sitting *below*
+ * the ceiling is free, so a bass line already at the bottom of the instrument
+ * is never lifted out of its register, and ties still go to the smaller move.
+ * The asymmetry is deliberate: on a cello the cost of being an octave too high
+ * is a hand out of the neck, and the cost of being an octave too low is a
+ * darker colour.
  */
 export function bestOctaveShiftToRange(
   pitches: readonly number[], low: number, high: number,
+  medianCeiling: number = MEDIAN_CEILING_MIDI,
 ): { shift: number; fit: number } {
   let best = { shift: 0, fit: -1 };
+  let bestScore = -Infinity;
   for (let octaves = -8; octaves <= 8; octaves++) {
     const shift = octaves === 0 ? 0 : octaves * 12;
     let inside = 0;
@@ -73,9 +107,12 @@ export function bestOctaveShiftToRange(
       if (moved >= low && moved <= high) inside++;
     }
     const fit = pitches.length === 0 ? 0 : inside / pitches.length;
+    const median = medianOf(pitches) + shift;
+    const score = fit * 100 - Math.max(0, median - medianCeiling) * ABOVE_CEILING_COST;
     // Ties go to the smaller move: leave the music where it was written.
-    if (fit > best.fit || (fit === best.fit && Math.abs(shift) < Math.abs(best.shift))) {
+    if (score > bestScore || (score === bestScore && Math.abs(shift) < Math.abs(best.shift))) {
       best = { shift, fit };
+      bestScore = score;
     }
   }
   return best;
@@ -258,7 +295,10 @@ export function rankMelodyTracks(parsed: {
     const activeDurationMs = first && last
       ? Math.max(1, last.startTimeMs + last.durationMs - first.startTimeMs)
       : parsed.durationMs;
-    const score = melodyTrackScore(track, notes, activeDurationMs);
+    const rawScore = melodyTrackScore(track, notes, activeDurationMs);
+    // A tiny lead break must not outrank a theme that spans the song.
+    const coverage = Math.min(1, activeDurationMs / Math.max(1, parsed.durationMs));
+    const score = rawScore < 0 ? rawScore : rawScore * (0.2 + 0.8 * Math.sqrt(coverage));
     if (score < 0) continue;
     const metrics = melodyMetrics(notes, activeDurationMs);
     ranked.push({ track: track.index, score, metrics, octaveShift: metrics.octaveShift });

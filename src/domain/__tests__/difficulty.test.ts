@@ -4,9 +4,13 @@ import {
   difficultyBlurb, difficultyOf, measure, tierFor,
 } from '../difficulty';
 import {
-  MINIMAL_TRAVEL_WEIGHTS, RawNoteEvent, solveFingering,
+  ARRANGEMENT_WEIGHTS, RawNoteEvent, solveFingering,
 } from '../fingering';
 import { COMPACT_SCORES } from '@/scores/bundledSongs';
+import { LIBRARY_EDITION } from '@/scores/libraryEdition';
+
+/** Size thresholds describe the full library; the free edition ships a dozen pieces. */
+const FULL_LIBRARY = LIBRARY_EDITION.id === 'full';
 
 /** A line of quarter notes at 120 bpm. */
 function line(midis: number[], stepMs = 500, durationMs = 450): RawNoteEvent[] {
@@ -16,7 +20,7 @@ function line(midis: number[], stepMs = 500, durationMs = 450): RawNoteEvent[] {
 }
 
 function solved(notes: RawNoteEvent[]) {
-  return solveFingering(notes, MINIMAL_TRAVEL_WEIGHTS).states;
+  return solveFingering(notes, ARRANGEMENT_WEIGHTS).states;
 }
 
 describe('measuring what the hand does', () => {
@@ -106,7 +110,7 @@ describe('scoring and tiers', () => {
 
   it('maps scores onto the four tiers in order', () => {
     expect(tierFor(0)).toBe('Beginner');
-    expect(tierFor(25)).toBe('Intermediate');
+    expect(tierFor(15)).toBe('Intermediate');
     expect(tierFor(40)).toBe('Advanced');
     expect(tierFor(90)).toBe('Expert');
   });
@@ -125,7 +129,7 @@ describe('the solver keeps full catalogue lines playable', () => {
       expect(notes.every((note) => note.midiNumber >= 36 && note.midiNumber <= 81), raw.id).toBe(true);
       noteCount += notes.length;
     }
-    expect(noteCount).toBeGreaterThan(10_000);
+    expect(noteCount).toBeGreaterThan(FULL_LIBRARY ? 10_000 : 0);
   }, 60_000);
 
   it('prefers a string crossing to a shift when the shift is the longer move', () => {
