@@ -4,7 +4,7 @@ import React, {
 } from 'react';
 
 import { AccompanimentStyle } from '@/domain/backing';
-import { DEFAULT_TAPE_SETS, TapeSet } from '@/domain/tapes';
+import { DEFAULT_TAPE_SETS, isCurrentTapeLayout, TAPE_LAYOUT_VERSION, TapeSet } from '@/domain/tapes';
 import { DEFAULT_TRACK_CHOICE, TrackChoice } from '@/domain/trackPicker';
 import { ListenMode } from '@/audio/backing/types';
 import { ChromeName } from '@/theme/tokens';
@@ -44,6 +44,17 @@ export type FlowAxis = 'vertical' | 'horizontal';
  */
 export type NoteOverlayMode = 'off' | 'key' | 'song';
 
+/**
+ * How the noteheads on the Score page are coloured.
+ *
+ * `off` is the engraved page as a copyist would set it, in ink. `string`
+ * colours each note by the string it is played on, which answers "where does
+ * my hand go". `note` colours it by its letter name from the constant in
+ * `domain/noteColors`, which answers "what note is that" — the colour code the
+ * printed fingerboard charts use, and the one the chart screen prints.
+ */
+export type ScoreColorMode = 'off' | 'string' | 'note';
+
 export interface Settings {
   /** Chrome for the play screen only; menus are always paper. */
   chrome: ChromeName;
@@ -70,6 +81,24 @@ export interface Settings {
   tabAxis: FlowAxis;
   /** Faint fingerboard overlay: the song's key, the song's notes, or nothing. */
   noteOverlay: NoteOverlayMode;
+  /** How the Score page colours its noteheads. */
+  scoreColor: ScoreColorMode;
+  /**
+   * Ring the other places the note being played could be taken.
+   *
+   * The fingering is chosen for you; this shows what it chose between.
+   */
+  showAlternatePlacements: boolean;
+  /**
+   * Hide the view/sound switchers while the music runs.
+   *
+   * They are setup controls, not performance controls: mid-phrase they are
+   * something bright moving at the top of the screen that you cannot use
+   * anyway. With this on they come back the moment you pause.
+   */
+  hideControlsWhilePlaying: boolean;
+  /** Layout generation of `tapeSets`; a bump discards stored tapes. */
+  tapeLayoutVersion: number;
   /**
    * Which source part the player takes as their cello line, per song.
    *
@@ -98,6 +127,10 @@ const DEFAULTS: Settings = {
   highwayAxis: 'vertical',
   tabAxis: 'horizontal',
   noteOverlay: 'key',
+  scoreColor: 'off',
+  showAlternatePlacements: true,
+  hideControlsWhilePlaying: false,
+  tapeLayoutVersion: TAPE_LAYOUT_VERSION,
   trackChoices: {},
 };
 
@@ -217,6 +250,15 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         if (!stored.trackChoices || typeof stored.trackChoices !== 'object') {
           delete stored.trackChoices;
         }
+        // Tapes stored against an older layout are dropped rather than merged.
+        // Nine tapes cannot be reconciled with a stored four plus a thumb set,
+        // and half-applying one would leave the drawing disagreeing with the
+        // instrument, which is the one thing this feature must never do.
+        if (stored.tapeLayoutVersion !== TAPE_LAYOUT_VERSION
+          || !isCurrentTapeLayout(stored.tapeSets)) {
+          delete stored.tapeSets;
+          stored.tapeLayoutVersion = TAPE_LAYOUT_VERSION;
+        }
         // Retired: the microphone is for tuning while paused, never mid-playback.
         delete (stored as { micWhilePlaying?: unknown }).micWhilePlaying;
         settingsRef.current = { ...settingsRef.current, ...stored };
@@ -300,6 +342,9 @@ export function useVisionPreferences() {
     tabAxis: s.tabAxis,
     noteOverlay: s.noteOverlay,
     showTapes: s.showTapes,
+    scoreColor: s.scoreColor,
+    showAlternatePlacements: s.showAlternatePlacements,
+    hideControlsWhilePlaying: s.hideControlsWhilePlaying,
   }), shallowEqual);
   const { update } = useSettingsActions();
   return { ...prefs, update };

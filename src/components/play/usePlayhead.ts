@@ -38,17 +38,33 @@ export interface PlayheadPosition {
 /** Step of `PlayheadPosition.windowMs`. Visions keep more margin than this. */
 export const WINDOW_QUANTUM_MS = 500;
 
+/**
+ * Whether the transport is running, and how many times it has been restarted.
+ *
+ * Subscribed to rather than returned on the `Playhead` object, because the
+ * object's *identity* is what every `memo()` below it compares. When `playing`
+ * lived on the object, pressing play replaced it, and the fingerboard panel,
+ * all three visions and the top bar re-rendered in full at exactly the moment
+ * the frame budget matters most. Now only the two leaves that actually read
+ * this state re-render, and the object is created once per session.
+ */
+export interface PlayheadTransport {
+  playing: boolean;
+  /** Increments on every restart so dependent transports can seek too. */
+  revision: number;
+}
+
 export interface Playhead {
   /** Score time in milliseconds, recomputed on the UI thread every frame. */
   timeMs: SharedValue<number>;
-  playing: boolean;
   /** Start now, or after an adapter-reported delay counted on the UI thread. */
   play: (delayMs?: number) => void;
   pause: () => void;
   toggle: () => void;
   restart: () => void;
-  /** Increments on every restart so dependent transports can seek too. */
-  revision: number;
+  /** Snapshot of `playing`/`revision`. Stable until one of them changes. */
+  getTransport: () => PlayheadTransport;
+  subscribeTransport: (listener: () => void) => () => void;
   /**
    * Reads the clock from JS. The accompaniment calls this once, when it
    * starts, to work out where in the loop to begin.
@@ -66,14 +82,13 @@ export interface Playhead {
   getPosition: () => PlayheadPosition;
   /** Subscribe to position changes without re-rendering whoever owns the playhead. */
   subscribePosition: (listener: () => void) => () => void;
-  loopStartMs: number;
-  loopEndMs: number;
 }
 
 /** How often the React-visible note index catches up with the clock. */
 const POSITION_POLL_MS = 33;
 
 const START: PlayheadPosition = { activeIndex: 0, measureIndex: 0, windowMs: 0 };
+const IDLE: PlayheadTransport = { playing: false, revision: 0 };
 
 /**
  * The transport.
@@ -106,7 +121,24 @@ export function usePlayhead({ score, loop }: PlayheadOptions): Playhead {
   const frameCount = useSharedValue(0);
 
   const [playing, setPlaying] = useState(false);
-  const [revision, setRevision] = useState(0);
+
+  // Published outside React state for the same reason the position is: the
+  // owner re-renders on a transport change either way, but its children must
+  // not, and they only escape that if the `Playhead` object never changes.
+  const transportRef = useRef<PlayheadTransport>(IDLE);
+  const transportListeners = useRef(new Set<() => void>());
+  const publishTransport = useCallback((patch: Partial<PlayheadTransport>) => {
+    const next = { ...transportRef.current, ...patch };
+    if (next.playing === transportRef.current.playing
+      && next.revision === transportRef.current.revision) return;
+    transportRef.current = next;
+    for (const listener of transportListeners.current) listener();
+  }, []);
+  const getTransport = useCallback(() => transportRef.current, []);
+  const subscribeTransport = useCallback((listener: () => void) => {
+    transportListeners.current.add(listener);
+    return () => { transportListeners.current.delete(listener); };
+  }, []);
 
   const { fromMs: loopStartMs, toMs: loopEndMs, tempoScale } = loop;
 
@@ -205,7 +237,8 @@ export function usePlayhead({ score, loop }: PlayheadOptions): Playhead {
     pendingStart.set(1);
     estimator.reset();
     setPlaying(true);
-  }, [estimator, pendingStart, reanchorTo, startDelayMs]);
+    publishTransport({ playing: true });
+  }, [estimator, pendingStart, publishTransport, reanchorTo, startDelayMs]);
 
   const pause = useCallback(() => {
     pendingStart.set(0);
@@ -213,17 +246,20 @@ export function usePlayhead({ score, loop }: PlayheadOptions): Playhead {
     estimator.reset();
     publish(timeMs.get());
     setPlaying(false);
-  }, [estimator, pendingStart, publish, running, timeMs]);
+    publishTransport({ playing: false });
+  }, [estimator, pendingStart, publish, publishTransport, running, timeMs]);
 
+  // Reads the published snapshot rather than the state variable, so `toggle`
+  // — and with it the whole `Playhead` object — stays identity-stable.
   const toggle = useCallback(() => {
-    if (playing) pause();
+    if (transportRef.current.playing) pause();
     else play();
-  }, [playing, play, pause]);
+  }, [play, pause]);
 
   const restart = useCallback(() => {
     moveTo(loopStartMs);
-    setRevision((current) => current + 1);
-  }, [loopStartMs, moveTo]);
+    publishTransport({ revision: transportRef.current.revision + 1 });
+  }, [loopStartMs, moveTo, publishTransport]);
 
   const scoreTimeMs = useCallback(() => timeMs.get(), [timeMs]);
 
@@ -238,12 +274,24 @@ export function usePlayhead({ score, loop }: PlayheadOptions): Playhead {
   }, [anchorScore, estimator, frameCount, loopEnd, loopStart, pendingStart, running, timeMs]);
 
   return useMemo(() => ({
-    timeMs, playing, play, pause, toggle, restart, revision, scoreTimeMs, syncToAudio,
-    getPosition, subscribePosition, loopStartMs, loopEndMs,
+    timeMs, play, pause, toggle, restart, scoreTimeMs, syncToAudio,
+    getPosition, subscribePosition, getTransport, subscribeTransport,
   }), [
-    timeMs, playing, play, pause, toggle, restart, revision, scoreTimeMs, syncToAudio,
-    getPosition, subscribePosition, loopStartMs, loopEndMs,
+    timeMs, play, pause, toggle, restart, scoreTimeMs, syncToAudio,
+    getPosition, subscribePosition, getTransport, subscribeTransport,
   ]);
+}
+
+/**
+ * Whether the transport is running. Re-renders only the caller, only on change.
+ * Read this instead of a `playing` prop threaded down from the play screen.
+ */
+export function usePlayheadTransport(
+  playhead: Pick<Playhead, 'getTransport' | 'subscribeTransport'>,
+): PlayheadTransport {
+  return useSyncExternalStore(
+    playhead.subscribeTransport, playhead.getTransport, playhead.getTransport,
+  );
 }
 
 /** Which note and bar are current. Re-renders only the caller, only on change. */

@@ -42,16 +42,18 @@ export function useTrackOptions(
   piece: ResolvedPiece,
   level: ArrangementLevel,
 ): CelloPartOption[] {
-  const { adaptive, score, backing } = piece;
+  const { adaptive, score, backing, authoredLevels } = piece;
 
   return useMemo(() => {
-    if (!adaptive || !score) return [];
+    // Authored levels carry their own fingering; picking a source part would
+    // replace it with a runtime arrangement, so there is nothing to offer.
+    if (!adaptive || !score || authoredLevels) return [];
     const parts = backing?.parts ?? [];
     if (parts.length === 0) return [];
     return celloPartOptions(parts, level, {
       preferFlats: score.metadata.preferFlats ?? false,
     });
-  }, [adaptive, score, backing, level]);
+  }, [adaptive, score, backing, level, authoredLevels]);
 }
 
 /** Library rows for every imported piece, newest first. */

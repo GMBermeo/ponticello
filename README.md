@@ -252,6 +252,32 @@ Install it by copying the file to the phone and opening it (Android will ask
 you to allow installs from that app once), or over USB with
 `adb install -r app-release.apk`.
 
+### Benchmarking models
+
+```
+yarn ollama:benchmark            # every chat model on the Ollama server, one at a time
+yarn ollama:benchmark --dry-run  # list the models and the work, generate nothing
+```
+
+`tools/ollama-benchmark.ts` arranges *Welcome Home*, *The Kill* and *Aerials* with
+every chat-capable model on `http://100.124.192.6:11434` (smallest first,
+strictly sequential: each model is loaded, runs both songs, and is unloaded
+before the next). Every model gets the same deterministic notes and chooses
+where to play them, under a prompt that encourages 2nd–4th position and
+staying on one string instead of crossing. Every request — in the benchmark
+and in `tools/ollama-arranger.ts` — carries the **complete** cello-scoring skill
+(`.agents/skills/cello-scoring`, all four files, verbatim) at the top of its
+system prompt, with a short note resolving where the skill and the app disagree
+(the skill says to transpose to C/G/D/A; the app never transposes its backing).
+A missing skill stops the run, and a model whose context window cannot hold the
+skill is skipped with the reason recorded rather than sent a trimmed skill.
+Results land in
+`_MIDIS/arranged/<song>--<model>/`, a comparison table in
+`_MIDIS/benchmarks/summary.md`, and when the run ends the full library is
+rebuilt so each result is a `<title> [<model>]` row in the app, its arrangement
+levels being that model's tiers. Finished song/model pairs are skipped on the
+next run; `--force` repeats them. See the file header for every option.
+
 ### Two editions
 
 The app is released in two editions that differ only in the bundled library:

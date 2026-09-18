@@ -4,7 +4,7 @@ import {
   difficultyBlurb, difficultyOf, measure, tierFor,
 } from '../difficulty';
 import {
-  ARRANGEMENT_WEIGHTS, RawNoteEvent, solveFingering,
+  ARRANGEMENT_WEIGHTS, CelloState, RawNoteEvent, solveFingering,
 } from '../fingering';
 import { COMPACT_SCORES } from '@/scores/bundledSongs';
 import { LIBRARY_EDITION } from '@/scores/libraryEdition';
@@ -63,11 +63,16 @@ describe('measuring what the hand does', () => {
   });
 
   it('counts a skipped string as a wide crossing', () => {
-    // The open C and the open A: three strings apart, so the crossing cannot
-    // be avoided by choosing a different placement.
+    // States are given rather than solved. The subject here is `measure`, and
+    // a solved line cannot be relied on to contain a wide crossing — avoiding
+    // them is exactly what the solver is for, and given open C against A3 it
+    // now takes the A on the D string to keep the bow closer.
     const notes = line([36, 57, 36, 57]);
-    const f = measure(notes, solved(notes));
-    expect(f.wideCrossingsPerSec).toBeGreaterThan(0);
+    const open = (string: 'C' | 'A'): CelloState => ({
+      string, position: '1st', finger: '0', extension: 'none', baseSemitones: 2,
+    });
+    const states = [open('C'), open('A'), open('C'), open('A')];
+    expect(measure(notes, states).wideCrossingsPerSec).toBeGreaterThan(0);
   });
 
   it('reports nothing for an empty line rather than dividing by zero', () => {

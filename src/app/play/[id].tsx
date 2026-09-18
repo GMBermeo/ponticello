@@ -1,7 +1,7 @@
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -11,7 +11,7 @@ import { Highway } from '@/components/play/Highway';
 import { ScorePage } from '@/components/play/ScorePage';
 import { TabVision } from '@/components/play/TabVision';
 import { TunerStrip } from '@/components/play/TunerStrip';
-import { Playhead, usePlayhead } from '@/components/play/usePlayhead';
+import { Playhead, usePlayhead, usePlayheadTransport } from '@/components/play/usePlayhead';
 import { useMeasuredSize } from '@/components/useMeasuredSize';
 import { Label, Row, Rule, Title } from '@/components/ui/primitives';
 import { usePitch } from '@/audio/usePitch';
@@ -20,6 +20,7 @@ import { calculateFretboardMaxMm } from '@/domain/cello';
 import { detectSongKey, fingerboardMarkers, songPlayedNotes } from '@/domain/key';
 import { practiceLoop } from '@/domain/loop';
 import { usePiece } from '@/state/usePiece';
+import { usePracticeActions } from '@/state/practice';
 import { useSession } from '@/state/session';
 import {
   useAudioPreferences,
@@ -51,6 +52,7 @@ const STATUS_BAR = 36;
 /** How often the audio's own position is compared with the picture. */
 const AUDIO_LOCK_MS = 250;
 
+
 export default function PlayRoute() {
   const chrome = useSettingsSelector((s) => s.chrome);
   return (
@@ -80,7 +82,9 @@ function PlayScreen() {
 
   const choice = useTrackChoice(id);
   const { listenMode, accompaniment, backingVolume } = useAudioPreferences();
-  const { vision, showFingerings, showTapes, highwayAxis, tabAxis } = useVisionPreferences();
+  const {
+    vision, showFingerings, showTapes, highwayAxis, tabAxis, scoreColor, hideControlsWhilePlaying,
+  } = useVisionPreferences();
   const { tapeSets } = useTapeSettings();
   const noteOverlayMode = useSettingsSelector((s) => s.noteOverlay);
   const { setup } = useSession();
@@ -124,6 +128,10 @@ function PlayScreen() {
     restart: restartPlayhead,
   } = playhead;
   const [playRequested, setPlayRequested] = useState(false);
+  // Subscribed, not read off the playhead object: the object is identity-stable
+  // now, which is what lets every memoised child skip a transport change.
+  const { playing, revision } = usePlayheadTransport(playhead);
+  usePracticeClock(playing);
 
   const handlePlaybackWillStart = useCallback(() => {
     pausePlayhead();
@@ -168,7 +176,7 @@ function PlayScreen() {
     accompaniment,
     loop,
     playing: playRequested,
-    transportRevision: playhead.revision,
+    transportRevision: revision,
     volume: backingVolume,
     scoreTimeMs: playhead.scoreTimeMs,
     onPlaybackWillStart: handlePlaybackWillStart,
@@ -176,6 +184,18 @@ function PlayScreen() {
   });
 
   useAudioLock(playhead, backing.audioScoreTimeMs, playRequested);
+
+  /**
+   * Pressing play on a long song buys a render before anything can sound, so
+   * the button says "Loading…" and refuses a press until the clock moves.
+   *
+   * The clock is the right signal rather than `backing.rendering`: with the
+   * sound off, or with a program that turns out to be silent, the transport
+   * releases the picture immediately and there is nothing to wait for. An
+   * adapter error also lets go — `useBacking` keeps waiting in that case, and
+   * a permanently disabled play button is a worse failure than a silent one.
+   */
+  const starting = playRequested && !playing && backing.error === null;
 
   /**
    * Faint fingerboard overlay markers. `key` shows the whole detected key to
@@ -197,7 +217,9 @@ function PlayScreen() {
     });
   }, [noteOverlayMode, score, songKey]);
 
-  const fretboardMaxMm = useMemo(() => {
+  // What the piece needs. How much board is actually drawn is decided by the
+  // panel, which knows how much room it has — see `fingerboardExtentMm`.
+  const fretboardMinMm = useMemo(() => {
     if (!score) return 440;
     return calculateFretboardMaxMm(score.notes);
   }, [score]);
@@ -246,19 +268,26 @@ function PlayScreen() {
         loopFromBar={setup.loopFromBar}
         loopToBar={setup.loopToBar}
         playRequested={playRequested}
+        starting={starting}
         onEndSession={() => router.canGoBack() ? router.back() : router.replace(`/song/${id}`)}
         onRestart={restartPlayback}
         onTogglePlay={togglePlayback}
       />
-      <Rule />
-      <PlayControlBar />
+      {/* Setup controls, not performance controls: with the preference on they
+          leave while the music runs and come back the moment you pause. */}
+      {hideControlsWhilePlaying && playRequested ? null : (
+        <>
+          <Rule />
+          <PlayControlBar />
+        </>
+      )}
       <Rule />
 
       {/* Body */}
       <View style={{ flex: 1, flexDirection: 'row', minHeight: 0 }}>
         <PlayFingerboardColumn
           width={fingerboardWidth}
-          fretboardMaxMm={fretboardMaxMm}
+          fretboardMinMm={fretboardMinMm}
           songKeyName={songKey?.name}
           noteOverlay={noteOverlay}
           score={score}
@@ -307,17 +336,26 @@ function PlayScreen() {
                   height={visionHeight}
                   width={visionWidth}
                   showFingerings={showFingerings}
+                  colorMode={scoreColor}
                 />
               ) : null}
             </>
           )}
 
-          {/* Laid over the top of the play area rather than above it, so
-              pausing does not resize — and re-lay out — the vision. */}
+          {/* Laid over the play area rather than above it, so pausing does not
+              resize — and re-lay out — the vision.
+
+              On the Score page it goes to the *bottom*. A page of notation is
+              read from the top down, and a tuner parked over the first system
+              covers the clef, the key signature and the first bar — the three
+              things you look at first. Every other vision scrolls towards the
+              bottom edge, so there the tuner stays out of the way up top. */}
           {playRequested ? null : (
             <View
               pointerEvents="box-none"
-              style={{ position: 'absolute', top: theme.s(6), left: theme.s(10), right: theme.s(10) }}
+              style={vision === 'score'
+                ? { position: 'absolute', bottom: theme.s(6), left: theme.s(10), right: theme.s(10) }
+                : { position: 'absolute', top: theme.s(6), left: theme.s(10), right: theme.s(10) }}
             >
               <TunerStrip pitch={pitch} micEnabled={micEnabled} onEnableMic={enableMic} />
             </View>
@@ -357,6 +395,33 @@ function PlayScreen() {
       </Row>
     </View>
   );
+}
+
+/**
+ * Credits time to the practice log while the transport is actually running.
+ *
+ * Only while it *runs*: a screen left open on the play view for an hour with
+ * nothing sounding is not an hour of practice, and a log that claimed it was
+ * would be worth nothing to look at. The tally is flushed on every pause and
+ * on unmount, so leaving the screen mid-phrase still counts.
+ */
+function usePracticeClock(playing: boolean) {
+  const { log } = usePracticeActions();
+  const startedAt = useRef<number | null>(null);
+  const startedOn = useRef<Date | null>(null);
+
+  useEffect(() => {
+    if (!playing) return;
+    startedAt.current = Date.now();
+    startedOn.current = new Date();
+    return () => {
+      const from = startedAt.current;
+      const on = startedOn.current;
+      startedAt.current = null;
+      startedOn.current = null;
+      if (from !== null) log(Date.now() - from, on ?? undefined);
+    };
+  }, [playing, log]);
 }
 
 /**

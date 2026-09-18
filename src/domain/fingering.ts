@@ -157,6 +157,17 @@ export interface CostWeights {
   /** Long notes want vibrato, which an open string cannot give. */
   openStringOnLongNote: number;
   longNoteMs: number;
+  /**
+   * Credited to any open string, against every other seat for that pitch.
+   *
+   * For a player with tapes on the fingerboard the open string is the
+   * reference pitch — the one note they can be certain of — so a library that
+   * answers an open G with a third finger on the D string has taken away the
+   * thing they tune everything else against. Held as its own term because it
+   * has to stay ahead of the neck positions: making second and third position
+   * nearly free is what let stopped seats start winning these.
+   */
+  openStringBonus: number;
   forwardExtension: number;
   backwardExtension: number;
   /** The little finger has no business in thumb position. */
@@ -164,6 +175,34 @@ export interface CostWeights {
   shift: number;
   /** Crossing the neck heel is a bigger move than its distance suggests. */
   heelCrossing: number;
+  /**
+   * Charged per position above first, for the neck positions 2nd–4th.
+   *
+   * This is the dial that decides whether the hand is allowed to leave first
+   * position at all. Set it high and every awkward note is answered with an
+   * extension or a drop into half position, because moving the frame is priced
+   * out; set it low and the solver will settle the hand wherever the passage
+   * actually lies. Second, third and fourth are ordinary places for a hand to
+   * be — they should not cost much more than first.
+   */
+  neckPosition: number;
+  /**
+   * Charged for fifth position and above — where the hand leaves the neck.
+   *
+   * Priced apart from `neckPosition` and not derived from it. Making second to
+   * fourth position cheap is a statement about the neck; it must not quietly
+   * make sixth position cheap too, or the solver answers an open A with a
+   * fourth finger in sixth position on the G string.
+   */
+  upperPosition: number;
+  /**
+   * Charged for half position.
+   *
+   * Priced separately, and above the neck positions, because it is not one of
+   * them: it is a first-position hand slid back by a semitone, and a line that
+   * keeps dipping into it and back is the hand jumping, not settling.
+   */
+  halfPosition: number;
 }
 
 /**
@@ -199,21 +238,45 @@ export interface CostWeights {
 export const ARRANGEMENT_WEIGHTS: CostWeights = {
   openStringOnLongNote: 0.25,
   longNoteMs: 300,
-  forwardExtension: 1.2,
-  backwardExtension: 0.7,
+  // Set just above `CROSSING_COST`'s widest entry, so an open string can never
+  // be refused in order to avoid a string crossing — which makes it a
+  // guarantee in practice rather than a preference, and `fingering.test.ts`
+  // holds it to that across the whole library. It costs nothing elsewhere:
+  // raising it to here *lowered* the library's hand movement, because an open
+  // string is the one note that needs no hand at all.
+  openStringBonus: 8,
+  // Reaching is dearer than moving. A forward extension repeated through a
+  // passage is the thing that tires a hand and pulls it out of tune, and it is
+  // what the solver reached for whenever a position change looked expensive —
+  // answering a C sharp with an extended little finger bar after bar instead
+  // of putting the hand where the passage plainly sits.
+  forwardExtension: 2.6,
+  backwardExtension: 1.4,
   fourthFingerInThumb: 6,
   shift: 26,
   heelCrossing: 2.5,
+  // Second, third and fourth position are ordinary places to play, not last
+  // resorts. Nearly free, so the frame lands where the music is.
+  neckPosition: 0.08,
+  // Leaving the neck is not. Nothing this app arranges needs to.
+  upperPosition: 4,
+  // Half position is still discouraged: it is where the old fixed mapping put
+  // every semitone-above-the-nut note, and it is the flapping this fixes.
+  halfPosition: 1.1,
 };
 
 export const DEFAULT_WEIGHTS: CostWeights = {
   openStringOnLongNote: 1.4,
   longNoteMs: 300,
+  openStringBonus: 0,
   forwardExtension: 1.2,
   backwardExtension: 0.7,
   fourthFingerInThumb: 6,
   shift: 2.5,
   heelCrossing: 1.5,
+  neckPosition: 0.3,
+  upperPosition: 1.8,
+  halfPosition: 0.2,
 };
 
 /**
@@ -231,9 +294,9 @@ export function emissionCost(
 
   const posIndex = POSITION_ORDER[state.position];
   if (state.position === '1st') cost += 0;
-  else if (state.position === 'Half') cost += 0.2;
-  else if (posIndex <= 4) cost += 0.3 * posIndex;
-  else if (posIndex <= 7) cost += 1.8 + 0.4 * (posIndex - 4);
+  else if (state.position === 'Half') cost += w.halfPosition;
+  else if (posIndex <= 4) cost += w.neckPosition * posIndex;
+  else if (posIndex <= 7) cost += w.upperPosition + 0.4 * (posIndex - 4);
   // Thumb position is cheap for genuinely high notes and absurd for low ones.
   else cost += note.midiNumber >= 69 ? 0.8 : 3;
 
@@ -242,6 +305,7 @@ export function emissionCost(
 
   if (state.finger === '0') {
     cost += note.durationMs < w.longNoteMs ? 0.2 : w.openStringOnLongNote;
+    cost -= w.openStringBonus;
     // The hand is still somewhere. An open string costs no shift to reach —
     // nothing is stopped — but holding the arm out at seventh position while
     // no finger is down is a posture, not a rest, and left uncharged the
@@ -312,11 +376,13 @@ export interface SolveResult {
 }
 
 export function solveFingering(
-  notes: readonly RawNoteEvent[], w: CostWeights = DEFAULT_WEIGHTS,
+  notes: readonly RawNoteEvent[],
+  w: CostWeights = DEFAULT_WEIGHTS,
+  candidates: (midi: number) => CelloState[] = candidateStates,
 ): SolveResult {
   if (notes.length === 0) return { states: [], totalCost: 0 };
 
-  const trellis = notes.map((n) => candidateStates(n.midiNumber));
+  const trellis = notes.map((n) => candidates(n.midiNumber));
   const unreachable = trellis.findIndex((c) => c.length === 0);
   if (unreachable >= 0) {
     throw new Error(
@@ -422,6 +488,79 @@ export function detectShifts(
     });
   }
   return shifts;
+}
+
+// ─── Seating a line ──────────────────────────────────────────────────────────
+
+/**
+ * Where the left hand goes for a whole line — the one seating every entry path
+ * should use.
+ *
+ * This replaces a per-note lookup. A lookup cannot answer the question, because
+ * the question is not "where does this note live" but "where should the hand be
+ * for this passage": the same C sharp is a second finger in third position in
+ * one bar and an extension in first in another, and only the notes either side
+ * of it decide which. Seating each note independently is what produced a line
+ * that dropped into half position for one semitone and climbed straight back
+ * out — a move no hand can make at speed, written into the library hundreds of
+ * times over.
+ *
+ * Weighted for arranging by default: the hand stays put unless moving is
+ * genuinely better, second to fourth position are ordinary places to be, and
+ * half position and repeated extensions are what the solver avoids.
+ */
+export interface SeatOptions {
+  weights?: CostWeights;
+  /**
+   * Refuse extensions, for the levels that teach the closed hand frame.
+   *
+   * Cheap to honour now and it was not before. Under a fixed first-position
+   * mapping the sixth semitone of a string had exactly one seat — the fourth
+   * finger stretched forward — so "no extensions" and "play this note" were in
+   * direct conflict. Reading the whole line, the same pitch is an ordinary
+   * second finger in third position, so the closed frame costs nothing but a
+   * shift the solver was going to consider anyway.
+   *
+   * Applied per note and never fatally: a pitch with no closed-frame seat
+   * anywhere keeps its full candidate set rather than making the line
+   * unplayable.
+   */
+  closedFrameOnly?: boolean;
+}
+
+export function seatLine(
+  notes: readonly RawNoteEvent[], options: SeatOptions = {},
+): CelloState[] {
+  if (notes.length === 0) return [];
+  const { weights = ARRANGEMENT_WEIGHTS, closedFrameOnly = false } = options;
+
+  const candidates = closedFrameOnly
+    ? (midi: number) => {
+      const all = candidateStates(midi);
+      const closed = all.filter((state) => state.extension === 'none');
+      return closed.length > 0 ? closed : all;
+    }
+    : candidateStates;
+
+  return solveFingering(notes, weights, candidates).states;
+}
+
+/**
+ * How many times the hand's anchor moves across a seated line.
+ *
+ * The number this whole cost model exists to keep down, and the one a test can
+ * hold a regression against. Counted on the anchor rather than the position
+ * name because those disagree for open strings, which move no hand at all.
+ */
+export function handMoves(states: readonly CelloState[]): number {
+  let moves = 0;
+  for (let i = 1; i < states.length; i++) {
+    const previous = states[i - 1];
+    const current = states[i];
+    if (!previous || !current) continue;
+    if (handSemitones(previous) !== handSemitones(current)) moves++;
+  }
+  return moves;
 }
 
 // ─── Beginner mapping ────────────────────────────────────────────────────────

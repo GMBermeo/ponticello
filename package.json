@@ -1,7 +1,7 @@
 {
   "name": "ponticello",
   "main": "expo-router/entry",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",
     "@expo/ui": "~57.0.12",
@@ -54,6 +54,7 @@
     "build:library": "vite-node --config vitest.config.ts tools/build-library.ts -- --edition=full",
     "audit:arrangements": "vite-node --config vitest.config.ts tools/audit-arrangements.ts",
     "arrange:ollama": "vite-node tools/ollama-arranger.ts --",
+    "ollama:benchmark": "vite-node --config vitest.config.ts tools/ollama-benchmark.ts --",
     "convert": "vite-node tools/convert-score.ts --",
     "apk": "bash tools/build-apk.sh",
     "proxy": "node tools/dev-proxy.mjs",

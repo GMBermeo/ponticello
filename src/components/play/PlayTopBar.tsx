@@ -15,6 +15,17 @@ export interface PlayTopBarProps {
   loopFromBar: number;
   loopToBar: number;
   playRequested: boolean;
+  /**
+   * Play has been asked for but the sound has not begun yet.
+   *
+   * The first press of play on a long song pays for a render: the accompaniment
+   * has to be built before anything can sound, and until this release the
+   * button simply sat there saying "Pause" while nothing happened, which reads
+   * as a dropped tap. It now says so and refuses a second press, because a
+   * second press during the wait is a *stop*, and stopping something that has
+   * not started is how you end up with silent playback.
+   */
+  starting: boolean;
   onEndSession: () => void;
   onRestart: () => void;
   onTogglePlay: () => void;
@@ -26,6 +37,7 @@ export const PlayTopBar = memo(function PlayTopBar({
   loopFromBar,
   loopToBar,
   playRequested,
+  starting,
   onEndSession,
   onRestart,
   onTogglePlay,
@@ -57,8 +69,10 @@ export const PlayTopBar = memo(function PlayTopBar({
         style={{ minWidth: theme.tap, paddingHorizontal: 0, alignItems: 'center' }}
       />
       <Button
-        label={playRequested ? 'Pause' : 'Play'}
+        label={starting ? 'Loading…' : playRequested ? 'Pause' : 'Play'}
+        accessibilityLabel={starting ? 'Preparing the music' : playRequested ? 'Pause' : 'Play'}
         onPress={onTogglePlay}
+        disabled={starting}
         tone="accent"
         style={{ minWidth: theme.s(78), alignItems: 'center' }}
       />

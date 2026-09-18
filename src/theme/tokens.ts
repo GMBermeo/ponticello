@@ -13,6 +13,7 @@
  */
 
 import { CelloString } from '@/domain/cello';
+import { NoteColorName, STRING_NOTE_COLOR } from '@/domain/noteColors';
 import { TapeColor } from '@/domain/tapes';
 
 // ─── Base palette ────────────────────────────────────────────────────────────
@@ -36,26 +37,54 @@ export const ACCENT_WASH = '#e2ebf4';
 const ACCENT_ON_NAVY = '#a9c8ec';
 
 /**
+ * Note hues — the palette behind `domain/noteColors`.
+ *
+ * One colour per letter name, so a C is the same colour on the fingerboard
+ * chart, on the string rails and on a notehead. Two versions, because a hue
+ * that reads on paper turns to mud on a navy ground and the lifted version
+ * glares on white; both are held at one lightness band per chrome so no letter
+ * shouts louder than another.
+ */
+export const NOTE_COLOR_ON_PAPER: Record<NoteColorName, string> = {
+  green: '#0a7e3a',
+  blue: '#0063ba',
+  orange: '#b3600b',
+  cyan: '#00737f',
+  red: '#c0342c',
+  yellow: '#96770a',
+  purple: '#6b3fbd',
+};
+
+export const NOTE_COLOR_ON_DARK: Record<NoteColorName, string> = {
+  green: '#22c373',
+  blue: '#4f9ff5',
+  orange: '#f08a2c',
+  cyan: '#2fc3d0',
+  red: '#ff515a',
+  yellow: '#edc32f',
+  purple: '#a37bff',
+};
+
+/**
  * String hues.
  *
- * Built in OKLCH at one lightness and chroma so that no string shouts louder
- * than another — an equal-luminance set means the eye reads *which* string
- * from hue alone, without one lane dominating the highway. Converted to sRGB
- * here because React Native's style engine takes hex, not colour functions.
+ * Not a separate palette any more: a string is drawn in the colour of the note
+ * it sounds open, straight out of the note constant. C green, G red, D blue,
+ * A yellow — so the rail under a note and the note itself cannot disagree.
  */
 export const STRING_COLOR_MUTED: Record<CelloString, string> = {
-  C: '#ba2b2e', // oklch(0.52 0.18 25)
-  G: '#9d6400', // oklch(0.55 0.14 78)
-  D: '#00793d', // oklch(0.50 0.14 155)
-  A: '#6250b2', // oklch(0.50 0.15 288)
+  C: NOTE_COLOR_ON_PAPER[STRING_NOTE_COLOR.C],
+  G: NOTE_COLOR_ON_PAPER[STRING_NOTE_COLOR.G],
+  D: NOTE_COLOR_ON_PAPER[STRING_NOTE_COLOR.D],
+  A: NOTE_COLOR_ON_PAPER[STRING_NOTE_COLOR.A],
 };
 
 /** The same four hues lifted for dark chromes, where muted reads as murky. */
 export const STRING_COLOR_HOT: Record<CelloString, string> = {
-  C: '#ff515a', // oklch(0.68 0.21 22)
-  G: '#edaa00', // oklch(0.78 0.17 82)
-  D: '#22c373', // oklch(0.72 0.17 155)
-  A: '#9475ff', // oklch(0.66 0.20 290)
+  C: NOTE_COLOR_ON_DARK[STRING_NOTE_COLOR.C],
+  G: NOTE_COLOR_ON_DARK[STRING_NOTE_COLOR.G],
+  D: NOTE_COLOR_ON_DARK[STRING_NOTE_COLOR.D],
+  A: NOTE_COLOR_ON_DARK[STRING_NOTE_COLOR.A],
 };
 
 /**
@@ -109,6 +138,8 @@ export interface Chrome {
   glow: boolean;
   strings: Record<CelloString, string>;
   tapes: Record<TapeColor, string>;
+  /** One colour per note name — see `domain/noteColors`. */
+  notes: Record<NoteColorName, string>;
 }
 
 export const CHROMES: Record<ChromeName, Chrome> = {
@@ -126,6 +157,7 @@ export const CHROMES: Record<ChromeName, Chrome> = {
     glow: false,
     strings: STRING_COLOR_MUTED,
     tapes: TAPE_COLOR_ON_PAPER,
+    notes: NOTE_COLOR_ON_PAPER,
   },
   quiet: {
     name: 'quiet',
@@ -141,6 +173,7 @@ export const CHROMES: Record<ChromeName, Chrome> = {
     glow: false,
     strings: STRING_COLOR_HOT,
     tapes: TAPE_COLOR_ON_DARK,
+    notes: NOTE_COLOR_ON_DARK,
   },
   neon: {
     name: 'neon',
@@ -156,6 +189,7 @@ export const CHROMES: Record<ChromeName, Chrome> = {
     glow: true,
     strings: STRING_COLOR_HOT,
     tapes: TAPE_COLOR_ON_DARK,
+    notes: NOTE_COLOR_ON_DARK,
   },
 };
 

@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   calculateFretboardMaxMm, CELLO_NOTES, centsBetween, defaultStringFor, DISPLAY_STRING_ORDER,
-  frequencyToMidi, getCelloNote, judgeIntonation, LANDMARKS,
+  alternativePlacements, fingerboardExtentMm, frequencyToMidi, getCelloNote, judgeIntonation,
+  LANDMARKS, NECK_REACH_SEMITONES, placementsFor,
   midiAt, midiToFrequency, midiToPitchName, OPEN_STRING_MIDI, semitonesAtMm,
   semitonesFor, stopDistanceMm, STRING_LENGTH_MM,
 } from '../cello';
@@ -161,5 +162,81 @@ describe('calculateFretboardMaxMm', () => {
 
   it('defaults to 440 mm for empty notes', () => {
     expect(calculateFretboardMaxMm([])).toBe(440);
+  });
+});
+
+describe('how much fingerboard a panel should draw', () => {
+  it('shows what the piece needs when there is no room to spare', () => {
+    expect(fingerboardExtentMm(220, 200)).toBe(220);
+    expect(fingerboardExtentMm(330, 300)).toBe(330);
+  });
+
+  it('widens a first-position piece to fill a tall column', () => {
+    // A column this tall would stretch 220 mm over the whole panel, putting
+    // neighbouring semitones a hand's width apart on screen.
+    expect(fingerboardExtentMm(220, 520)).toBeGreaterThan(220);
+  });
+
+  it('never draws less than the piece actually uses', () => {
+    for (const height of [0, 120, 400, 900]) {
+      expect(fingerboardExtentMm(440, height)).toBeGreaterThanOrEqual(440);
+    }
+  });
+
+  it('stops at the full board rather than running off the string', () => {
+    expect(fingerboardExtentMm(220, 5000)).toBe(440);
+  });
+
+  it('snaps to a ladder, so a pixel of layout change cannot rescale it', () => {
+    const a = fingerboardExtentMm(220, 480);
+    const b = fingerboardExtentMm(220, 483);
+    expect(a).toBe(b);
+  });
+
+  it('falls back to the piece when the column has not been measured yet', () => {
+    expect(fingerboardExtentMm(330, 0)).toBe(330);
+    expect(fingerboardExtentMm(330, Number.NaN)).toBe(330);
+  });
+});
+
+describe('the same note, somewhere else', () => {
+  it('finds the reported pair: A2 on the G string and on the C string', () => {
+    // A2 is two semitones up the G string, and nine up the C.
+    const places = placementsFor(45);
+    expect(places).toEqual([
+      { string: 'C', semitones: 9 },
+      { string: 'G', semitones: 2 },
+    ]);
+  });
+
+  it('lists the open string as a placement in its own right', () => {
+    const places = placementsFor(OPEN_STRING_MIDI.D);
+    expect(places).toContainEqual({ string: 'D', semitones: 0 });
+    expect(places).toContainEqual({ string: 'G', semitones: 7 });
+  });
+
+  it('excludes the place the note is actually being taken', () => {
+    const others = alternativePlacements(45, { string: 'G', semitones: 2 });
+    expect(others).toEqual([{ string: 'C', semitones: 9 }]);
+  });
+
+  it('never suggests a string that cannot reach the pitch', () => {
+    // The low C is only ever the open C string — nothing is below it.
+    expect(placementsFor(OPEN_STRING_MIDI.C)).toEqual([{ string: 'C', semitones: 0 }]);
+    expect(alternativePlacements(OPEN_STRING_MIDI.C, { string: 'C', semitones: 0 })).toEqual([]);
+  });
+
+  it('stays inside the neck', () => {
+    for (let midi = 36; midi <= 72; midi++) {
+      for (const place of placementsFor(midi)) {
+        expect(place.semitones).toBeGreaterThanOrEqual(0);
+        expect(place.semitones).toBeLessThanOrEqual(NECK_REACH_SEMITONES);
+        expect(midiAt(place.string, place.semitones)).toBe(midi);
+      }
+    }
+  });
+
+  it('honours a narrower reach when the panel is drawing less board', () => {
+    expect(placementsFor(45, 5)).toEqual([{ string: 'G', semitones: 2 }]);
   });
 });

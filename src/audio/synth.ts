@@ -17,11 +17,27 @@
 import { midiToFrequency } from '@/domain/cello';
 import { BackingNote, BackingPart, InstrumentName } from '@/domain/backing';
 import { BackingProgram } from './backing/program';
-import { envelopeAt, VoiceSpec, VOICES } from './voices';
+import {
+  bowNoiseAt, brightnessTier, centsToRatio, envelopeAt, noteSeed, NoteVariation,
+  noteVariation, spectrumForTier, vibratoCents, VoiceSpec, VOICES,
+} from './voices';
 
 const TABLE_SIZE = 2048;
 /** One wavetable per octave, from MIDI 12 upwards. */
 const BAND_COUNT = 10;
+
+/**
+ * How often the vibrato curve is re-evaluated, in samples.
+ *
+ * A sine per sample would be the one expensive thing in an otherwise cheap
+ * inner loop. Every 32 samples is 1.4 kHz of control rate against a 5 Hz
+ * wobble — three hundred points per cycle, linearly interpolated, which is far
+ * past anything audible.
+ */
+const VIBRATO_BLOCK = 32;
+
+/** d(ratio)/d(cents) near unity. Vibrato is small, so the tangent is exact enough. */
+const CENTS_SLOPE = Math.LN2 / 1200;
 
 /** Which band-limited table a pitch should read from. */
 function bandFor(midiNumber: number): number {
@@ -34,9 +50,10 @@ function bandFor(midiNumber: number): number {
  * with eight harmonics folds partials back down the spectrum and rings
  * audibly out of tune.
  */
-function buildTables(spec: VoiceSpec, sampleRate: number): Float32Array[] {
+function buildTables(spec: VoiceSpec, sampleRate: number, tier: number): Float32Array[] {
   const tables: Float32Array[] = [];
   const nyquist = sampleRate / 2;
+  const harmonics = spectrumForTier(spec, tier);
 
   for (let band = 0; band < BAND_COUNT; band++) {
     const table = new Float32Array(TABLE_SIZE);
@@ -47,26 +64,36 @@ function buildTables(spec: VoiceSpec, sampleRate: number): Float32Array[] {
     for (let i = 0; i < TABLE_SIZE; i++) {
       let sample = 0;
       const phase = (2 * Math.PI * i) / TABLE_SIZE;
-      for (let h = 0; h < spec.harmonics.length && h + 1 <= allowed; h++) {
-        sample += spec.harmonics[h] * Math.sin(phase * (h + 1));
+      for (let h = 0; h < harmonics.length && h + 1 <= allowed; h++) {
+        sample += harmonics[h]! * Math.sin(phase * (h + 1));
       }
       table[i] = sample;
       peak = Math.max(peak, Math.abs(sample));
     }
-    if (peak > 0) for (let i = 0; i < TABLE_SIZE; i++) table[i] /= peak;
+    if (peak > 0) for (let i = 0; i < TABLE_SIZE; i++) table[i]! /= peak;
     tables.push(table);
   }
 
   return tables;
 }
 
+/**
+ * Cached per instrument, sample rate *and* brightness tier.
+ *
+ * Four tiers per voice is four times the tables and no extra work per sample:
+ * the note reads whichever one its dynamic asks for. Building them is the only
+ * cost, it happens once, and it is what lets a forte note be brighter rather
+ * than merely louder.
+ */
 const tableCache = new Map<string, Float32Array[]>();
 
-function tablesFor(instrument: InstrumentName, sampleRate: number): Float32Array[] {
-  const key = `${instrument}@${sampleRate}`;
+function tablesFor(
+  instrument: InstrumentName, sampleRate: number, tier: number,
+): Float32Array[] {
+  const key = `${instrument}@${sampleRate}@${tier}`;
   let tables = tableCache.get(key);
   if (!tables) {
-    tables = buildTables(VOICES[instrument], sampleRate);
+    tables = buildTables(VOICES[instrument], sampleRate, tier);
     tableCache.set(key, tables);
   }
   return tables;
@@ -92,53 +119,183 @@ function makeNoise(seed: number): () => number {
   };
 }
 
+/**
+ * Adds one sounding voice into `out`.
+ *
+ * Shared by the whole-buffer renderer and the slice renderer, which is what
+ * keeps them sounding identical. Everything here is a pure function of the
+ * note-relative sample index `i` — phase included — so a note rendered in two
+ * slices produces exactly the same samples as one rendered in a single pass.
+ * That is not a nicety: the native player builds an eleven-minute song in
+ * two-second pieces, and a note straddling a boundary that disagreed with
+ * itself would click.
+ *
+ * Vibrato is applied as a *phase* offset rather than by stepping the
+ * increment. Stepping would make the phase an accumulation, and an
+ * accumulation cannot be resumed from the middle of a note. Modulating phase
+ * by `sin` gives a frequency deviation proportional to `cos` — the same wobble,
+ * a quarter-cycle over, and closed-form in `i`.
+ */
+function renderVoice(
+  out: Float32Array,
+  /** Output index at which note-relative sample 0 sits. May be negative. */
+  originIndex: number,
+  firstI: number,
+  lastI: number,
+  spec: VoiceSpec,
+  table: Float32Array,
+  baseIncrement: number,
+  amplitude: number,
+  attack: number,
+  decay: number,
+  heldSamples: number,
+  releaseSamples: number,
+  sampleRate: number,
+  variation: NoteVariation,
+  seed: number,
+): void {
+  const increment = baseIncrement * centsToRatio(variation.detuneCents);
+
+  // A section, not a soloist: two copies a few cents apart, half level each.
+  // Not worth it on a note too short for the beating to be heard.
+  const unison = (spec.unisonCents ?? 0) > 0 && heldSamples > sampleRate * 0.08
+    ? spec.unisonCents! / 2
+    : 0;
+  const incrementA = unison ? increment * centsToRatio(unison) : increment;
+  const incrementB = unison ? increment * centsToRatio(-unison) : 0;
+  const voiceGain = unison ? amplitude * 0.5 : amplitude;
+
+  const rateHz = spec.vibrato?.rateHz ?? 0;
+  const vibratoScale = rateHz > 0
+    ? (CENTS_SLOPE * increment * sampleRate) / (2 * Math.PI * rateHz)
+    : 0;
+
+  // Bow noise runs on its own short envelope from the note's own zero, so it
+  // has to be wound forward when a slice starts partway in.
+  const noiseAmount = spec.bowNoise ?? 0;
+  const noiseSpan = noiseAmount > 0
+    ? Math.ceil(Math.max(0.02, (spec.attackMs / 1000) * 1.8) * sampleRate)
+    : 0;
+  let noise: (() => number) | null = null;
+  if (noiseSpan > 0 && firstI < noiseSpan) {
+    noise = makeNoise(seed ^ 0x5bf03635);
+    for (let i = 0; i < firstI; i++) noise();
+  }
+
+  // Phase is accumulated within the slice but *seeded* from a closed form, so
+  // a slice starting mid-note lands on the same phase a single pass would have
+  // reached. That keeps the join exact while making the inner step an add
+  // rather than a multiply and a modulo.
+  let phaseA = wrapPhase(incrementA * firstI);
+  let phaseB = unison ? wrapPhase(incrementB * firstI) : 0;
+
+  let block = -1;
+  let vibratoFrom = 0;
+  let vibratoTo = 0;
+
+  for (let i = firstI; i < lastI; i++) {
+    const index = originIndex + i;
+    if (index >= out.length) break;
+    if (index < 0) {
+      phaseA = advance(phaseA, incrementA);
+      if (unison) phaseB = advance(phaseB, incrementB);
+      continue;
+    }
+
+    let sample: number;
+    if (vibratoScale !== 0) {
+      const b = (i / VIBRATO_BLOCK) | 0;
+      if (b !== block) {
+        block = b;
+        vibratoFrom = vibratoCents(spec, variation, (b * VIBRATO_BLOCK) / sampleRate) * vibratoScale;
+        vibratoTo = vibratoCents(spec, variation, ((b + 1) * VIBRATO_BLOCK) / sampleRate) * vibratoScale;
+      }
+      const within = (i - block * VIBRATO_BLOCK) / VIBRATO_BLOCK;
+      const offset = vibratoFrom + (vibratoTo - vibratoFrom) * within;
+      sample = readTable(table, phaseA + offset);
+      if (unison) sample += readTable(table, phaseB + offset);
+    } else {
+      sample = readAt(table, phaseA);
+      if (unison) sample += readAt(table, phaseB);
+    }
+
+    if (noise && i < noiseSpan) {
+      sample += noise() * bowNoiseAt(spec, i / sampleRate);
+    }
+
+    out[index] += sample * voiceGain
+      * envelopeAt(i, attack, decay, spec.sustain, heldSamples, releaseSamples);
+
+    phaseA = advance(phaseA, incrementA);
+    if (unison) phaseB = advance(phaseB, incrementB);
+  }
+}
+
+/** Steps a phase already inside the table by one increment. */
+function advance(phase: number, increment: number): number {
+  const next = phase + increment;
+  return next >= TABLE_SIZE ? next - TABLE_SIZE : next;
+}
+
+/** Brings any phase into `[0, TABLE_SIZE)`. */
+function wrapPhase(phase: number): number {
+  const wrapped = phase % TABLE_SIZE;
+  return wrapped < 0 ? wrapped + TABLE_SIZE : wrapped;
+}
+
+/** One read at a phase already known to be inside the table. */
+function readAt(table: Float32Array, phase: number): number {
+  const base = phase | 0;
+  const frac = phase - base;
+  const a = table[base]!;
+  const b = table[base + 1 === TABLE_SIZE ? 0 : base + 1]!;
+  return a + (b - a) * frac;
+}
+
+/** One linearly-interpolated read, for a phase that may sit outside the table. */
+function readTable(table: Float32Array, phase: number): number {
+  return readAt(table, wrapPhase(phase));
+}
+
 /** Adds one note into `out`. */
 function renderNote(
-  out: Float32Array, note: BackingNote, spec: VoiceSpec, tables: Float32Array[],
-  sampleRate: number, tempoScale: number, gain: number,
+  out: Float32Array, note: BackingNote, spec: VoiceSpec,
+  sampleRate: number, tempoScale: number, gain: number, instrument: InstrumentName,
 ): void {
   const startSample = Math.floor((note.startTimeMs / tempoScale / 1000) * sampleRate);
   if (startSample >= out.length) return;
+
+  const seed = noteSeed(note.midiNumber, note.startTimeMs);
+  const variation = noteVariation(spec, seed);
+  const velocity = Math.max(0, Math.min(1, note.velocity * variation.velocityScale));
 
   const heldMs = note.durationMs / tempoScale;
   const heldSamples = Math.max(1, Math.floor((heldMs / 1000) * sampleRate));
   const releaseSamples = Math.max(1, Math.floor((spec.releaseMs / 1000) * sampleRate));
   const totalSamples = heldSamples + releaseSamples;
 
-  const attack = Math.max(1, (spec.attackMs / 1000) * sampleRate);
+  const attack = Math.max(1, (spec.attackMs / 1000) * sampleRate * variation.attackScale);
   const decay = Math.max(1, (spec.decayMs / 1000) * sampleRate);
-  const amplitude = gain * spec.gain * note.velocity;
+  const amplitude = gain * spec.gain * velocity;
 
   if (spec.noise) {
-    const noise = makeNoise(note.midiNumber * 7919 + note.startTimeMs);
+    const noise = makeNoise(seed);
     for (let i = 0; i < totalSamples; i++) {
       const index = startSample + i;
       if (index >= out.length) break;
-      out[index] += noise() * amplitude * envelopeAt(i, attack, decay, spec.sustain, heldSamples, releaseSamples);
+      out[index] += noise() * amplitude
+        * envelopeAt(i, attack, decay, spec.sustain, heldSamples, releaseSamples);
     }
     return;
   }
 
-  const table = tables[bandFor(note.midiNumber)];
+  const table = tablesFor(instrument, sampleRate, brightnessTier(velocity))[bandFor(note.midiNumber)]!;
   const increment = (midiToFrequency(note.midiNumber) / sampleRate) * TABLE_SIZE;
-  let phase = 0;
 
-  for (let i = 0; i < totalSamples; i++) {
-    const index = startSample + i;
-    if (index >= out.length) break;
-
-    const base = phase | 0;
-    const frac = phase - base;
-    const a = table[base % TABLE_SIZE];
-    const b = table[(base + 1) % TABLE_SIZE];
-
-    out[index] += (a + (b - a) * frac)
-      * amplitude
-      * envelopeAt(i, attack, decay, spec.sustain, heldSamples, releaseSamples);
-
-    phase += increment;
-    if (phase >= TABLE_SIZE) phase -= TABLE_SIZE;
-  }
+  renderVoice(
+    out, startSample, 0, totalSamples, spec, table, increment, amplitude,
+    attack, decay, heldSamples, releaseSamples, sampleRate, variation, seed,
+  );
 }
 
 /** Renders a set of parts into one mono buffer. */
@@ -152,9 +309,8 @@ export function renderParts(
   for (const part of parts) {
     if (part.muted || part.gain <= 0) continue;
     const spec = VOICES[part.instrument];
-    const tables = tablesFor(part.instrument, sampleRate);
     for (const note of part.notes) {
-      renderNote(out, note, spec, tables, sampleRate, tempoScale, part.gain);
+      renderNote(out, note, spec, sampleRate, tempoScale, part.gain, part.instrument);
     }
   }
 
@@ -230,14 +386,17 @@ export function renderProgramInto(
     if (startSample >= toSample) break;   // notes are sorted by start time
 
     const spec = VOICES[note.instrument];
+    const seed = noteSeed(note.midiNumber, Math.round(note.atSec * 1000));
+    const variation = noteVariation(spec, seed);
+
     const heldSamples = Math.max(1, Math.floor(note.holdSec * sampleRate));
     const releaseSamples = Math.max(1, Math.floor((spec.releaseMs / 1000) * sampleRate));
     const totalSamples = heldSamples + releaseSamples;
     if (startSample + totalSamples <= fromSample) continue;
 
-    const attack = Math.max(1, (spec.attackMs / 1000) * sampleRate);
+    const attack = Math.max(1, (spec.attackMs / 1000) * sampleRate * variation.attackScale);
     const decay = Math.max(1, (spec.decayMs / 1000) * sampleRate);
-    const amplitude = note.amplitude * spec.gain;
+    const amplitude = note.amplitude * spec.gain * variation.velocityScale;
 
     /** Where in the note this slice begins, and where it ends. */
     const firstI = Math.max(0, fromSample - startSample);
@@ -247,7 +406,7 @@ export function renderProgramInto(
       // Deterministic noise has to be wound forward to the slice, or a
       // percussion hit split across a boundary would change timbre mid-hit.
       // Percussion notes are short, so the cost is bounded.
-      const noise = makeNoise(note.midiNumber * 7919 + Math.round(note.atSec * 1000));
+      const noise = makeNoise(seed);
       for (let i = 0; i < firstI; i++) noise();
       for (let i = firstI; i < lastI; i++) {
         out[startSample + i - fromSample] +=
@@ -257,32 +416,20 @@ export function renderProgramInto(
       continue;
     }
 
-    const table = tablesFor(note.instrument, sampleRate)[bandFor(note.midiNumber)];
+    // The dynamic the note was *played* at, not the level it is mixed at — a
+    // quiet part is not a dull part. `velocity` is carried on the scheduled
+    // note for exactly this.
+    const tier = brightnessTier(note.velocity * variation.velocityScale);
+    const table = tablesFor(note.instrument, sampleRate, tier)[bandFor(note.midiNumber)]!;
     const increment = (midiToFrequency(note.midiNumber) / sampleRate) * TABLE_SIZE;
-    // Derived, not accumulated — see above.
-    let phase = (increment * firstI) % TABLE_SIZE;
 
-    for (let i = firstI; i < lastI; i++) {
-      const base = phase | 0;
-      const frac = phase - base;
-      const a = table[base % TABLE_SIZE];
-      const b = table[(base + 1) % TABLE_SIZE];
-
-      out[startSample + i - fromSample] +=
-        (a + (b - a) * frac) * amplitude
-        * envelopeAt(i, attack, decay, spec.sustain, heldSamples, releaseSamples);
-
-      phase += increment;
-      if (phase >= TABLE_SIZE) phase -= TABLE_SIZE;
-    }
+    renderVoice(
+      out, startSample - fromSample, firstI, lastI, spec, table, increment, amplitude,
+      attack, decay, heldSamples, releaseSamples, sampleRate, variation, seed,
+    );
   }
 
   limit(out);
-}
-
-/** Harmonic series of a voice, for the web scheduler's `createPeriodicWave`. */
-export function harmonicsOf(instrument: InstrumentName): readonly number[] {
-  return VOICES[instrument].harmonics;
 }
 
 export { VOICES };

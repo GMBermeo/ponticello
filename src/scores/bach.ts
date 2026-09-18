@@ -4,8 +4,9 @@
  *
  * Chosen as the first real piece because of what it does *not* demand: the
  * opening four bars never leave first position, and every stopped note lands
- * on a tape. Over a held G pedal the hand only ever plays the blue tape
- * (first finger) and the two yellows, while the bow does all the travelling.
+ * on a tape. Over a held G pedal the hand only ever plays the first three
+ * tapes — first, second and third fingers — while the bow does all the
+ * travelling.
  * It sounds like Bach on the first attempt, which no scale does.
  */
 
@@ -69,7 +70,7 @@ export const BWV1007_PRELUDE: CelloSongScore = buildScore({
     bpm: 66,
     difficulty: 'Intermediate',
     tonic: 'G',
-    teaches: 'Four bars over a G pedal that never leave first position. The left hand plays only blue and the two yellows; everything hard here belongs to the bow — four string planes, even semiquavers, no accent where the string changes.',
+    teaches: 'Four bars over a G pedal that never leave first position. The left hand plays only the first three tapes; everything hard here belongs to the bow — four string planes, even semiquavers, no accent where the string changes.',
     rights: 'Public domain (composed c. 1720). Bars 1–4, hand-entered; check against an edition before performing.',
   },
   bars: [G_MAJOR, C_OVER_G, D7_OVER_G, D_OVER_G].map((figure) => alternateBows(twice(figure))),

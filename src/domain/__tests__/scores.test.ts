@@ -4,13 +4,16 @@ import { ARRANGEMENT_LEVELS, ARRANGEMENT_PROFILES, arrangeScoreForLevel } from '
 import { soloPartFromScore } from '../backing';
 import { midiToFrequency, midiToPitchName, OPEN_STRING_MIDI } from '../cello';
 import { difficultyOf } from '../difficulty';
-import { firstPositionFingering } from '../fingering';
+import { seatLine } from '../fingering';
 import { scoreDurationMs, validateScore } from '../schema';
 import { LIBRARY_ROWS, SCORES } from '@/scores';
 import { LIBRARY_EDITION } from '@/scores/libraryEdition';
 
 /** Size thresholds describe the full library; the free edition ships a dozen pieces. */
 const FULL_LIBRARY = LIBRARY_EDITION.id === 'full';
+
+/** Where an arrangement is allowed to put the hand: the neck, never past it. */
+const NECK_POSITIONS = ['Half', '1st', '2nd', '3rd', '4th'];
 
 describe('bundled scores', () => {
   it.each(SCORES.map((s) => [s.id, s] as const))('%s passes structural validation', (_id, score) => {
@@ -152,10 +155,15 @@ describe('library rows', () => {
       const seconds = Math.max(1, scoreDurationMs(beginner) / 1000);
       expect(beginner.notes.length / seconds, `${item.id} attacks/s`)
         .toBeLessThanOrEqual(ARRANGEMENT_PROFILES.Beginner.maxNotesPerSecond + 0.01);
-      // Every note under the fingers of a hand that never leaves the tapes.
+      // Every note in the neck, where the tapes are. Not "first position
+      // only": a line is seated by reading the whole passage now, and the
+      // answer to an awkward semitone is often a settled hand in second or
+      // third position rather than a dip into half position and straight back
+      // out. What a beginner needs is a hand that stays put, and that is
+      // asserted in `fingering.test.ts` where it can be counted properly.
       expect(
-        beginner.notes.every((note) => note.position === '1st' || note.position === 'Half'),
-        `${item.id} beginner stays in first position`,
+        beginner.notes.every((note) => NECK_POSITIONS.includes(note.position)),
+        `${item.id} beginner stays in the neck`,
       ).toBe(true);
       for (let i = 1; i < beginner.notes.length; i++) {
         expect(
@@ -169,14 +177,27 @@ describe('library rows', () => {
         const version = versions[index];
         if (!level || !version) continue;
         const range = ARRANGEMENT_PROFILES[level].range;
-        const actual = difficultyOf(version.notes, version.notes.map((note) => firstPositionFingering(note.midiNumber)));
+        // Measured through the seating the app actually uses, not through the
+        // fixed first-position map it used to use. Scoring a line against a
+        // fingering nobody plays is how a tier drifts away from the thing it
+        // describes.
+        const actual = difficultyOf(version.notes, seatLine(
+          version.notes.map((note) => ({
+            midiNumber: note.midiNumber,
+            startTimeMs: note.startTimeMs,
+            durationMs: note.durationMs,
+          })),
+          { closedFrameOnly: ARRANGEMENT_PROFILES[level].closedFrameOnly },
+        ));
         expect(ARRANGEMENT_LEVELS.indexOf(actual.tier), `${item.id}/${level} measured difficulty`)
           .toBeLessThanOrEqual(ARRANGEMENT_LEVELS.indexOf(level));
         for (const note of version.notes) {
           if (level === 'Beginner' || level === 'Intermediate') expect(note.extension, `${item.id}/${level} extension`).toBe('none');
-          expect(['1st', 'Half'], `${item.id}/${level}/${note.id}`).toContain(note.position);
+          expect(NECK_POSITIONS, `${item.id}/${level}/${note.id}`).toContain(note.position);
+          // Inside the neck: fourth position anchors at 7 and the little
+          // finger reaches 3 above it, one more when extended.
           expect(note.midiNumber - OPEN_STRING_MIDI[note.string], `${item.id}/${level} stop`)
-            .toBeLessThanOrEqual(6);
+            .toBeLessThanOrEqual(11);
           if (Object.values(OPEN_STRING_MIDI).includes(note.midiNumber)) {
             expect(note.finger, `${item.id}/${level} open string`).toBe('0');
           }

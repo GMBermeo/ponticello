@@ -9,6 +9,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { DeviceCanvas } from '@/components/DeviceCanvas';
 import { ImportedLibraryProvider } from '@/state/library';
+import { PracticeProvider } from '@/state/practice';
 import { SessionProvider } from '@/state/session';
 import { SettingsProvider } from '@/state/settings';
 import { ThemeProvider } from '@/theme/ThemeProvider';
@@ -35,6 +36,7 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: PAPER }}>
       <SafeAreaProvider>
         <SettingsProvider>
+          <PracticeProvider>
           <SessionProvider>
             <ImportedLibraryProvider>
               <DeviceCanvas>
@@ -50,6 +52,7 @@ export default function RootLayout() {
               </DeviceCanvas>
             </ImportedLibraryProvider>
           </SessionProvider>
+          </PracticeProvider>
         </SettingsProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

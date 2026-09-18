@@ -98,6 +98,7 @@ export default function LibraryScreen() {
           <Title size={22}>{APP_NAME}</Title>
           {wide ? <Body size={12} color={theme.chrome.dim}>{`${APP_TAGLINE} · ${LIBRARY_EDITION.label}`}</Body> : null}
         </View>
+        <Button label="Practice" tone="ghost" onPress={() => router.push('/profile')} />
         <Button label="Tuner" tone="ghost" onPress={() => router.push('/tuner')} />
         <Button label="Import" onPress={() => router.push('/settings/import')} />
       </Row>
@@ -123,6 +124,7 @@ export default function LibraryScreen() {
           />
           {!wide ? <Row padX={16} style={{ borderTopWidth: theme.rule(1), borderColor: theme.chrome.lineSoft }}>
             <Button label="Reading guide" tone="ghost" onPress={() => router.push('/tutorial')} />
+            <Button label="Chart" tone="ghost" onPress={() => router.push('/chart')} />
             <Button label="Scales" tone="ghost" onPress={() => router.push('/scales')} />
             <View style={{ marginLeft: 'auto' }}><Button label="My tapes" tone="ghost" onPress={() => router.push('/settings/tapes')} /></View>
           </Row> : null}
@@ -182,6 +184,8 @@ function PracticeRail() {
       <Stack pad={20} gap={12}>
         <Label size={11}>Before you play</Label>
         <PressableRow onPress={() => router.push('/tutorial')} accessibilityLabel="Open the reading guide" style={{ justifyContent: 'center' }}><Title size={15}>Reading guide →</Title><Body size={12} color={theme.chrome.dim}>Notes, numbers and string colours</Body></PressableRow>
+        <PressableRow onPress={() => router.push('/chart')} accessibilityLabel="Open the fingerboard chart" style={{ justifyContent: 'center' }}><Title size={15}>Fingerboard chart →</Title><Body size={12} color={theme.chrome.dim}>Every note, coloured by its name</Body></PressableRow>
+        <PressableRow onPress={() => router.push('/profile')} accessibilityLabel="Open your practice record" style={{ justifyContent: 'center' }}><Title size={15}>Your practice →</Title><Body size={12} color={theme.chrome.dim}>Hours, days and streaks, kept on this phone</Body></PressableRow>
         <PressableRow onPress={() => router.push('/settings/tapes')} accessibilityLabel="Edit my tapes" style={{ justifyContent: 'center' }}><Title size={15}>My fingerboard tapes →</Title><Body size={12} color={theme.chrome.dim}>Match the colours on your cello</Body></PressableRow>
         <Row gap={7} style={{ flexWrap: 'wrap' }}>{settings.tapeSets[0]?.tapes.map((tape) => <TapeChip key={tape.id} color={theme.chrome.tapes[tape.color]} label={TAPE_COLOR_LABEL[tape.color]} width={32} height={5} />)}</Row>
       </Stack>

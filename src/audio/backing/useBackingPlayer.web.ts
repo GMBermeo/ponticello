@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { harmonicsOf } from '../synth';
-import { envelopeAt, envelopeHeldLevel, VOICES } from '../voices';
+import {
+  brightnessTier, envelopeAt, envelopeHeldLevel, noteSeed, noteVariation,
+  spectrumForTier, VOICES,
+} from '../voices';
 import { BackingProgram, notesActiveAtOffset, ScheduledNote } from './program';
 import { BackingPlayer } from './types';
 
@@ -28,6 +30,89 @@ import { BackingPlayer } from './types';
  * same notes at the same instants.
  */
 
+/**
+ * Vibrato, as an LFO on the oscillators' detune.
+ *
+ * Silent for the whole onset and then faded in, exactly as
+ * `vibratoCents` does for the native renderer — a note that arrives already
+ * wobbling is the giveaway of a synthesiser. Skipped entirely on a note too
+ * short to reach its own onset, which is also what happens in the hand.
+ */
+function scheduleVibrato(
+  audio: AudioContext,
+  spec: { vibrato?: { rateHz: number; depthCents: number; onsetMs: number } },
+  variation: { vibratoPhase: number; vibratoRateScale: number; vibratoDepthScale: number },
+  targets: OscillatorNode[],
+  at: number,
+  holdSec: number,
+  elapsedSec: number,
+  extras: (OscillatorNode | AudioBufferSourceNode)[],
+): void {
+  const vibrato = spec.vibrato;
+  if (!vibrato) return;
+  const onset = vibrato.onsetMs / 1000;
+  if (holdSec < Math.max(VIBRATO_MIN_HOLD_SEC, onset + 0.05)) return;
+
+  const lfo = audio.createOscillator();
+  lfo.frequency.value = vibrato.rateHz * variation.vibratoRateScale;
+  const depth = audio.createGain();
+  const cents = vibrato.depthCents * variation.vibratoDepthScale;
+
+  // Swell in over one onset, from wherever a resumed note already is.
+  const startsAt = at + Math.max(0, onset - elapsedSec);
+  const already = Math.max(0, Math.min(1, (elapsedSec - onset) / Math.max(1e-6, onset)));
+  depth.gain.setValueAtTime(cents * already, at);
+  depth.gain.linearRampToValueAtTime(cents, startsAt + onset);
+
+  lfo.connect(depth);
+  for (const target of targets) depth.connect(target.detune);
+  lfo.start(at);
+  lfo.stop(at + holdSec + 1);
+  extras.push(lfo);
+}
+
+/**
+ * The scrape before the string speaks, on its own short envelope.
+ *
+ * Gated on length because it is an articulation, not a texture: a run of
+ * semiquavers would otherwise become a wash of noise.
+ */
+function scheduleBowNoise(
+  audio: AudioContext,
+  spec: { bowNoise?: number; attackMs: number },
+  destination: GainNode,
+  peak: number,
+  at: number,
+  holdSec: number,
+  elapsedSec: number,
+  noiseFor: (audio: AudioContext) => AudioBuffer,
+  extras: (OscillatorNode | AudioBufferSourceNode)[],
+): void {
+  const amount = spec.bowNoise ?? 0;
+  if (amount <= 0 || holdSec < BOW_NOISE_MIN_HOLD_SEC) return;
+  // A resumed note is long past its own attack; there is no scrape left.
+  if (elapsedSec > 0.02) return;
+
+  const span = Math.max(0.02, (spec.attackMs / 1000) * 1.8);
+  const source = audio.createBufferSource();
+  source.buffer = noiseFor(audio);
+  source.loop = true;
+
+  const shaper = audio.createGain();
+  const g = shaper.gain;
+  g.setValueAtTime(0, at);
+  // Three points is enough for a rise and a fall the ear reads as a scrape.
+  g.linearRampToValueAtTime(peak * amount, at + span * 0.18);
+  g.linearRampToValueAtTime(peak * amount * 0.25, at + span * 0.5);
+  g.linearRampToValueAtTime(0, at + span);
+
+  shaper.connect(destination);
+  source.connect(shaper);
+  source.start(at);
+  source.stop(at + span + 0.02);
+  extras.push(source);
+}
+
 /** How far ahead of the audio clock notes are scheduled. */
 const LOOKAHEAD_SEC = 1.6;
 /** How often the scheduler wakes up. Comfortably inside the lookahead. */
@@ -52,7 +137,21 @@ interface Voice {
   endsAt: number;
   osc: OscillatorNode | AudioBufferSourceNode;
   gain: GainNode;
+  /** Vibrato LFO, the detuned second copy, the attack scrape — when present. */
+  extras?: (OscillatorNode | AudioBufferSourceNode)[];
 }
+
+/**
+ * Expression is bought with nodes, so it is spent only where it is heard.
+ *
+ * A dense arrangement can put four hundred notes inside one lookahead window;
+ * giving every one of them a vibrato LFO and a noise source would quadruple
+ * the graph for notes far too short to show any of it. These are the lengths
+ * below which each effect is inaudible anyway.
+ */
+const VIBRATO_MIN_HOLD_SEC = 0.3;
+const UNISON_MIN_HOLD_SEC = 0.2;
+const BOW_NOISE_MIN_HOLD_SEC = 0.12;
 
 export function useBackingPlayer(enabled: boolean): BackingPlayer {
   const contextRef = useRef<AudioContext | null>(null);
@@ -60,7 +159,11 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
   const programRef = useRef<BackingProgram | null>(null);
   const volumeRef = useRef(0.8);
 
-  /** Cached `PeriodicWave` per instrument — building one per note is wasteful. */
+  /**
+   * Cached `PeriodicWave` per instrument *and brightness tier* — building one
+   * per note is wasteful, and a voice needs one spectrum per dynamic so that
+   * playing harder opens the tone rather than only raising it.
+   */
   const wavesRef = useRef<Map<string, PeriodicWave>>(new Map());
   /** Cached noise buffer for the percussion voice. */
   const noiseRef = useRef<AudioBuffer | null>(null);
@@ -102,18 +205,21 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
     return contextRef.current;
   }, []);
 
-  /** The band-limited wave for an instrument, built once. */
-  const waveFor = useCallback((audio: AudioContext, instrument: string): PeriodicWave => {
-    const cached = wavesRef.current.get(instrument);
+  /** The band-limited wave for an instrument at one dynamic, built once. */
+  const waveFor = useCallback((
+    audio: AudioContext, instrument: string, tier: number,
+  ): PeriodicWave => {
+    const key = `${instrument}@${tier}`;
+    const cached = wavesRef.current.get(key);
     if (cached) return cached;
-    const harmonics = harmonicsOf(instrument as never);
+    const harmonics = spectrumForTier(VOICES[instrument as never], tier);
     // Index 0 of a PeriodicWave is DC and must stay zero; harmonic n lives at
     // index n. Sine phase means the whole series goes in the imaginary part.
     const real = new Float32Array(harmonics.length + 1);
     const imag = new Float32Array(harmonics.length + 1);
-    for (let h = 0; h < harmonics.length; h++) imag[h + 1] = harmonics[h];
+    for (let h = 0; h < harmonics.length; h++) imag[h + 1] = harmonics[h]!;
     const wave = audio.createPeriodicWave(real, imag, { disableNormalization: false });
-    wavesRef.current.set(instrument, wave);
+    wavesRef.current.set(key, wave);
     return wave;
   }, []);
 
@@ -141,6 +247,10 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
       } catch {
         // Already ended — nodes are single-use and may have stopped on their own.
       }
+      for (const extra of voice.extras ?? []) {
+        try { extra.stop(); } catch { /* already ended */ }
+        try { extra.disconnect(); } catch { /* gone */ }
+      }
       try { voice.osc.disconnect(); voice.gain.disconnect(); } catch { /* gone */ }
     }
     voicesRef.current = [];
@@ -154,10 +264,15 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
     if (!master) return;
 
     const spec = VOICES[note.instrument];
-    const peak = note.amplitude * spec.gain;
+    // The same per-note wander the native renderer applies, from the same seed,
+    // so a song does not change character when it changes platform.
+    const seed = noteSeed(note.midiNumber, Math.round(note.atSec * 1000));
+    const variation = noteVariation(spec, seed);
+
+    const peak = note.amplitude * spec.gain * variation.velocityScale;
     if (peak <= 0.0004) return;
 
-    const attack = Math.max(0.001, spec.attackMs / 1000);
+    const attack = Math.max(0.001, (spec.attackMs / 1000) * variation.attackScale);
     const decay = Math.max(0.001, spec.decayMs / 1000);
     const release = Math.max(0.01, spec.releaseMs / 1000);
     const hold = Math.max(0.01, note.holdSec);
@@ -190,6 +305,9 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
       g.linearRampToValueAtTime(0, at + hold + release - elapsed);
     }
 
+    const remaining = hold + release - elapsed;
+    const extras: (OscillatorNode | AudioBufferSourceNode)[] = [];
+
     let source: OscillatorNode | AudioBufferSourceNode;
     if (spec.noise) {
       const noise = audio.createBufferSource();
@@ -197,26 +315,72 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
       noise.loop = true;
       source = noise;
     } else {
-      const osc = audio.createOscillator();
-      osc.setPeriodicWave(waveFor(audio, note.instrument));
       // 440 · 2^((m−69)/12), inline rather than imported: `midiToFrequency`
       // lives in the domain layer and this is the audio thread's hot path.
-      osc.frequency.setValueAtTime(440 * Math.pow(2, (note.midiNumber - 69) / 12), at);
+      const hz = 440 * Math.pow(2, (note.midiNumber - 69) / 12);
+      const wave = waveFor(audio, note.instrument, brightnessTier(note.velocity * variation.velocityScale));
+
+      const osc = audio.createOscillator();
+      osc.setPeriodicWave(wave);
+      osc.frequency.setValueAtTime(hz, at);
+      osc.detune.setValueAtTime(variation.detuneCents, at);
       source = osc;
+
+      // A section rather than a soloist: a second copy a few cents away, half
+      // level each. The beating between them is the sound of more than one
+      // player, and it cannot be faked with a chorus on the master.
+      const unison = spec.unisonCents ?? 0;
+      if (unison > 0 && hold >= UNISON_MIN_HOLD_SEC) {
+        const twin = audio.createOscillator();
+        twin.setPeriodicWave(wave);
+        twin.frequency.setValueAtTime(hz, at);
+        twin.detune.setValueAtTime(variation.detuneCents - unison, at);
+        osc.detune.setValueAtTime(variation.detuneCents + unison, at);
+        const half = audio.createGain();
+        half.gain.setValueAtTime(0.5, at);
+        half.connect(gain);
+        twin.connect(half);
+        twin.start(at);
+        twin.stop(at + remaining + 0.02);
+        extras.push(twin);
+        // The first copy drops to half too, or the pair is twice as loud.
+        const firstHalf = audio.createGain();
+        firstHalf.gain.setValueAtTime(0.5, at);
+        firstHalf.connect(gain);
+        osc.connect(firstHalf);
+        osc.start(at);
+        osc.stop(at + remaining + 0.02);
+        scheduleVibrato(audio, spec, variation, [osc, twin], at, hold, elapsed, extras);
+        scheduleBowNoise(audio, spec, gain, peak, at, hold, elapsed, noiseFor, extras);
+        registerVoice(at + remaining + 0.05, osc, gain, extras);
+        return;
+      }
+
+      scheduleVibrato(audio, spec, variation, [osc], at, hold, elapsed, extras);
+      scheduleBowNoise(audio, spec, gain, peak, at, hold, elapsed, noiseFor, extras);
     }
 
-    const remaining = hold + release - elapsed;
     source.connect(gain);
     source.start(at);
     source.stop(at + remaining + 0.02);
+    registerVoice(at + remaining + 0.05, source, gain, extras);
 
-    const voice: Voice = { endsAt: at + remaining + 0.05, osc: source, gain };
-    source.onended = () => {
-      try { source.disconnect(); gain.disconnect(); } catch { /* already gone */ }
-      const index = voicesRef.current.indexOf(voice);
-      if (index >= 0) voicesRef.current.splice(index, 1);
-    };
-    voicesRef.current.push(voice);
+    function registerVoice(
+      endsAt: number, node: OscillatorNode | AudioBufferSourceNode,
+      output: GainNode, held: (OscillatorNode | AudioBufferSourceNode)[],
+    ) {
+      const voice: Voice = { endsAt, osc: node, gain: output, extras: held };
+      node.onended = () => {
+        try { node.disconnect(); output.disconnect(); } catch { /* already gone */ }
+        for (const extra of held) {
+          try { extra.stop(); } catch { /* already ended */ }
+          try { extra.disconnect(); } catch { /* gone */ }
+        }
+        const index = voicesRef.current.indexOf(voice);
+        if (index >= 0) voicesRef.current.splice(index, 1);
+      };
+      voicesRef.current.push(voice);
+    }
   }, [noiseFor, waveFor]);
 
   /**

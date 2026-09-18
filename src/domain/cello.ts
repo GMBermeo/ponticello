@@ -313,3 +313,75 @@ export function calculateFretboardMaxMm(
   if (maxSemitones <= 6) return 220;
   return 330;
 }
+
+/**
+ * How far down the string a *panel* should draw, given the room it has.
+ *
+ * `calculateFretboardMaxMm` answers "what does this piece need"; this answers
+ * "what should we actually show", and they are different questions. A piece
+ * that never leaves first position needs 220 mm, and on a tall column that
+ * 220 mm gets stretched over the whole panel: two neighbouring semitones end
+ * up a finger's width apart on screen and a hand's width apart on the cello,
+ * which teaches the opposite of the truth. It also wastes the space — the
+ * player is shown four tapes when nine are stuck to their instrument.
+ *
+ * So the extent grows with the room until the drawing is no more stretched
+ * than `MAX_UNITS_PER_MM`, snapped to a short ladder so that a few pixels of
+ * layout change cannot make the whole picture rescale.
+ */
+const MAX_UNITS_PER_MM = 1.35;
+/** Past this there is nothing left worth drawing: the bridge is at 690 mm. */
+const FULL_BOARD_MM = 440;
+const EXTENT_LADDER = [220, 275, 330, 385, FULL_BOARD_MM] as const;
+
+export function fingerboardExtentMm(songMinMm: number, heightUnits: number): number {
+  if (!Number.isFinite(heightUnits) || heightUnits <= 0) return songMinMm;
+  const wanted = Math.max(songMinMm, heightUnits / MAX_UNITS_PER_MM);
+  return EXTENT_LADDER.find((mm) => mm >= wanted) ?? Math.max(songMinMm, FULL_BOARD_MM);
+}
+
+// ─── The same note, somewhere else ───────────────────────────────────────────
+
+/**
+ * How far up a string the neck reaches: fourth position anchors at 7 semitones
+ * and the little finger stretches to four above it.
+ */
+export const NECK_REACH_SEMITONES = 11;
+
+export interface Placement {
+  string: CelloString;
+  /** Semitones above the nut. 0 is the open string. */
+  semitones: number;
+}
+
+/**
+ * Every place a pitch can be stopped within the neck.
+ *
+ * A cello has no one-to-one map from note to place. A2 is the second semitone
+ * of the G string and the ninth of the C string, and which one is *right*
+ * depends entirely on what the hand is doing either side of it — which is the
+ * whole reason `seatLine` reads a passage rather than a note.
+ *
+ * The solver picks one. This lists the rest, so the player can see the choice
+ * that was made on their behalf and disagree with it: a run that has been
+ * seated across a string crossing may be far easier taken up one string, and
+ * nothing on screen could previously say so.
+ */
+export function placementsFor(
+  midiNumber: number, maxSemitones = NECK_REACH_SEMITONES,
+): Placement[] {
+  const out: Placement[] = [];
+  for (const string of STRING_ORDER) {
+    const semitones = midiNumber - OPEN_STRING_MIDI[string];
+    if (semitones >= 0 && semitones <= maxSemitones) out.push({ string, semitones });
+  }
+  return out;
+}
+
+/** The other places a pitch could be taken, given where it is being taken now. */
+export function alternativePlacements(
+  midiNumber: number, played: Placement, maxSemitones = NECK_REACH_SEMITONES,
+): Placement[] {
+  return placementsFor(midiNumber, maxSemitones)
+    .filter((p) => p.string !== played.string || p.semitones !== played.semitones);
+}

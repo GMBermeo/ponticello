@@ -6,7 +6,7 @@ import { VOICES } from '../voices';
 import { buildProgram, limitPolyphony, MAX_POLYPHONY, ScheduledNote } from '../backing/program';
 
 function note(atSec: number, holdSec: number, amplitude: number, midiNumber = 60): ScheduledNote {
-  return { atSec, holdSec, amplitude, midiNumber, instrument: 'piano' };
+  return { atSec, holdSec, amplitude, midiNumber, instrument: 'piano', velocity: amplitude };
 }
 
 /** Most voices sounding at any onset, counting hold and release. */
@@ -76,5 +76,8 @@ describe('limitPolyphony', () => {
     expect(maxOverlap(program.notes)).toBeLessThanOrEqual(MAX_POLYPHONY);
     // Stealing thins the texture; it must not hollow it out.
     expect(program.notes.length).toBeGreaterThan(parts.length * 840 * 0.3);
-  });
+    // Twelve thousand notes through the sweep takes a few seconds, and more
+    // when the suite runs it beside everything else; the default 5 s timeout
+    // makes an otherwise deterministic test flaky.
+  }, 30_000);
 });

@@ -1,5 +1,5 @@
 import { midiToFrequency, midiToPitchName } from '../cello';
-import { CelloState, firstPositionFingering, RawNoteEvent } from '../fingering';
+import { CelloState, RawNoteEvent, seatLine } from '../fingering';
 import { melodyMetrics, rankMelodyTracks } from '../melody';
 import { MidiNote, monophonic, ParsedMidi } from '../midi';
 import { CelloNote, CelloSongScore, scoreDurationMs } from '../schema';
@@ -182,7 +182,7 @@ export function arrangeScoreForLevel(
   const guide = profile.prefersGuide;
   const role = guide ? 'roots' : profile.prefersBass && accompaniment?.events.length ? 'bass' : 'melody';
 
-  const states: CelloState[] = events.map((event) => firstPositionFingering(event.midiNumber));
+  const states: CelloState[] = seatLine(events, { closedFrameOnly: profile.closedFrameOnly });
   const originalsByStart = new Map<number, CelloNote>();
   for (const note of score.notes) if (!originalsByStart.has(note.startTimeMs)) originalsByStart.set(note.startTimeMs, note);
 

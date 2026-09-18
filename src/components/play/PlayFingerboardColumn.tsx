@@ -4,6 +4,7 @@ import { View } from 'react-native';
 import { Fingerboard, FingerboardProps, FingerboardStringLabels } from '@/components/Fingerboard';
 import { useMeasuredSize } from '@/components/useMeasuredSize';
 import { Label, Row } from '@/components/ui/primitives';
+import { fingerboardExtentMm } from '@/domain/cello';
 import { CelloSongScore } from '@/domain/schema';
 import {
   shallowEqual,
@@ -16,7 +17,8 @@ import { Playhead, usePlayheadPosition } from './usePlayhead';
 
 export interface PlayFingerboardColumnProps {
   width: number;
-  fretboardMaxMm: number;
+  /** The least the drawing must cover for this piece, in millimetres. */
+  fretboardMinMm: number;
   songKeyName?: string;
   noteOverlay?: FingerboardProps['noteOverlay'];
   score: CelloSongScore;
@@ -26,7 +28,7 @@ export interface PlayFingerboardColumnProps {
 
 export const PlayFingerboardColumn = memo(function PlayFingerboardColumn({
   width,
-  fretboardMaxMm,
+  fretboardMinMm,
   songKeyName,
   noteOverlay,
   score,
@@ -38,8 +40,19 @@ export const PlayFingerboardColumn = memo(function PlayFingerboardColumn({
   const activeNote = score.notes[activeIndex] ?? null;
   const nextNote = score.notes[activeIndex + 1] ?? null;
 
+  /**
+   * What the piece needs, widened to whatever the column can show without
+   * stretching the board — see `fingerboardExtentMm`. A first-position study on
+   * a tall phone gets the whole tape ladder rather than four tapes spread over
+   * the height of the screen.
+   */
+  const maxMm = fingerboardExtentMm(
+    fretboardMinMm,
+    theme.scale.scale > 0 ? boardSize.height / theme.scale.scale : 0,
+  );
+
   const { tapeSets } = useTapeSettings();
-  const { showTapes } = useVisionPreferences();
+  const { showTapes, showAlternatePlacements } = useVisionPreferences();
   const { cueDensity, boardView, noteOverlayMode } = useSettingsSelector((s) => ({
     cueDensity: s.cueDensity,
     boardView: s.boardView,
@@ -64,7 +77,7 @@ export const PlayFingerboardColumn = memo(function PlayFingerboardColumn({
       <View ref={boardRef} style={{ flex: 1, marginTop: theme.s(6) }} onLayout={onBoardLayout}>
         <Fingerboard
           height={boardSize.height}
-          maxMm={fretboardMaxMm}
+          maxMm={maxMm}
           tapeSets={tapeSets}
           showTapes={showTapes}
           showLandmarks={cueDensity === 'full'}
@@ -74,9 +87,10 @@ export const PlayFingerboardColumn = memo(function PlayFingerboardColumn({
           invert={boardView === 'player'}
           active={activeNote}
           next={nextNote}
+          showAlternates={showAlternatePlacements}
         />
       </View>
-      <FingerboardStringLabels compact activeString={activeNote?.string ?? null} />
+      <FingerboardStringLabels compact gutter={46} activeString={activeNote?.string ?? null} />
     </View>
   );
 });

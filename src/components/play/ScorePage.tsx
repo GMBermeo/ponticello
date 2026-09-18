@@ -1,15 +1,18 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { memo, useEffect, useMemo, useRef } from 'react';
 import { ScrollView, View } from 'react-native';
 import Svg, { Circle, Ellipse, G, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
 
+import { CelloString } from '@/domain/cello';
 import {
-  EngravedMeasure, engrave, Glyph, locateMeasure, RepeatBlock,
+  EngravedMeasure, engrave, Glyph, locateMeasure, NoteGlyph, RepeatBlock,
 } from '@/domain/engrave';
+import { noteColorNames } from '@/domain/noteColors';
 import { CelloSongScore } from '@/domain/schema';
+import { ScoreColorMode } from '@/state/settings';
 import { useTheme } from '@/theme/ThemeProvider';
 import { Label } from '../ui/primitives';
 import { staffStep } from './staff';
-import { Playhead, usePlayheadPosition } from './usePlayhead';
+import { Playhead, usePlayheadPosition, usePlayheadTransport } from './usePlayhead';
 
 /**
  * The page.
@@ -82,9 +85,29 @@ export interface ScorePageProps {
   height: number;
   width: number;
   showFingerings: boolean;
+  /** Ink, by string, or by note name. See `ScoreColorMode`. */
+  colorMode?: ScoreColorMode;
 }
 
-export function ScorePage({ score, playhead, height, width, showFingerings }: ScorePageProps) {
+/**
+ * How a notehead is inked.
+ *
+ * `ring` is only ever set for a sharp or a flat coloured by note name: those
+ * belong to two letters at once, and the printed charts draw them as a split
+ * disc. A stave is too small for a split notehead that still reads as a
+ * notehead, so the second letter's colour becomes a ring around the first.
+ */
+interface NoteInk { fill: string; ring: string | null }
+
+/**
+ * Memoised like the other two visions. It was the only one that was not, so a
+ * re-render of the play screen root redrew every system on the page — which is
+ * the most expensive tree in the app, and the one most likely to be on screen
+ * when the transport starts.
+ */
+export const ScorePage = memo(function ScorePage({
+  score, playhead, height, width, showFingerings, colorMode = 'off',
+}: ScorePageProps) {
   const theme = useTheme();
   const { chrome } = theme;
   const gap = theme.s(GAP);
@@ -164,6 +187,7 @@ export function ScorePage({ score, playhead, height, width, showFingerings }: Sc
   const pageHeight = Math.max(height, TOP_MARGIN + systems.length * systemHeight + gap * 4);
 
   const position = usePlayheadPosition(playhead);
+  const { playing } = usePlayheadTransport(playhead);
 
   // ── Follow the music ──────────────────────────────────────────────────────
   // Only while playing. Paused, the page belongs to the reader: they may want
@@ -183,29 +207,47 @@ export function ScorePage({ score, playhead, height, width, showFingerings }: Sc
   }, [engraved, systems, position.measureIndex]);
 
   useEffect(() => {
-    if (!playhead.playing) return;
+    if (!playing) return;
     // Keep the active system a third of the way down rather than at the top,
     // so the next few bars are always already in view.
     const y = Math.max(0, TOP_MARGIN + activeSystem * systemHeight - height / 3);
     scroller.current?.scrollTo({ y, animated: true });
-  }, [activeSystem, playhead.playing, systemHeight, height, TOP_MARGIN]);
+  }, [activeSystem, playing, systemHeight, height, TOP_MARGIN]);
 
   const accidentalCount = keyAccidentals(engraved.keySignature);
+
+  const inkFor = (glyph: NoteGlyph): NoteInk => {
+    if (colorMode === 'string') {
+      return { fill: chrome.strings[glyph.string as CelloString] ?? chrome.ink, ring: null };
+    }
+    if (colorMode === 'note') {
+      const [primary, secondary] = noteColorNames(glyph.midiNumber);
+      return {
+        fill: chrome.notes[primary],
+        ring: secondary ? chrome.notes[secondary] : null,
+      };
+    }
+    return { fill: chrome.ink, ring: null };
+  };
 
   return (
     <View style={{ flex: 1 }}>
       <View style={{ flexDirection: 'row', gap: theme.s(12), paddingBottom: theme.s(4) }}>
         <Label size={10}>{engraved.keySignature}</Label>
         <Label size={10}>{`${engraved.writtenMeasures} BARS WRITTEN · ${engraved.sourceMeasures} PLAYED`}</Label>
-        <Label size={10} color={playhead.playing ? chrome.accent : chrome.dim}>
-          {playhead.playing ? 'FOLLOWING' : 'SCROLL FREELY'}
+        <Label size={10} color={playing ? chrome.accent : chrome.dim}>
+          {playing ? 'FOLLOWING' : 'SCROLL FREELY'}
         </Label>
       </View>
       <ScrollView
         ref={scroller}
         style={{ flex: 1 }}
-        scrollEnabled={!playhead.playing}
-        showsVerticalScrollIndicator={!playhead.playing}
+        // Room under the last system for the tuner, which parks along the
+        // bottom of the play area on this vision. Without it the final bars
+        // cannot be scrolled out from behind it.
+        contentContainerStyle={{ paddingBottom: gap * 7 }}
+        scrollEnabled={!playing}
+        showsVerticalScrollIndicator={!playing}
       >
         <Svg width={width} height={pageHeight}>
           {systems.map((system, s) => (
@@ -228,6 +270,7 @@ export function ScorePage({ score, playhead, height, width, showFingerings }: Sc
                   chrome={chrome}
                   activeIndex={position.activeIndex}
                   showFingerings={showFingerings}
+                  inkFor={inkFor}
                   openRepeat={system.firstInBlock[i] && engraved.blocks[system.blockOf[i]].times > 1}
                   closeRepeat={system.lastInBlock[i] && engraved.blocks[system.blockOf[i]].times > 1}
                   repeatTimes={engraved.blocks[system.blockOf[i]].times}
@@ -241,7 +284,7 @@ export function ScorePage({ score, playhead, height, width, showFingerings }: Sc
 
     </View>
   );
-}
+});
 
 function StaveLines({ width, gap, colour }: { width: number; gap: number; colour: string }) {
   return (
@@ -362,6 +405,7 @@ interface MeasureProps {
   chrome: { ink: string; dim: string; accent: string; line: string; lineSoft: string };
   activeIndex: number;
   showFingerings: boolean;
+  inkFor: (glyph: NoteGlyph) => NoteInk;
   openRepeat: boolean;
   closeRepeat: boolean;
   repeatTimes: number;
@@ -369,7 +413,7 @@ interface MeasureProps {
 }
 
 function Measure({
-  laid, gap, chrome, activeIndex, showFingerings,
+  laid, gap, chrome, activeIndex, showFingerings, inkFor,
   openRepeat, closeRepeat, repeatTimes, isLast,
 }: MeasureProps) {
   const right = laid.x + laid.width;
@@ -416,6 +460,7 @@ function Measure({
           chrome={chrome}
           active={g.glyph.kind === 'note' && g.glyph.noteIndex === activeIndex}
           showFingerings={showFingerings}
+          inkFor={inkFor}
           beam={beamFor(i)}
         />
       ))}
@@ -451,7 +496,7 @@ function RepeatBar({
 }
 
 function GlyphMark({
-  laid, next, gap, chrome, active, showFingerings, beam,
+  laid, next, gap, chrome, active, showFingerings, inkFor, beam,
 }: {
   laid: LaidGlyph;
   next: LaidGlyph | undefined;
@@ -459,15 +504,20 @@ function GlyphMark({
   chrome: { ink: string; dim: string; accent: string; line: string; lineSoft: string };
   active: boolean;
   showFingerings: boolean;
+  inkFor: (glyph: NoteGlyph) => NoteInk;
   beam: BeamGeometry | null;
 }) {
   const { glyph } = laid;
   const y = -(laid.step / 2) * gap;
-  const colour = active ? chrome.accent : chrome.ink;
 
   if (glyph.kind === 'rest') {
     return <RestMark x={laid.x} gap={gap} sixteenths={glyph.sixteenths} colour={chrome.dim} />;
   }
+
+  // The playhead outranks the colour code: whatever a note's letter or string
+  // says, the note sounding *now* is the accent, or you lose your place.
+  const ink = inkFor(glyph);
+  const colour = active ? chrome.accent : ink.fill;
 
   const hollow = glyph.sixteenths >= 8;
   // Under a beam the whole group shares one stem direction, or the beam would
@@ -503,8 +553,9 @@ function GlyphMark({
       <Ellipse
         cx={laid.x} cy={y} rx={gap * 0.62} ry={gap * 0.46}
         fill={hollow ? 'none' : colour}
-        stroke={colour}
-        strokeWidth={hollow ? Math.max(1, gap * 0.13) : 0}
+        stroke={!active && ink.ring ? ink.ring : colour}
+        strokeWidth={hollow ? Math.max(1, gap * 0.13)
+          : (!active && ink.ring ? Math.max(1, gap * 0.16) : 0)}
       />
 
       {glyph.dots > 0 ? (

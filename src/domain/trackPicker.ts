@@ -21,9 +21,9 @@
  * costed up front — the resulting range, how much of it seats in first
  * position, how many notes the app would have to move anyway — and an octave
  * that cannot work is refused with a reason rather than rendered as a
- * plausible-looking impossible fingering. `firstPositionFingering` throws
- * outside its compass, and the honest place to catch that is here, at the
- * moment of choosing, not at draw time.
+ * plausible-looking impossible fingering. Nothing below the neck ceiling can
+ * fail to be seated, and the honest place to catch what is above it is here,
+ * at the moment of choosing, not at draw time.
  *
  * Pure: no React, no React Native. See AGENTS.md.
  */
@@ -33,7 +33,7 @@ import {
 } from './arrangement';
 import { BackingPart, InstrumentName } from './backing';
 import { midiToFrequency, midiToPitchName, OPEN_STRING_MIDI } from './cello';
-import { firstPositionFingering, RawNoteEvent } from './fingering';
+import { RawNoteEvent, seatLine } from './fingering';
 import { bestOctaveShiftToRange } from './melody';
 import { MidiNote, monophonic } from './midi';
 import { CelloNote, CelloSongScore, scoreDurationMs } from './schema';
@@ -41,13 +41,18 @@ import { CelloNote, CelloSongScore, scoreDurationMs } from './schema';
 // ─── The compass ─────────────────────────────────────────────────────────────
 
 /**
- * The lowest and highest pitch `firstPositionFingering` can seat.
+ * The lowest and highest pitch this app will arrange for.
  *
  * The floor is the open C. The ceiling is D♯4 — the sixth semitone of the A
- * string, reached by extending the fourth finger forward — and above it the
- * hand has to leave the neck. Every arrangement profile's range is a subset of
- * this, which is what makes the pipeline below total: once a line has been
- * seated inside a profile range, fingering it cannot throw.
+ * string — and above it the hand has to leave the neck. Every arrangement
+ * profile's range is a subset of this, which is what makes the pipeline below
+ * total: a line seated inside a profile range can always be fingered.
+ *
+ * It used to be described as the compass of `firstPositionFingering`, because
+ * that fixed per-note mapping was what seated every line. Seating is now
+ * `seatLine`, which reads the whole passage and will use second, third and
+ * fourth position — so the ceiling is a decision about staying in the neck
+ * rather than a limit of the mapping.
  */
 export const FIRST_POSITION_FLOOR = OPEN_STRING_MIDI.C;
 export const FIRST_POSITION_ROOF = 63;
@@ -648,8 +653,13 @@ export function scoreFromPart(
   const label = partLabel(part);
   const preferFlats = base.metadata.preferFlats ?? false;
 
+  const seated = seatLine(built.events, {
+    closedFrameOnly: ARRANGEMENT_PROFILES[level].closedFrameOnly,
+  });
+
   const notes: CelloNote[] = built.events.map((event, index) => {
-    const state = firstPositionFingering(event.midiNumber);
+    const state = seated[index];
+    if (!state) throw new Error(`No fingering was found for chosen-part note ${index + 1}.`);
     const measureIndex = Math.max(0, base.measures.findIndex((measure) =>
       event.startTimeMs >= measure.startBarTimeMs
       && event.startTimeMs < measure.startBarTimeMs + measure.durationMs));

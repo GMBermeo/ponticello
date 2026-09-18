@@ -4,10 +4,14 @@ import { join } from 'node:path';
 import { parseMidi } from '../src/domain/midi';
 import { arrangeMidi, bassLine, harmonicGuide, rebaseLine } from '../src/domain/arrangement';
 import { instrumentForProgram } from '../src/domain/backing';
-import { firstPositionFingering } from '../src/domain/fingering';
-import { difficultyOf } from '../src/domain/difficulty';
+import { CelloState, seatLine } from '../src/domain/fingering';
+import { DIFFICULTY_TIERS, difficultyOf } from '../src/domain/difficulty';
 import { detectKey, keyName } from '../src/domain/key';
-import type { DifficultyTier } from '../src/domain/schema';
+import { midiToPitchName } from '../src/domain/cello';
+import { CelloSongScore, DifficultyTier, measureDurationMs } from '../src/domain/schema';
+import type { LibraryRow } from '../src/scores/index';
+import type { CompactVariantDef, VariantLibraryData } from '../src/scores/benchmarkVariants';
+import { BenchmarkRecord, parseVariantFolder } from './ollama/benchmarkCore';
 
 
 function parseSongInfo(filename: string, category: 'study' | 'classical' | 'song') {
@@ -15,12 +19,57 @@ function parseSongInfo(filename: string, category: 'study' | 'classical' | 'song
   const id = stem.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
   if (category === 'classical') {
+    if (stem.includes('clair_de_lune') || stem.includes('clair-de-lune')) {
+      return {
+        id: 'debussy-clair-de-lune',
+        title: 'Clair de Lune',
+        composer: 'Claude Debussy',
+        origin: 'PUBLIC DOMAIN · CELLO ARRANGEMENT',
+        category: 'classical' as const,
+      };
+    }
+
+    if (stem.includes('gymnopedie')) {
+      return {
+        id: 'gymnopedie-no-1',
+        title: 'Gymnopédie No. 1',
+        composer: 'Erik Satie',
+        origin: 'PUBLIC DOMAIN · CELLO ARRANGEMENT',
+        category: 'classical' as const,
+      };
+    }
+
+    if (stem.includes('scheherazade')) {
+      let movement = 'Scheherazade';
+      let mvtId = 'scheherazade';
+      if (stem.includes('1st')) {
+        movement = 'Scheherazade - 1st Movement';
+        mvtId = 'scheherazade-1st-movement';
+      } else if (stem.includes('2nd')) {
+        movement = 'Scheherazade - 2nd Movement (Part 1)';
+        mvtId = 'scheherazade-2nd-movement-part-1';
+      } else if (stem.includes('3rd')) {
+        movement = 'Scheherazade - 3rd Movement';
+        mvtId = 'scheherazade-3rd-movement';
+      }
+      return {
+        id: mvtId,
+        title: movement,
+        composer: 'Nikolai Rimsky-Korsakov',
+        origin: 'PUBLIC DOMAIN · CELLO ARRANGEMENT',
+        category: 'classical' as const,
+      };
+    }
+
     const title = stem.replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     let composer = 'Classical';
     if (stem.startsWith('bach')) composer = 'J.S. Bach';
     else if (stem.startsWith('pachelbel')) composer = 'Johann Pachelbel';
     else if (stem.startsWith('moonlight') || stem.startsWith('fur-elise') || stem.startsWith('ode')) composer = 'L. van Beethoven';
     else if (stem.startsWith('dies-irae')) composer = 'Traditional 13th C.';
+    else if (stem.startsWith('debussy')) composer = 'Claude Debussy';
+    else if (stem.includes('satie')) composer = 'Erik Satie';
+    else if (stem.includes('rimsky')) composer = 'Nikolai Rimsky-Korsakov';
     return {
       id,
       title,
@@ -138,6 +187,59 @@ function thinTrack<T extends { velocity: number }>(notes: T[], cap: number): T[]
     out.push(notes[best]);
   }
   return out;
+}
+
+/**
+ * Every pitched track as a compact backing part, thinned, clipped to
+ * `[originTime, endMs)` and rebased so `originTime` is zero. `soloTrack` is
+ * marked as the solo so the mixer can leave it out when the cello plays it.
+ */
+function buildBackingParts(
+  parsed: ReturnType<typeof parseMidi>,
+  soloTrack: number | null,
+  originTime: number,
+  endMs: number,
+): CompactScoreData['backingParts'] {
+  const backingParts: CompactScoreData['backingParts'] = [];
+  for (const track of parsed.tracks) {
+    if (track.noteCount === 0) continue;
+    const isSolo = track.index === soloTrack;
+    // Cap density, but by thinning across the whole track rather than by
+    // truncating it. `.slice(0, 1500)` used to be here, and it meant that on
+    // any track with more than 1500 notes the accompaniment simply stopped a
+    // quarter of the way through the song — 223 tracks across 132 of the 258
+    // songs. Six of them had no second track to cover for it and went
+    // completely silent after the first minute.
+    const tNotes = thinTrack(
+      parsed.notes
+        .filter((note) => note.track === track.index
+          && note.startTimeMs < endMs
+          && note.startTimeMs + note.durationMs > originTime)
+        .sort((a, b) => a.startTimeMs - b.startTimeMs),
+      MAX_TRACK_NOTES,
+    )
+      .map((note) => {
+        const startTimeMs = Math.max(0, note.startTimeMs - originTime);
+        const endTimeMs = Math.min(
+          note.startTimeMs + note.durationMs,
+          endMs,
+        ) - originTime;
+        return [
+          note.midiNumber,
+          Math.round(startTimeMs),
+          Math.max(1, Math.round(endTimeMs - startTimeMs)),
+          Math.round((Math.max(0.05, note.velocity / 127)) * 100) / 100,
+        ] as [number, number, number, number];
+      });
+
+    if (tNotes.length === 0) continue;
+    const inst = instrumentForProgram(track.program, track.isPercussion);
+    const role = isSolo ? 'solo' : 'accompaniment';
+    const gain = isSolo ? 0.85 : 0.5;
+    const name = (track.name || `Track ${track.index + 1}`).trim().slice(0, 40);
+    backingParts.push([name, inst, role, gain, tNotes]);
+  }
+  return backingParts;
 }
 
 /**
@@ -259,7 +361,9 @@ for (const { dir, cat } of categories) {
         .map((note) => ({ midiNumber: note.midiNumber, durationMs: note.durationMs })),
     ]);
     const key = keyName(detected.tonic, detected.mode);
-    const solvedStates = events.map((event) => firstPositionFingering(event.midiNumber));
+    // Seated as a line, exactly as the app seats it — so the stored position
+    // distribution describes the fingering the player is actually shown.
+    const solvedStates = seatLine(events);
     const report = difficultyOf(events, solvedStates);
     const difficulty: DifficultyTier = report.tier;
     difficulties.push({ id: info.id, tier: report.tier, score: report.score });
@@ -277,45 +381,7 @@ for (const { dir, cat } of categories) {
       share(p => ['5th', '6th', '7th', 'Thumb'].includes(p)),
     ];
 
-    const backingParts: CompactScoreData['backingParts'] = [];
-    for (const track of parsed.tracks) {
-      if (track.noteCount === 0) continue;
-      const isSolo = track.index === soloTrack;
-      // Cap density, but by thinning across the whole track rather than by
-      // truncating it. `.slice(0, 1500)` used to be here, and it meant that on
-      // any track with more than 1500 notes the accompaniment simply stopped a
-      // quarter of the way through the song — 223 tracks across 132 of the 258
-      // songs. Six of them had no second track to cover for it and went
-      // completely silent after the first minute.
-      const tNotes = thinTrack(
-        parsed.notes
-          .filter((note) => note.track === track.index
-            && note.startTimeMs < arranged.sourceEndMs
-            && note.startTimeMs + note.durationMs > originTime)
-          .sort((a, b) => a.startTimeMs - b.startTimeMs),
-        MAX_TRACK_NOTES,
-      )
-        .map((note) => {
-          const startTimeMs = Math.max(0, note.startTimeMs - originTime);
-          const endTimeMs = Math.min(
-            note.startTimeMs + note.durationMs,
-            arranged.sourceEndMs,
-          ) - originTime;
-          return [
-            note.midiNumber,
-            Math.round(startTimeMs),
-            Math.max(1, Math.round(endTimeMs - startTimeMs)),
-            Math.round((Math.max(0.05, note.velocity / 127)) * 100) / 100,
-          ] as [number, number, number, number];
-        });
-
-      if (tNotes.length === 0) continue;
-      const inst = instrumentForProgram(track.program, track.isPercussion);
-      const role = isSolo ? 'solo' : 'accompaniment';
-      const gain = isSolo ? 0.85 : 0.5;
-      const name = (track.name || `Track ${track.index + 1}`).trim().slice(0, 40);
-      backingParts.push([name, inst, role, gain, tNotes]);
-    }
+    const backingParts = buildBackingParts(parsed, soloTrack, originTime, arranged.sourceEndMs);
 
     compactList.push({
       id: info.id,
@@ -337,6 +403,125 @@ for (const { dir, cat } of categories) {
   }
 }
 
+// ── Model benchmark variants ────────────────────────────────────────────────
+// `tools/ollama-benchmark.ts` writes one folder per song per model,
+// `_MIDIS/arranged/<song>--<model>/`. Each keeps that model's own fingering,
+// which the compact format above cannot (it stores pitches and re-fingers them
+// on load), so they ship as their own data file and appear as extra rows.
+// Full edition only: the benchmark songs are copyrighted.
+const variantData: VariantLibraryData = { variants: [], backings: {} };
+const variantRows: LibraryRow[] = [];
+
+function variantRow(variant: CompactVariantDef): LibraryRow {
+  const line = variant.levels.Intermediate;
+  const events = line.map(([midiNumber, startTimeMs, durationMs]) => ({ midiNumber, startTimeMs, durationMs }));
+  const states: CelloState[] = line.map(([, , , string, finger, position, extension]) => ({ string, finger, position, extension }));
+  const report = difficultyOf(events, states);
+  let low = Infinity;
+  let high = -Infinity;
+  let end = 0;
+  for (const note of line) {
+    low = Math.min(low, note[0]);
+    high = Math.max(high, note[0]);
+  }
+  for (const notes of Object.values(variant.levels)) {
+    for (const note of notes) end = Math.max(end, note[1] + note[2]);
+  }
+  const share = (test: (position: string) => boolean) =>
+    Math.round((100 * line.filter((note) => test(note[5])).length) / (line.length || 1));
+  return {
+    id: variant.id,
+    title: `${variant.title} [${variant.model}]`,
+    composer: variant.composer,
+    origin: `MODEL BENCHMARK · ${variant.model.toUpperCase()}`,
+    keySignature: variant.key.toUpperCase(),
+    range: line.length > 0
+      ? `${midiToPitchName(low, variant.preferFlats)} – ${midiToPitchName(high, variant.preferFlats)}`
+      : '—',
+    tempo: `♩ ${variant.bpm}`,
+    difficulty: report.tier,
+    category: 'song',
+    bars: Math.max(1, Math.ceil(end / measureDurationMs(variant.meter, variant.bpm))),
+    playable: true,
+    distribution: [
+      ['1st position', share((p) => p === '1st' || p === 'Half')],
+      ['2nd – 4th', share((p) => ['2nd', '3rd', '4th'].includes(p))],
+      ['Thumb / upper', share((p) => ['5th', '6th', '7th', 'Thumb'].includes(p))],
+    ],
+    note: `Fingered by ${variant.model}: it placed ${Math.round(variant.placedByModel * 100)}% of the notes it was asked about; the solver placed the rest.`,
+  };
+}
+
+if (edition === 'full' && arrangedIds) {
+  const downloads = existsSync('_MIDIS/downloaded')
+    ? readdirSync('_MIDIS/downloaded').filter((f) => /\.midi?$/i.test(f))
+    : [];
+  const fileForSong = new Map(downloads.map((f) => [parseSongInfo(f, 'song').id, f]));
+
+  for (const folder of [...arrangedIds].sort()) {
+    const name = parseVariantFolder(folder);
+    if (!name) continue;
+    const dir = join(ARRANGED_DIR, folder);
+    const recordPath = join(dir, 'benchmark.json');
+    if (!existsSync(recordPath)) continue;
+    const record = JSON.parse(readFileSync(recordPath, 'utf8')) as BenchmarkRecord;
+    if (record.status !== 'completed') continue;
+    const file = fileForSong.get(name.songId);
+    if (!file) {
+      console.warn(`benchmark variant ${folder}: no source MIDI for ${name.songId} in _MIDIS/downloaded — skipped`);
+      continue;
+    }
+
+    const levels = {} as CompactVariantDef['levels'];
+    const teaches = {} as CompactVariantDef['teaches'];
+    let complete = true;
+    for (const tier of DIFFICULTY_TIERS) {
+      const path = join(dir, `${tier.toLowerCase()}.json`);
+      if (!existsSync(path)) { complete = false; break; }
+      const score = JSON.parse(readFileSync(path, 'utf8')) as CelloSongScore;
+      levels[tier] = score.notes.map((n) => [
+        n.midiNumber, n.startTimeMs, n.durationMs, n.string, n.finger, n.position, n.extension,
+        n.articulation === 'accent' ? 1 : 0,
+      ]);
+      teaches[tier] = score.metadata.teaches;
+    }
+    if (!complete) {
+      console.warn(`benchmark variant ${folder}: missing a tier file — skipped`);
+      continue;
+    }
+
+    if (!variantData.backings[name.songId]) {
+      const source = parseMidi(new Uint8Array(readFileSync(join('_MIDIS/downloaded', file))));
+      // The arranger writes notes on the file's own clock, with no rebase to
+      // the first note, so the backing is built on that clock too.
+      variantData.backings[name.songId] = buildBackingParts(source, record.melodyTrackIndex, 0, source.durationMs);
+    }
+
+    const asked = record.tiers.filter((tier) => tier.askedModel);
+    const askedNotes = asked.reduce((total, tier) => total + tier.notes, 0);
+    const info = parseSongInfo(file, 'song');
+    const variant: CompactVariantDef = {
+      id: folder,
+      baseId: name.songId,
+      model: record.model,
+      title: info.title,
+      composer: info.composer,
+      bpm: record.bpm,
+      meter: record.meter,
+      key: record.key,
+      preferFlats: record.key.includes('♭'),
+      levels,
+      teaches,
+      placedByModel: askedNotes === 0 ? 0 : asked.reduce((total, tier) => total + tier.accepted, 0) / askedNotes,
+    };
+    variantData.variants.push(variant);
+    variantRows.push(variantRow(variant));
+  }
+}
+
+writeFileSync('src/scores/benchmarkVariants.json', JSON.stringify(variantData));
+console.log(`Benchmark variants: ${variantData.variants.length}`);
+
 console.log(`Writing ${compactList.length} compact scores to src/scores/bundledSongs.json...`);
 writeFileSync('src/scores/bundledSongs.json', JSON.stringify(compactList));
 
@@ -351,7 +536,7 @@ console.log('Done writing bundledSongs.json.');
 // tens of megabytes of songs to draw a list. It has to be written by the same
 // run as the JSON, or the list and the songs behind it disagree.
 const { toCompactRow } = await import('../src/scores/index');
-const rows = compactList.map((entry) => toCompactRow(entry));
+const rows = [...compactList.map((entry) => toCompactRow(entry)), ...variantRows];
 writeFileSync('src/scores/catalogIndex.ts', `import type { LibraryRow } from './index';
 
 /**

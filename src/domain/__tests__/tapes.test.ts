@@ -1,74 +1,77 @@
 import { describe, expect, it } from 'vitest';
 
-import { midiToPitchName, stopDistanceMm } from '../cello';
+import { stopDistanceMm } from '../cello';
 import {
-  DEFAULT_TAPE_SETS, FIRST_POSITION_TAPES, nearestTapeBelow, notesUnderTape,
-  tapeForSemitones, tapeGeometry, tapeHint, THUMB_POSITION_TAPES,
+  DEFAULT_TAPE_SETS, FINGERBOARD_TAPES, isCurrentTapeLayout, nearestTapeBelow, notesUnderTape,
+  Tape, tapeForSemitones, tapeGeometry, tapeHint,
 } from '../tapes';
 
-describe('first position tapes — blue, yellow, yellow, green', () => {
-  it('runs blue · yellow · yellow · green from the nut outwards', () => {
-    expect(FIRST_POSITION_TAPES.tapes.map((t) => t.color))
-      .toEqual(['blue', 'yellow', 'yellow', 'green']);
+describe('the default tapes — nine of them, no half position', () => {
+  it('runs blue · green · yellow · red · green · blue · yellow · green · yellow', () => {
+    expect(FINGERBOARD_TAPES.tapes.map((t) => t.color)).toEqual([
+      'blue', 'green', 'yellow', 'red', 'green', 'blue', 'yellow', 'green', 'yellow',
+    ]);
   });
 
-  it('is one closed hand frame — a semitone between neighbours', () => {
-    const semitones = FIRST_POSITION_TAPES.tapes.map((t) => t.semitones);
-    expect(semitones).toEqual([2, 3, 4, 5]);
-    // Fingers 1 to 4 span a minor third, which is the first-position frame.
-    expect(semitones[3] - semitones[0]).toBe(3);
+  it('starts a whole step above the nut and climbs one semitone at a time', () => {
+    expect(FINGERBOARD_TAPES.tapes.map((t) => t.semitones))
+      .toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10]);
   });
 
-  it('assigns one finger per tape, in order', () => {
-    expect(FIRST_POSITION_TAPES.tapes.map((t) => t.finger)).toEqual(['1', '2', '3', '4']);
+  it('has nothing in half position', () => {
+    expect(FINGERBOARD_TAPES.tapes.some((t) => t.semitones <= 1)).toBe(false);
   });
 
-  it('gives the notes a beginner actually reads off them', () => {
-    const [blue, yellow1, yellow2, green] = FIRST_POSITION_TAPES.tapes;
-    const names = (t: typeof blue) =>
+  it('never asks for the thumb, and ships no thumb-position set', () => {
+    expect(FINGERBOARD_TAPES.tapes.some((t) => t.finger === 'T')).toBe(false);
+    expect(DEFAULT_TAPE_SETS).toHaveLength(1);
+  });
+
+  it('opens with the closed first-position hand frame', () => {
+    const frame = FINGERBOARD_TAPES.tapes.slice(0, 4);
+    expect(frame.map((t) => t.finger)).toEqual(['1', '2', '3', '4']);
+    // First finger to little finger spans a minor third.
+    expect(frame[3].semitones - frame[0].semitones).toBe(3);
+  });
+
+  it('puts a tape on the neck heel, where the hand can feel the body', () => {
+    const heel = FINGERBOARD_TAPES.tapes.find((t) => t.semitones === 7);
+    expect(heel?.color).toBe('blue');
+  });
+
+  it('gives the notes a beginner actually reads off the first four', () => {
+    const names = (t: Tape) =>
       Object.fromEntries(notesUnderTape(t).map((n) => [n.string, n.name]));
+    const [blue, green, yellow, red] = FINGERBOARD_TAPES.tapes;
 
     expect(names(blue)).toEqual({ C: 'D2', G: 'A2', D: 'E3', A: 'B3' });
-    expect(names(yellow1)).toEqual({ C: 'D#2', G: 'A#2', D: 'F3', A: 'C4' });
-    expect(names(yellow2)).toEqual({ C: 'E2', G: 'B2', D: 'F#3', A: 'C#4' });
-    expect(names(green)).toEqual({ C: 'F2', G: 'C3', D: 'G3', A: 'D4' });
+    expect(names(green)).toEqual({ C: 'D#2', G: 'A#2', D: 'F3', A: 'C4' });
+    expect(names(yellow)).toEqual({ C: 'E2', G: 'B2', D: 'F#3', A: 'C#4' });
+    expect(names(red)).toEqual({ C: 'F2', G: 'C3', D: 'G3', A: 'D4' });
   });
 
-  it('puts blue a whole step up and green a fourth up', () => {
+  it('puts blue a whole step up and red a fourth up', () => {
     expect(stopDistanceMm(2)).toBeCloseTo(75.3, 1);
     expect(stopDistanceMm(5)).toBeCloseTo(173.1, 1);
   });
 });
 
-describe('thumb position tapes — blue, green, green, yellow', () => {
-  it('runs blue · green · green · yellow from the nut outwards', () => {
-    expect(THUMB_POSITION_TAPES.tapes.map((t) => t.color))
-      .toEqual(['blue', 'green', 'green', 'yellow']);
+describe('stored layouts', () => {
+  it('accepts the shipped set', () => {
+    expect(isCurrentTapeLayout(DEFAULT_TAPE_SETS)).toBe(true);
   });
 
-  it('parks the thumb on the octave harmonic at half the string', () => {
-    const [thumb] = THUMB_POSITION_TAPES.tapes;
-    expect(thumb.finger).toBe('T');
-    expect(thumb.semitones).toBe(12);
-    expect(stopDistanceMm(thumb.semitones)).toBeCloseTo(345, 6);
+  it('rejects the old two-set, four-tape layout', () => {
+    const old = [
+      { ...FINGERBOARD_TAPES, tapes: FINGERBOARD_TAPES.tapes.slice(0, 4) },
+      { ...FINGERBOARD_TAPES, id: 'thumb', tapes: FINGERBOARD_TAPES.tapes.slice(0, 4) },
+    ];
+    expect(isCurrentTapeLayout(old)).toBe(false);
   });
 
-  it('climbs a major tetrachord above the thumb', () => {
-    const gaps = THUMB_POSITION_TAPES.tapes
-      .map((t) => t.semitones)
-      .map((n, i, all) => (i === 0 ? 0 : n - all[i - 1]));
-    expect(gaps).toEqual([0, 2, 2, 1]); // whole, whole, half
-  });
-
-  it('spells D major on the A string', () => {
-    const names = THUMB_POSITION_TAPES.tapes.map(
-      (t) => midiToPitchName(57 + t.semitones),
-    );
-    expect(names).toEqual(['A4', 'B4', 'C#5', 'D5']);
-  });
-
-  it('never asks for the little finger', () => {
-    expect(THUMB_POSITION_TAPES.tapes.some((t) => t.finger === '4')).toBe(false);
+  it('rejects nonsense', () => {
+    expect(isCurrentTapeLayout(undefined)).toBe(false);
+    expect(isCurrentTapeLayout([])).toBe(false);
   });
 });
 
@@ -76,35 +79,41 @@ describe('tape geometry and hints', () => {
   it('orders every tape from the nut down the string', () => {
     const mm = tapeGeometry(DEFAULT_TAPE_SETS).map((t) => t.mm);
     expect([...mm].sort((a, b) => a - b)).toEqual(mm);
-    expect(mm).toHaveLength(8);
+    expect(mm).toHaveLength(9);
   });
 
   it('finds the tape under an exact stopping point', () => {
     expect(tapeForSemitones(DEFAULT_TAPE_SETS, 4)?.color).toBe('yellow');
-    expect(tapeForSemitones(DEFAULT_TAPE_SETS, 6)).toBeUndefined();
+    expect(tapeForSemitones(DEFAULT_TAPE_SETS, 1)).toBeUndefined();
+    expect(tapeForSemitones(DEFAULT_TAPE_SETS, 12)).toBeUndefined();
   });
 
   it('falls back to the nearest tape below', () => {
-    const near = nearestTapeBelow(DEFAULT_TAPE_SETS, 7);
-    expect(near?.tape.color).toBe('green');
+    const near = nearestTapeBelow(DEFAULT_TAPE_SETS, 12);
+    expect(near?.tape.semitones).toBe(10);
     expect(near?.semitonesAbove).toBe(2);
   });
 
-  it('disambiguates the two yellows by ordinal within their own set', () => {
-    expect(tapeHint(DEFAULT_TAPE_SETS, 3, '2')).toBe('2 finger on the first yellow tape');
-    expect(tapeHint(DEFAULT_TAPE_SETS, 4, '3')).toBe('3 finger on the second yellow tape');
+  it('disambiguates repeated colours by ordinal within the set', () => {
+    expect(tapeHint(DEFAULT_TAPE_SETS, 3, '2')).toBe('2 finger on the first green tape');
+    expect(tapeHint(DEFAULT_TAPE_SETS, 6, '2')).toBe('2 finger on the second green tape');
+    expect(tapeHint(DEFAULT_TAPE_SETS, 9, '3')).toBe('3 finger on the third green tape');
+  });
+
+  it('names a colour used once without an ordinal', () => {
+    expect(tapeHint(DEFAULT_TAPE_SETS, 5, '4')).toBe('4 finger on the red tape');
   });
 
   it('describes a note between tapes as an offset from one', () => {
-    expect(tapeHint(DEFAULT_TAPE_SETS, 7, '4'))
-      .toBe('4 finger, a whole step above the green tape');
+    expect(tapeHint(DEFAULT_TAPE_SETS, 11, '4'))
+      .toBe('4 finger, a semitone above the third yellow tape');
   });
 
   it('says nothing about the left hand for an open string', () => {
     expect(tapeHint(DEFAULT_TAPE_SETS, 0, '0')).toMatch(/open string/);
   });
 
-  it('names the thumb rather than a finger number', () => {
-    expect(tapeHint(DEFAULT_TAPE_SETS, 12, 'T')).toMatch(/^thumb on/);
+  it('has nothing to say below the first tape', () => {
+    expect(tapeHint(DEFAULT_TAPE_SETS, 1, '1')).toMatch(/below every tape/);
   });
 });

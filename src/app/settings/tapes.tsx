@@ -15,10 +15,10 @@ const COLORS: TapeColor[] = ['blue', 'yellow', 'green', 'red', 'orange', 'white'
 /**
  * My tapes.
  *
- * The defaults describe one particular cello — blue, yellow, yellow, green in
- * first position and blue, green, green, yellow up in thumb position. Tapes
- * get moved, and teachers disagree about where the thumb frame should sit, so
- * every one of them is editable here and everything downstream follows.
+ * The defaults describe one particular cello — nine tapes running from the
+ * whole step above the nut down to the neck heel, with nothing in half
+ * position. Tapes get moved, and no two teachers put them in the same places,
+ * so every one of them is editable here and everything downstream follows.
  */
 export default function TapesScreen() {
   const theme = useTheme();
@@ -49,8 +49,8 @@ export default function TapesScreen() {
             <Stack padX={22} padY={18} gap={10}>
               <Button label="Reset to my defaults" onPress={resetTapes} />
               <Body size={12} color={theme.chrome.dim}>
-                Back to blue · yellow · yellow · green in first position and
-                blue · green · green · yellow in thumb position.
+                Back to the shipped nine: blue, green, yellow and red for the first-position
+                frame, then green, blue, yellow, green and yellow climbing to the neck heel.
               </Body>
             </Stack>
           </View>
@@ -72,7 +72,7 @@ export default function TapesScreen() {
                   </Body>
                 </View>
               </Row>
-              <FingerboardStringLabels />
+              <FingerboardStringLabels gutter={50} />
               <FingerboardScaleNote />
             </Stack>
           </View>

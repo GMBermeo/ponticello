@@ -25,7 +25,7 @@ export interface Tape {
 }
 
 export interface TapeSet {
-  id: 'first' | 'thumb';
+  id: string;
   name: string;
   /** Where the hand sits when these tapes are in play. */
   blurb: string;
@@ -33,51 +33,65 @@ export interface TapeSet {
 }
 
 /**
- * Default first-position tapes: BLUE · YELLOW · YELLOW · GREEN.
+ * Bumped whenever the shipped default layout changes shape.
  *
- * These are the four fingers of the closed first-position hand frame, one
- * semitone apart, spanning a minor third from first finger to little finger.
- * Blue anchors the hand, the two yellows are the middle fingers, green is the
- * far edge of the frame.
+ * Stored tapes from an older layout are dropped rather than merged: a set that
+ * was four tapes long and is now nine cannot be reconciled field by field, and
+ * silently keeping half of each is worse than starting from the new default.
  */
-export const FIRST_POSITION_TAPES: TapeSet = {
-  id: 'first',
-  name: 'First position',
-  blurb: 'Thumb behind the neck, opposite the second finger. Fingers 1–4 span a minor third — one semitone per tape.',
-  tapes: [
-    { id: 'f1', color: 'blue', semitones: 2, finger: '1', caption: '1st finger' },
-    { id: 'f2', color: 'yellow', semitones: 3, finger: '2', caption: '2nd finger' },
-    { id: 'f3', color: 'yellow', semitones: 4, finger: '3', caption: '3rd finger' },
-    { id: 'f4', color: 'green', semitones: 5, finger: '4', caption: '4th finger' },
-  ],
-};
+export const TAPE_LAYOUT_VERSION = 2;
 
 /**
- * Default thumb-position tapes: BLUE · GREEN · GREEN · YELLOW.
+ * The default tapes: nine of them, from the whole step above the nut down to
+ * the minor seventh, with nothing in half position.
  *
- * Blue sits on the octave harmonic at exactly half the string, where the side
- * of the thumb lies flat across two strings like a movable nut. Fingers 1, 2
- * and 3 then climb a major tetrachord above it (whole, whole, half); the
- * little finger is not used up here.
+ *     2 blue · 3 green · 4 yellow · 5 red · 6 green · 7 blue · 8 yellow
+ *     · 9 green · 10 yellow
+ *
+ * The first four are the closed first-position hand frame — one semitone per
+ * finger, first finger to little finger spanning a minor third. Above them the
+ * tapes carry on past the third position and up to the neck heel, which is the
+ * seventh (7 semitones): the point where you can feel the body of the cello
+ * and find your place without looking.
+ *
+ * There is deliberately no thumb-position set any more. The thumb frame sits
+ * at the octave harmonic, half the string away, and drawing it alongside these
+ * made the useful half of every diagram a third of its height.
  */
-export const THUMB_POSITION_TAPES: TapeSet = {
-  id: 'thumb',
-  name: 'Thumb position',
-  blurb: 'The side of the thumb lies flat across two strings on the octave harmonic. Fingers 1–3 climb above it; the little finger sits out.',
+export const FINGERBOARD_TAPES: TapeSet = {
+  id: 'board',
+  name: 'My tapes',
+  blurb: 'Nine tapes from the first position down to the neck heel. No half position: the first tape is the whole step above the nut, where the first finger lives.',
   tapes: [
-    { id: 't0', color: 'blue', semitones: 12, finger: 'T', caption: 'thumb · 8va harmonic' },
-    { id: 't1', color: 'green', semitones: 14, finger: '1', caption: '1st finger' },
-    { id: 't2', color: 'green', semitones: 16, finger: '2', caption: '2nd finger' },
-    { id: 't3', color: 'yellow', semitones: 17, finger: '3', caption: '3rd finger' },
+    { id: 't2', color: 'blue', semitones: 2, finger: '1', caption: '1st position · 1st finger' },
+    { id: 't3', color: 'green', semitones: 3, finger: '2', caption: '1st position · 2nd finger' },
+    { id: 't4', color: 'yellow', semitones: 4, finger: '3', caption: '1st position · 3rd finger' },
+    { id: 't5', color: 'red', semitones: 5, finger: '4', caption: '1st position · 4th finger' },
+    { id: 't6', color: 'green', semitones: 6, finger: '2', caption: '3rd position · 2nd finger' },
+    { id: 't7', color: 'blue', semitones: 7, finger: '1', caption: '4th position · 1st finger' },
+    { id: 't8', color: 'yellow', semitones: 8, finger: '2', caption: '4th position · 2nd finger' },
+    { id: 't9', color: 'green', semitones: 9, finger: '3', caption: '4th position · 3rd finger' },
+    { id: 't10', color: 'yellow', semitones: 10, finger: '4', caption: '4th position · 4th finger' },
   ],
 };
 
-export const DEFAULT_TAPE_SETS: TapeSet[] = [FIRST_POSITION_TAPES, THUMB_POSITION_TAPES];
+export const DEFAULT_TAPE_SETS: TapeSet[] = [FINGERBOARD_TAPES];
+
+/**
+ * True when a stored set of tapes still matches the shipped layout's shape.
+ * Colours and millimetres are the player's to change; the *number* of tapes
+ * and the number of sets are what a layout change invalidates.
+ */
+export function isCurrentTapeLayout(sets: readonly TapeSet[] | undefined): boolean {
+  if (!Array.isArray(sets) || sets.length !== DEFAULT_TAPE_SETS.length) return false;
+  return sets.every((set, i) => Array.isArray(set?.tapes)
+    && set.tapes.length === (DEFAULT_TAPE_SETS[i]?.tapes.length ?? -1));
+}
 
 // ─── Derived views ───────────────────────────────────────────────────────────
 
 export interface TapeGeometry extends Tape {
-  setId: TapeSet['id'];
+  setId: string;
   mm: number;
 }
 
@@ -138,10 +152,9 @@ export function tapeHint(
   const geo = tapeGeometry(sets);
   const exact = geo.find((t) => t.semitones === semitones);
 
-  // Ordinals count within the tape's *own* set, not across both. Blue, yellow,
-  // yellow, green is a hand shape the player learns as a unit; calling the
-  // thumb-position blue "the second blue" would be technically true and
-  // useless at the point of playing.
+  // Ordinals count within the tape's *own* set. With nine tapes the colours
+  // repeat, so "the second green" is the only way to name one out loud — and
+  // the string finishes the job of naming the note.
   const ordinalOf = (t: TapeGeometry) => {
     const set = sets.find((s) => s.id === t.setId);
     const sameColor = (set?.tapes ?? []).filter((g) => g.color === t.color);

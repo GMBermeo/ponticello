@@ -16,7 +16,7 @@ import { BackingTrack, backingFromMidi, soloPartFromScore } from './backing';
 import { midiToFrequency, midiToPitchName } from './cello';
 import { difficultyOf } from './difficulty';
 import { detectKey, keyName } from './key';
-import { detectShifts, firstPositionFingering, RawNoteEvent } from './fingering';
+import { detectShifts, RawNoteEvent, seatLine } from './fingering';
 import { ParsedMidi } from './midi';
 import { CelloMeasure, CelloNote, CelloSongScore, measureDurationMs } from './schema';
 
@@ -86,7 +86,7 @@ export function importScore(parsed: ParsedMidi, options: ImportScoreOptions): Im
   const detected = detectKey(events);
   const key = keyName(detected.tonic, detected.mode);
 
-  const states = events.map((event) => firstPositionFingering(event.midiNumber));
+  const states = seatLine(events);
   const shifts = detectShifts(events, states);
   const difficulty = difficultyOf(events, states);
 

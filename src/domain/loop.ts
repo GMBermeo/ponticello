@@ -187,7 +187,7 @@ export function clipToLoop(
  * slowed to 60 %, and short enough that the wait stays a progress bar rather
  * than a hang.
  */
-export const MAX_RENDER_SECONDS = 900;
+export const MAX_RENDER_SECONDS = 1200;
 
 export interface LoopBudget {
   withinBudget: boolean;

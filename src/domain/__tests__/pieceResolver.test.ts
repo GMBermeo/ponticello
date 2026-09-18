@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  NO_LINE, resolvePiece, rowForImported,
+  defaultCatalogProvider, NO_LINE, resolvePiece, rowForImported,
 } from '../pieceResolver';
+import { DifficultyTier } from '../schema';
 import { getScore } from '@/scores';
 
 describe('PieceResolver', () => {
@@ -85,5 +86,43 @@ describe('PieceResolver', () => {
     expect(row.id).toBe(sampleScore.id);
     expect(row.origin).toContain('2 BACKING PARTS');
     expect(row.distribution.length).toBe(3);
+  });
+});
+
+describe('authored arrangement levels', () => {
+  const base = getScore('first-position-ladder')!;
+  const levelScore = (level: DifficultyTier) => ({
+    ...base,
+    id: `variant-${level}`,
+    metadata: { ...base.metadata, difficulty: level },
+  });
+  const catalog = {
+    ...defaultCatalogProvider,
+    getScore: (id: string | undefined) => (id === 'variant' ? levelScore('Expert') : defaultCatalogProvider.getScore(id)),
+    getBundledBacking: () => undefined,
+    isAdaptiveBundledScore: () => false,
+    getAuthoredLevel: (id: string | undefined, level: DifficultyTier) => (id === 'variant' ? levelScore(level) : undefined),
+  };
+
+  it('serves the authored score for the requested level', () => {
+    for (const level of ['Beginner', 'Intermediate', 'Advanced', 'Expert'] as const) {
+      const piece = resolvePiece({ id: 'variant', level, catalog });
+      expect(piece.score?.id).toBe(`variant-${level}`);
+      expect(piece.adaptive).toBe(true);
+      expect(piece.authoredLevels).toBe(true);
+      expect(piece.line).toEqual(NO_LINE);
+    }
+  });
+
+  it('ignores a stored source-part choice rather than re-arranging over the authored fingering', () => {
+    const piece = resolvePiece({
+      id: 'variant', level: 'Advanced', choice: { partId: 'anything', octaves: -1 }, catalog,
+    });
+    expect(piece.score?.id).toBe('variant-Advanced');
+    expect(piece.line).toEqual(NO_LINE);
+  });
+
+  it('leaves every other piece on the runtime arranger', () => {
+    expect(resolvePiece({ id: 'first-position-ladder', catalog }).authoredLevels).toBe(false);
   });
 });

@@ -19,7 +19,7 @@ import { ArrangementLevel } from '@/domain/arrangement';
 import { AccompanimentStyle } from '@/domain/backing';
 import { practiceLoop } from '@/domain/loop';
 import { ListenMode } from '@/audio/backing/types';
-import { BoardView, FlowAxis, useSettings, useTrackChoice, VisionName } from '@/state/settings';
+import { BoardView, FlowAxis, ScoreColorMode, useSettings, useTrackChoice, VisionName } from '@/state/settings';
 import { useTheme } from '@/theme/ThemeProvider';
 import { ChromeName } from '@/theme/tokens';
 
@@ -58,6 +58,12 @@ const TAB_AXES = [
 const BOARD_VIEWS = [
   { value: 'player' as const, label: 'Player', hint: 'Nut at the bottom, as you see it' },
   { value: 'reader' as const, label: 'Diagram', hint: 'Nut at the top, as it is printed' },
+];
+
+const SCORE_COLORS = [
+  { value: 'off' as const, label: 'Ink', hint: 'Plain engraved noteheads' },
+  { value: 'string' as const, label: 'By string', hint: 'Each note in the colour of its string' },
+  { value: 'note' as const, label: 'By note', hint: 'Each note in the colour of its letter name' },
 ];
 
 const CHROMES = [
@@ -164,7 +170,8 @@ export default function SongScreen() {
               <Body size={14} color={theme.chrome.dim}>
                 {!adaptive ? row.note
                   : line.fit ? line.fit.reason
-                    : arrangement?.hint}
+                    : piece.authoredLevels ? score?.metadata.teaches
+                      : arrangement?.hint}
               </Body>
               <Body size={13} color={theme.chrome.dim}>Range {row.range}</Body>
             </View>
@@ -216,12 +223,15 @@ export default function SongScreen() {
             <View>
               <Disclosure title="Display preferences" summary={`${settings.showFingerings ? 'Fingerings on' : 'Fingerings hidden'} · ${settings.chrome} theme`}>
                 {settings.vision === 'highway' ? <><Label size={11}>Highway direction</Label><Segmented accessibilityLabel="Highway direction" segments={HIGHWAY_AXES} value={settings.highwayAxis} onChange={(highwayAxis: FlowAxis) => update({ highwayAxis })} grow /></> : null}
+                {settings.vision === 'score' ? <><Label size={11}>Score colours</Label><Segmented accessibilityLabel="Score colours" segments={SCORE_COLORS} value={settings.scoreColor} onChange={(scoreColor: ScoreColorMode) => update({ scoreColor })} grow /></> : null}
                 {settings.vision === 'tab' ? <><Label size={11}>Tab direction</Label><Segmented accessibilityLabel="Tab direction" segments={TAB_AXES} value={settings.tabAxis} onChange={(tabAxis: FlowAxis) => update({ tabAxis })} grow /></> : null}
                 <Label size={11}>Fingerboard orientation</Label>
                 <Segmented accessibilityLabel="Fingerboard orientation" segments={BOARD_VIEWS} value={settings.boardView} onChange={(boardView: BoardView) => update({ boardView })} grow />
                 <Toggle label="Show fingerings" hint="Hide the numbers when you want to test yourself." value={settings.showFingerings} onChange={(showFingerings) => update({ showFingerings })} />
                 <Toggle label="Show my tapes" hint="Match each note to your fingerboard tape colours." value={settings.showTapes} onChange={(showTapes) => update({ showTapes })} />
+                <Toggle label="Show the same note elsewhere" hint="Ring the other places the note being played could be taken, in its tape colour where there is one." value={settings.showAlternatePlacements} onChange={(showAlternatePlacements) => update({ showAlternatePlacements })} />
                 <Toggle label="Show all position guides" hint="Include every fingerboard landmark and bracket." value={settings.cueDensity === 'full'} onChange={(full) => update({ cueDensity: full ? 'full' : 'essentials' })} />
+                <Toggle label="Hide the switchers while playing" hint="The view and sound rows leave the screen once the music starts, and come back when you pause." value={settings.hideControlsWhilePlaying} onChange={(hideControlsWhilePlaying) => update({ hideControlsWhilePlaying })} />
                 <Label size={11}>Practice theme</Label>
                 <Segmented accessibilityLabel="Practice theme" segments={CHROMES} value={settings.chrome} onChange={(chrome: ChromeName) => update({ chrome })} grow />
               </Disclosure>

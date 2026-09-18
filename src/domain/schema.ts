@@ -139,9 +139,30 @@ export function activeNoteIndex(score: CelloSongScore, tMs: number): number {
   return best;
 }
 
+/**
+ * The bar sounding at `tMs`, or the last bar once the music has run out.
+ *
+ * Binary search rather than a scan. This is called from the playhead's publish
+ * step thirty times a second, and a nine-minute song is 236 bars — a linear
+ * find spent seven thousand comparisons a second answering a question the
+ * ordering already makes O(log n). Measures are contiguous and ascending by
+ * `startBarTimeMs`, which is what makes the search sound.
+ */
 export function measureAt(score: CelloSongScore, tMs: number): CelloMeasure | undefined {
-  return score.measures.find((m) => tMs >= m.startBarTimeMs && tMs < m.startBarTimeMs + m.durationMs)
-    ?? score.measures[score.measures.length - 1];
+  const measures = score.measures;
+  const last = measures[measures.length - 1];
+  if (!last) return undefined;
+
+  let lo = 0;
+  let hi = measures.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const candidate = measures[mid]!;
+    if (tMs < candidate.startBarTimeMs) hi = mid - 1;
+    else if (tMs >= candidate.startBarTimeMs + candidate.durationMs) lo = mid + 1;
+    else return candidate;
+  }
+  return last;
 }
 
 // ─── Validation ──────────────────────────────────────────────────────────────

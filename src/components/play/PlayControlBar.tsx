@@ -6,6 +6,7 @@ import { Segmented } from '@/components/ui/controls';
 import { Label, Row } from '@/components/ui/primitives';
 import {
   NoteOverlayMode,
+  ScoreColorMode,
   useAudioPreferences,
   useSettingsActions,
   useSettingsSelector,
@@ -32,6 +33,20 @@ const OVERLAY_SEGMENTS = [
   { value: 'song' as const, label: 'Song', hint: 'Show all notes in song' },
 ];
 
+/**
+ * Colouring the page, offered only where there is a page to colour.
+ *
+ * `String` answers "where does my hand go" — the same four hues as the rails
+ * beside it. `Note` answers "what note is that", using the one colour-per-
+ * letter constant the fingerboard chart prints. They are different questions,
+ * so they are different modes rather than one switch.
+ */
+const SCORE_COLOR_SEGMENTS = [
+  { value: 'off' as const, label: 'Ink', hint: 'Plain engraved noteheads' },
+  { value: 'string' as const, label: 'String', hint: 'Colour each note by its string' },
+  { value: 'note' as const, label: 'Note', hint: 'Colour each note by its name' },
+];
+
 const CONTROL_BAR_HEIGHT = 60;
 
 export const PlayControlBar = memo(function PlayControlBar() {
@@ -39,6 +54,7 @@ export const PlayControlBar = memo(function PlayControlBar() {
   const { vision } = useVisionPreferences();
   const { listenMode } = useAudioPreferences();
   const noteOverlay = useSettingsSelector((s) => s.noteOverlay);
+  const scoreColor = useSettingsSelector((s) => s.scoreColor);
   const { update } = useSettingsActions();
 
   return (
@@ -72,6 +88,18 @@ export const PlayControlBar = memo(function PlayControlBar() {
           compact
         />
       </Row>
+      {vision === 'score' ? (
+        <Row gap={8}>
+          <Label size={10}>Colour</Label>
+          <Segmented
+            accessibilityLabel="Colour the noteheads"
+            segments={SCORE_COLOR_SEGMENTS}
+            value={scoreColor}
+            onChange={(c: ScoreColorMode) => update({ scoreColor: c })}
+            compact
+          />
+        </Row>
+      ) : null}
       <Row gap={8}>
         <Label size={10}>Notes</Label>
         <Segmented

@@ -33,6 +33,16 @@ export interface ScheduledNote {
   instrument: InstrumentName;
   /** Linear amplitude, 0–1, with part gain and master trim already folded in. */
   amplitude: number;
+  /**
+   * How hard the note was *played*, 0–1, before any gain staging.
+   *
+   * Carried separately from `amplitude` because they answer different
+   * questions. Amplitude is where the note sits in the mix; velocity is how it
+   * was performed, and that is what decides its timbre — a cello part turned
+   * down is quieter, not duller. Fold them together and every quiet part loses
+   * its upper partials.
+   */
+  velocity: number;
 }
 
 export interface BackingProgram {
@@ -267,6 +277,7 @@ export function buildProgram({ id, parts, loop }: ProgramOptions): BackingProgra
         midiNumber: note.midiNumber,
         instrument: part.instrument,
         amplitude: part.gain * note.velocity,
+        velocity: note.velocity,
       });
     }
   }

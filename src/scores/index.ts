@@ -26,6 +26,7 @@ import { STUDIES, STUDIES_BACKINGS } from './studies';
 import { SCALE_DRILLS, SCALE_DRILL_BACKINGS, SCALE_DRILL_KEYS } from './scaleDrills';
 import { COMPACT_SCORES, inflateBacking, inflateScore, CompactScoreDef } from './bundledSongs';
 import { BUNDLED_CATALOG_ROWS } from './catalogIndex';
+import { variantBacking, variantLevelScore } from './benchmarkVariants';
 
 export { COMPACT_SCORES, BUNDLED_CATALOG_ROWS };
 
@@ -62,12 +63,23 @@ export function getScore(id: string | undefined): CelloSongScore | undefined {
     SCORE_CACHE.set(id, score);
     return score;
   }
-  return undefined;
+  // A benchmark variant answers with its full tier; the resolver asks for the
+  // level it needs through `getAuthoredLevel`.
+  return variantLevelScore(id, 'Expert');
 }
 
 /** True for MIDI-derived bundled scores that support runtime arrangement levels. */
 export function isAdaptiveBundledScore(id: string | undefined): boolean {
   return id !== undefined && COMPACT_MAP.has(id);
+}
+
+/**
+ * An authored score for one arrangement level, for pieces that ship a score
+ * per level — the model benchmark variants — instead of being arranged at
+ * runtime. Undefined for everything else.
+ */
+export function getAuthoredLevel(id: string | undefined, level: DifficultyTier): CelloSongScore | undefined {
+  return variantLevelScore(id, level);
 }
 
 /**
@@ -93,6 +105,8 @@ export function getBundledBacking(id: string | undefined): BackingTrack | undefi
   if (!id) return undefined;
   if (STUDIES_BACKINGS[id]) return STUDIES_BACKINGS[id];
   if (SCALE_DRILL_BACKINGS[id]) return SCALE_DRILL_BACKINGS[id];
+  const variant = variantBacking(id);
+  if (variant) return variant;
   const compact = COMPACT_MAP.get(id);
   if (compact) {
     return inflateBacking(compact);

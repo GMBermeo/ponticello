@@ -10,7 +10,7 @@
 import { CelloSongScore, CelloNote, CelloMeasure, DifficultyTier, measureDurationMs } from '@/domain/schema';
 import { BackingTrack, BackingPart, InstrumentName, PartRole } from '@/domain/backing';
 import { midiToPitchName, midiToFrequency } from '@/domain/cello';
-import { firstPositionFingering } from '@/domain/fingering';
+import { seatLine } from '@/domain/fingering';
 import rawData from './bundledSongs.json';
 
 
@@ -55,11 +55,14 @@ export function inflateScore(raw: CompactScoreDef): CelloSongScore {
     tempoBpm: raw.bpm,
   }));
 
-  // Hard first-position mapping: open strings cannot lose to solver weights.
-  const solved = raw.notes.map(([midi]) => firstPositionFingering(midi));
+  // Seated as a line, not note by note: where the hand goes for a C sharp
+  // depends on the bar around it. See `seatLine`.
+  const solved = seatLine(raw.notes.map(([midiNumber, startTimeMs, durationMs]) =>
+    ({ midiNumber, startTimeMs, durationMs })));
 
   const notes: CelloNote[] = raw.notes.map(([midiNumber, startTimeMs, durationMs], i) => {
-    const state = solved[i] ?? firstPositionFingering(midiNumber);
+    const state = solved[i];
+    if (!state) throw new Error(`No fingering was found for ${raw.id} note ${i + 1}.`);
     const measureIndex = Math.min(barCount - 1, Math.floor(startTimeMs / barDurationMs));
     return {
       id: `${raw.id}-${i + 1}`,

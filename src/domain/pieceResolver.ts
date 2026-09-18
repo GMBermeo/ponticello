@@ -17,7 +17,7 @@ import {
   TrackChoice,
 } from './trackPicker';
 import {
-  getBassLine, getBundledBacking, getGuideLine, getScore, isAdaptiveBundledScore,
+  getAuthoredLevel, getBassLine, getBundledBacking, getGuideLine, getScore, isAdaptiveBundledScore,
   LIBRARY_ROWS, LibraryRow,
 } from '@/scores';
 
@@ -28,6 +28,13 @@ export interface ResolvedPiece {
   imported: boolean;
   /** Whether this piece is MIDI-derived and supports runtime arrangement levels. */
   adaptive: boolean;
+  /**
+   * The levels are authored — one score per level, fingering included — rather
+   * than arranged at runtime. The level selector still applies; the source-part
+   * picker does not, because re-arranging a part would discard the authored
+   * fingering it exists to show.
+   */
+  authoredLevels: boolean;
   /** Where the cello line on screen actually came from. */
   line: ResolvedCelloLine;
 }
@@ -71,6 +78,8 @@ export interface ScoreCatalogProvider {
   getGuideLine: (id: string | undefined) => RawNoteEvent[] | undefined;
   getBassLine: (id: string | undefined) => RawNoteEvent[] | undefined;
   getLibraryRows: () => readonly LibraryRow[];
+  /** A score authored for this level, for pieces that ship one per level. */
+  getAuthoredLevel?: (id: string | undefined, level: ArrangementLevel) => CelloSongScore | undefined;
 }
 
 export const defaultCatalogProvider: ScoreCatalogProvider = {
@@ -80,6 +89,7 @@ export const defaultCatalogProvider: ScoreCatalogProvider = {
   getGuideLine,
   getBassLine,
   getLibraryRows: () => LIBRARY_ROWS,
+  getAuthoredLevel,
 };
 
 /** A library row describing an imported piece. */
@@ -201,6 +211,7 @@ const EMPTY_PIECE: ResolvedPiece = {
   backing: null,
   imported: false,
   adaptive: false,
+  authoredLevels: false,
   line: NO_LINE,
 };
 
@@ -223,6 +234,20 @@ export function resolvePiece({
   const bundled = catalog.getScore(id);
   if (bundled) {
     const baseRow = rows.find((r) => r.id === id) ?? null;
+
+    const authored = catalog.getAuthoredLevel?.(id, level);
+    if (authored) {
+      return {
+        row: baseRow ? rowForArrangement(baseRow, authored) : null,
+        score: authored,
+        backing: catalog.getBundledBacking(id) ?? null,
+        imported: false,
+        adaptive: true,
+        authoredLevels: true,
+        line: NO_LINE,
+      };
+    }
+
     const adaptive = catalog.isAdaptiveBundledScore(id);
     const arranged = adaptive
       ? arrangeScoreForLevel(bundled, level, {
@@ -238,6 +263,7 @@ export function resolvePiece({
         backing: catalog.getBundledBacking(id) ?? null,
         imported: false,
         adaptive,
+        authoredLevels: false,
         line: NO_LINE,
       };
     }
@@ -255,6 +281,7 @@ export function resolvePiece({
       backing: applied.backing,
       imported: false,
       adaptive,
+      authoredLevels: false,
       line: applied.line,
     };
   }
@@ -275,6 +302,7 @@ export function resolvePiece({
       backing: applied.backing,
       imported: true,
       adaptive: true,
+      authoredLevels: false,
       line: applied.line,
     };
   }

@@ -1,5 +1,5 @@
 import { difficultyOf, DIFFICULTY_TIERS } from '../difficulty';
-import { firstPositionFingering } from '../fingering';
+import { seatLine } from '../fingering';
 import { MidiNote } from '../midi';
 import { ARRANGEMENT_PROFILES, ArrangementLevel, ArrangementRange } from './profiles';
 import { fitLineToRange, playableAnchors, smoothLeaps, sortedNotes } from './rangeFitter';
@@ -164,7 +164,13 @@ export function preparePracticeLine(
 
   if (level !== 'Expert') {
     for (let attempt = 0; attempt < 6; attempt++) {
-      const report = difficultyOf(notes, notes.map((note) => firstPositionFingering(note.midiNumber)));
+      // Measured through the seating this level will actually ship. Scoring
+      // the line against a fingering nobody plays is how a line gets reduced
+      // until it looks like a Beginner line under one fingering and measures
+      // as an Intermediate one under the other.
+      const report = difficultyOf(notes, seatLine(notes, {
+        closedFrameOnly: profile.closedFrameOnly,
+      }));
       if (DIFFICULTY_TIERS.indexOf(report.tier) <= DIFFICULTY_TIERS.indexOf(level)) break;
       ceiling *= 0.75;
       notes = polish(ceiling);

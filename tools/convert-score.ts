@@ -22,7 +22,7 @@ import {
   midiToFrequency, midiToPitchName,
 } from '../src/domain/cello';
 import { arrangeMidi } from '../src/domain/arrangement';
-import { detectShifts, firstPositionFingering, RawNoteEvent } from '../src/domain/fingering';
+import { detectShifts, RawNoteEvent, seatLine } from '../src/domain/fingering';
 import type { DifficultyTier } from '../src/domain/schema';
 import {
   CelloMeasure, CelloNote, CelloSongScore, measureDurationMs, validateScore,
@@ -127,7 +127,7 @@ function main() {
 
   if (kept.length === 0) throw new Error('the requested bar window contains no arranged notes');
 
-  const states = kept.map((event) => firstPositionFingering(event.midiNumber));
+  const states = seatLine(kept);
   const shifts = detectShifts(kept, states);
   console.log(`  first-position fingering: ${shifts.length} half-position changes`);
 

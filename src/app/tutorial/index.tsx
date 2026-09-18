@@ -15,8 +15,7 @@ import { useTheme } from '@/theme/ThemeProvider';
 const SECTIONS = [
   { id: 'nut', label: 'The nut is zero' },
   { id: 'numbers', label: 'The numbers are fingers' },
-  { id: 'first', label: 'Your first-position tapes' },
-  { id: 'thumb', label: 'Your thumb-position tapes' },
+  { id: 'first', label: 'Your tapes' },
   { id: 'tab', label: 'Reading Tab' },
   { id: 'highway', label: 'Reading Highway' },
   { id: 'score', label: 'Reading Score' },
@@ -53,7 +52,7 @@ export default function TutorialScreen() {
     if (y !== undefined) scrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true });
   }, []);
 
-  const [firstSet, thumbSet] = settings.tapeSets;
+  const [firstSet] = settings.tapeSets;
   const wide = !theme.scale.compact;
 
   return (
@@ -126,7 +125,7 @@ export default function TutorialScreen() {
                   tapeSets={settings.tapeSets}
                   gutter={54}
                 />
-                <FingerboardStringLabels />
+                <FingerboardStringLabels gutter={54} />
                 <FingerboardScaleNote />
               </View>
               <Stack gap={12} style={{ flex: 1 }}>
@@ -143,8 +142,7 @@ export default function TutorialScreen() {
                   </Body>
                 </Callout>
                 <Body size={14} color={chrome.dim}>
-                  Your first-position tapes sit at {firstSet.tapes.map((t) => `${stopDistanceMm(t.semitones).toFixed(0)} mm`).join(', ')}.
-                  Your thumb-position tapes sit at {thumbSet.tapes.map((t) => `${stopDistanceMm(t.semitones).toFixed(0)} mm`).join(', ')}.
+                  Your tapes sit at {firstSet.tapes.map((t) => `${stopDistanceMm(t.semitones).toFixed(0)} mm`).join(', ')}.
                 </Body>
               </Stack>
             </Row>
@@ -173,57 +171,45 @@ export default function TutorialScreen() {
           {/* ── 3 ─────────────────────────────────────────────────────────── */}
           <Section
             index={3}
-            title={`Your first-position tapes: ${firstSet.tapes.map((t) => t.color).join(' · ')}`}
+            title={`Your tapes: ${firstSet.tapes.map((t) => t.color).join(' · ')}`}
             onLayout={onSectionLayout('first')}
           >
             <Body size={15}>
               {firstSet.blurb}
             </Body>
             <TapeTable set={firstSet} />
-            <Callout title="THE TWO YELLOWS ARE NOT AMBIGUOUS">
+            <Callout title="THE REPEATED COLOURS ARE NOT AMBIGUOUS">
               <Body size={14}>
-                They are one semitone apart, and they belong to the second and third fingers —
-                the two that sit next to each other in the middle of the hand. The tape narrows
-                the note to a semitone; the string finishes the job. Second finger on the first
-                yellow is F on the D string and C on the A string, and those are not notes you
-                will confuse once you have heard them.
+                With nine tapes the colours have to come round again — there are three greens
+                and three yellows. They are never confusable in practice, because a tape only
+                ever narrows the note to a semitone and the string finishes the job. The
+                second tape on the D string is F; the same colour on the A string is C. Those
+                are not notes you will mix up once you have heard them.
               </Body>
             </Callout>
+            <Callout title="THE FIRST FOUR ARE ONE HAND SHAPE">
+              <Body size={14}>
+                Blue, green, yellow, red — the first four tapes are the closed first-position
+                frame, one semitone per finger, first finger to little finger spanning a minor
+                third. Keep that shape and you drop fingers rather than reaching for them.
+                Everything above the red tape is a shift: the hand travels, the shape does not
+                change.
+              </Body>
+            </Callout>
+            <Body size={15}>
+              The blue tape further down, at the seventh semitone, is the neck heel — the
+              point where you can feel the body of the cello against your hand. It is the one
+              landmark up there you can find with your eyes shut, which is why it is worth
+              having a tape on it even before you can use it.
+            </Body>
             <Body size={15} color={chrome.dim}>
-              Try “First Position Ladder” in the library. It walks all four tapes on all four
-              strings, one finger at a time, with nothing else going on.
+              Try “First Position Ladder” in the library. It walks the first four tapes on all
+              four strings, one finger at a time, with nothing else going on.
             </Body>
           </Section>
 
           {/* ── 4 ─────────────────────────────────────────────────────────── */}
-          <Section
-            index={4}
-            title={`Your thumb-position tapes: ${thumbSet.tapes.map((t) => t.color).join(' · ')}`}
-            onLayout={onSectionLayout('thumb')}
-          >
-            <Body size={15}>
-              {thumbSet.blurb}
-            </Body>
-            <TapeTable set={thumbSet} />
-            <Callout title="FIND THE BLUE ONE BY EAR, NOT BY EYE">
-              <Body size={14}>
-                The blue tape is on the octave harmonic at exactly half the string. Rest a
-                finger on it lightly — do not press down to the fingerboard — and draw the bow.
-                If it is in the right place you will hear a clear, flute-like note an octave
-                above the open string. If you hear a dull thud, you are off the node. That
-                harmonic is the one landmark up here you can check without looking.
-              </Body>
-            </Callout>
-            <Body size={15}>
-              Above it, the two greens and the yellow climb a whole step, a whole step and a
-              half step — a major tetrachord. On the A string that is A, B, C sharp, D. The
-              little finger does not play in thumb position; the thumb takes its place as a
-              movable nut.
-            </Body>
-          </Section>
-
-          {/* ── 5 ─────────────────────────────────────────────────────────── */}
-          <Section index={5} title="Reading Tab" onLayout={onSectionLayout('tab')}>
+          <Section index={4} title="Reading Tab" onLayout={onSectionLayout('tab')}>
             <Body size={15}>
               Four horizontal lines, one per string, in the same order you see them looking
               down at the instrument: the A string on top, the C string at the bottom. Each
@@ -248,8 +234,8 @@ export default function TutorialScreen() {
             </Callout>
           </Section>
 
-          {/* ── 6 ─────────────────────────────────────────────────────────── */}
-          <Section index={6} title="Reading Highway" onLayout={onSectionLayout('highway')}>
+          {/* ── 5 ─────────────────────────────────────────────────────────── */}
+          <Section index={5} title="Reading Highway" onLayout={onSectionLayout('highway')}>
             <Body size={15}>
               Four vertical lanes, one per string, C on the left through to A on the right.
               Blocks fall down the lanes towards the orange hit line at the bottom. Bow when a
@@ -271,8 +257,8 @@ export default function TutorialScreen() {
             </Callout>
           </Section>
 
-          {/* ── 7 ─────────────────────────────────────────────────────────── */}
-          <Section index={7} title="Reading Score" onLayout={onSectionLayout('score')}>
+          {/* ── 6 ─────────────────────────────────────────────────────────── */}
+          <Section index={6} title="Reading Score" onLayout={onSectionLayout('score')}>
             <Body size={15}>
               Standard bass clef notation, which is what cello music is actually written in.
               Higher on the stave means a higher note. The notehead is drawn in the colour of
@@ -292,8 +278,8 @@ export default function TutorialScreen() {
             </Body>
           </Section>
 
-          {/* ── 8 ─────────────────────────────────────────────────────────── */}
-          <Section index={8} title="The cents rail" onLayout={onSectionLayout('cents')}>
+          {/* ── 7 ─────────────────────────────────────────────────────────── */}
+          <Section index={7} title="The cents rail" onLayout={onSectionLayout('cents')}>
             <CentsStill />
             <Callout title="LOW NOTES ANSWER SLOWLY">
               <Body size={14}>

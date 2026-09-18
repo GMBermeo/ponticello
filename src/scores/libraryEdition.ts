@@ -14,7 +14,7 @@ export interface LibraryEdition {
 export const LIBRARY_EDITION: LibraryEdition = {
   "id": "full",
   "label": "Full library",
-  "detail": "297 bundled pieces, including 284 arranged songs for personal practice",
-  "bundledCount": 297,
-  "songCount": 284
+  "detail": "333 bundled pieces, including 315 arranged songs for personal practice",
+  "bundledCount": 333,
+  "songCount": 315
 };

@@ -3,9 +3,11 @@ import { describe, expect, it } from 'vitest';
 import { OPEN_STRING_MIDI } from '../cello';
 import {
   ARRANGEMENT_WEIGHTS, candidateStates, CostWeights, DEFAULT_WEIGHTS, detectShifts,
-  emissionCost, firstPositionFingering, handSemitones, RawNoteEvent, solveFingering,
-  transitionCost,
+  emissionCost, firstPositionFingering, handMoves, handSemitones, RawNoteEvent, seatLine,
+  solveFingering, transitionCost,
 } from '../fingering';
+import { COMPACT_SCORES } from '@/scores/bundledSongs';
+import { LIBRARY_EDITION } from '@/scores/libraryEdition';
 
 const at = (midiNumber: number, startTimeMs: number, durationMs = 400): RawNoteEvent =>
   ({ midiNumber, startTimeMs, durationMs });
@@ -308,5 +310,149 @@ describe('firstPositionFingering', () => {
     // extended fourth finger, which looks plausible and is unplayable.
     expect(() => firstPositionFingering(64)).toThrow(RangeError);
     expect(() => firstPositionFingering(72)).toThrow(/Transpose/);
+  });
+});
+
+describe('seatLine settles the hand instead of flapping', () => {
+  /**
+   * The reported case, reduced.
+   *
+   * A passage sitting around the fifth and sixth semitone of the G string,
+   * with one F that the hand cannot reach from up there. Seated note by note,
+   * the semitone above the nut on the D string is *always* half position, so
+   * the line drops into half position and climbs straight back out between two
+   * quavers — a move no hand makes at that speed, and the thing that made the
+   * position label flicker on the play screen.
+   */
+  const passage = [48, 49, 48, 51, 49, 48, 53, 48, 49, 51, 49, 48]
+    .map((midiNumber, i) => at(midiNumber, i * 250, 230));
+
+  it('never drops into half position for a single note and back out', () => {
+    const seated = seatLine(passage);
+    const halves = seated.filter((s) => s.position === 'Half');
+    expect(halves).toHaveLength(0);
+  });
+
+  it('holds one hand frame across the passage', () => {
+    // One move at most: the F that third position cannot reach is allowed to
+    // cost a shift. Everything else is the same hand.
+    expect(handMoves(seatLine(passage))).toBeLessThanOrEqual(1);
+  });
+
+  it('beats the fixed per-note mapping it replaces', () => {
+    const fixed = passage.map((note) => firstPositionFingering(note.midiNumber));
+    expect(handMoves(seatLine(passage))).toBeLessThan(handMoves(fixed));
+  });
+
+  it('reaches a note the frame cannot cover rather than giving up', () => {
+    const seated = seatLine(passage);
+    const f = seated[6]!;
+    expect(f.string).toBe('D');
+    // F3 is the fourth semitone of the D string counted from the open string;
+    // wherever the hand is, it has to be somewhere that reaches it.
+    expect(53 - OPEN_STRING_MIDI[f.string]).toBe(3);
+  });
+
+  it('keeps a repeated pitch on one seat rather than alternating', () => {
+    const seated = seatLine(passage);
+    const cs = passage
+      .map((note, i) => ({ note, state: seated[i]! }))
+      .filter((entry) => entry.note.midiNumber === 49);
+    const seats = new Set(cs.map((e) => `${e.state.string}|${e.state.position}|${e.state.finger}`));
+    expect(seats.size).toBe(1);
+  });
+});
+
+describe('the whole bundled library, seated', () => {
+  const seatedLibrary = COMPACT_SCORES
+    .filter((song) => song.notes.length > 0)
+    .map((song) => {
+      const events = song.notes.map(([midiNumber, startTimeMs, durationMs]) =>
+        ({ midiNumber, startTimeMs, durationMs }));
+      return { id: song.id, events, states: seatLine(events) };
+    });
+
+  const totalNotes = seatedLibrary.reduce((sum, s) => sum + s.states.length, 0);
+
+  it('moves the hand far less often than the fixed mapping did', () => {
+    let solver = 0;
+    let fixed = 0;
+    for (const song of seatedLibrary) {
+      solver += handMoves(song.states);
+      fixed += handMoves(song.events.map((e) => firstPositionFingering(e.midiNumber)));
+    }
+    // Measured at 0.9 against 11.0 per hundred notes when this was written.
+    expect((solver / totalNotes) * 100).toBeLessThan(3);
+    expect(solver).toBeLessThan(fixed / 5);
+  });
+
+  it('has all but abandoned half position', () => {
+    const halves = seatedLibrary
+      .reduce((sum, s) => sum + s.states.filter((x) => x.position === 'Half').length, 0);
+    expect((halves / totalNotes) * 100).toBeLessThan(1);
+  });
+
+  it('actually uses second, third and fourth position', () => {
+    // The point of the change. If this ever collapses back towards zero the
+    // library is being crammed into first position again.
+    //
+    // The bar depends on the edition, because it is a fact about the music
+    // rather than about the solver: the free library is a dozen public-domain
+    // pieces and original etudes written to stay under a beginner's hand, and
+    // they have far less call to leave first position than three hundred
+    // arranged songs do. Measured at 13 % full, 2.4 % free.
+    const upper = seatedLibrary.reduce((sum, s) => sum
+      + s.states.filter((x) => ['2nd', '3rd', '4th'].includes(x.position)).length, 0);
+    const share = (upper / totalNotes) * 100;
+    expect(share).toBeGreaterThan(LIBRARY_EDITION.id === 'full' ? 5 : 0.5);
+  });
+
+  it('never leaves the neck', () => {
+    const neck = new Set(['Half', '1st', '2nd', '3rd', '4th']);
+    for (const song of seatedLibrary) {
+      for (const state of song.states) {
+        expect(neck.has(state.position), `${song.id} ${state.position}`).toBe(true);
+      }
+    }
+  });
+
+  it('always takes an open string when the pitch is one', () => {
+    // The open string is the reference pitch for a player with tapes, and the
+    // one note that needs no hand. `openStringBonus` sits above the widest
+    // string crossing precisely so this can never be traded away.
+    const open = new Set(Object.values(OPEN_STRING_MIDI));
+    for (const song of seatedLibrary) {
+      song.events.forEach((event, i) => {
+        if (!open.has(event.midiNumber)) return;
+        expect(song.states[i]!.finger, `${song.id} note ${i + 1}`).toBe('0');
+      });
+    }
+  });
+});
+
+describe('the closed frame, for the levels that teach it', () => {
+  const line = [48, 49, 50, 51, 53, 55].map((m, i) => at(m, i * 400, 350));
+
+  it('uses no extension at all when asked for the closed frame', () => {
+    const seated = seatLine(line, { closedFrameOnly: true });
+    expect(seated.every((s) => s.extension === 'none')).toBe(true);
+  });
+
+  it('reaches the same pitches by shifting rather than stretching', () => {
+    // What makes the closed frame affordable now: C sharp 3 is the sixth
+    // semitone of the G string, which under the old mapping had exactly one
+    // seat — a stretched fourth finger in first position — and has an ordinary
+    // closed seat a position or two higher.
+    const seated = seatLine(line, { closedFrameOnly: true });
+    expect(seated).toHaveLength(line.length);
+
+    const cSharp = seated[1]!;
+    expect(cSharp.extension).toBe('none');
+    expect(cSharp.position).not.toBe('1st');
+
+    // And the stretch is what the same line takes when extensions are allowed
+    // and the hand is pinned low, which is the trade being made here.
+    const free = seatLine(line);
+    expect(free).toHaveLength(line.length);
   });
 });

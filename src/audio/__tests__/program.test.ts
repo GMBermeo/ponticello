@@ -138,6 +138,59 @@ describe('resolving parts into a program', () => {
     expect(maxDifference).toBeLessThan(1e-7);
   });
 
+  /**
+   * The bowed voices are the ones that can break this. A cello note carries
+   * vibrato, bow noise and a per-note detune, all of which have to be pure
+   * functions of the note's own sample index — if any of them accumulated,
+   * a note split across a slice boundary would not rejoin, and the join is
+   * audible as a click.
+   */
+  it('renders a bowed note split mid-vibrato identically to one pass', () => {
+    const cello = {
+      ...part([[48, 0, 3500], [55, 200, 3000]]),
+      instrument: 'cello' as const,
+    };
+    const program = buildProgram({ id: 'bowed', parts: [cello], loop: loop4 });
+    const sampleRate = 22_050;
+    // Well past the 260 ms vibrato onset, and not on a vibrato-block boundary.
+    const split = Math.floor(sampleRate * 1.617) + 7;
+    const length = sampleRate * 4;
+    const whole = new Float32Array(length);
+    const first = new Float32Array(split);
+    const second = new Float32Array(length - split);
+
+    renderProgramInto(whole, program, 0, sampleRate);
+    renderProgramInto(first, program, 0, sampleRate);
+    renderProgramInto(second, program, split, sampleRate);
+
+    let maxDifference = 0;
+    for (let index = 0; index < length; index++) {
+      const sliced = index < split ? first[index] : second[index - split];
+      maxDifference = Math.max(maxDifference, Math.abs((whole[index] ?? 0) - (sliced ?? 0)));
+    }
+    expect(maxDifference).toBeLessThan(1e-7);
+  });
+
+  it('gives two identical written notes different sound', () => {
+    // Same pitch, same length, same velocity, a bar apart. On a real cello
+    // these are not the same note, and after humanisation they are not here.
+    const cello = {
+      ...part([[50, 0, 900], [50, 2000, 900]]),
+      instrument: 'cello' as const,
+    };
+    const program = buildProgram({ id: 'twice', parts: [cello], loop: loop4 });
+    const sampleRate = 22_050;
+    const out = new Float32Array(sampleRate * 4);
+    renderProgramInto(out, program, 0, sampleRate);
+
+    const windowLength = Math.floor(sampleRate * 0.8);
+    let difference = 0;
+    for (let i = 0; i < windowLength; i++) {
+      difference += Math.abs(out[i]! - out[Math.floor(sampleRate * 2) + i]!);
+    }
+    expect(difference / windowLength).toBeGreaterThan(1e-4);
+  });
+
   it('restores a loop-length drone when playback resumes after its onset', () => {
     const drone = { ...part([[48, 0, 8000]]), instrument: 'drone' as const };
     const program = buildProgram({ id: 'drone', parts: [drone], loop: loop4 });
