@@ -2,7 +2,7 @@
   "expo": {
     "name": "Ponticello",
     "slug": "ponticello",
-    "version": "1.6.0",
+    "version": "1.7.0",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "ponticello",
@@ -13,7 +13,7 @@
       "buildNumber": "8"
     },
     "android": {
-      "versionCode": 9,
+      "versionCode": 10,
       "adaptiveIcon": {
         "backgroundColor": "#f3f2f2",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

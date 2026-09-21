@@ -1,5 +1,8 @@
 # Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
 
+# env
+.env
+
 # dependencies
 node_modules/
 
@@ -44,6 +47,9 @@ example
 
 # personal MIDI stash - see _MIDIS/README.md
 _MIDIS/
+
+# personal chord charts stash
+_CHORDS/
 
 # built APKs - see tools/build-release.sh
 releases/

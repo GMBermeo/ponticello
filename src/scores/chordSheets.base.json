@@ -1,0 +1,168 @@
+[
+  {
+    "version": 1,
+    "id": "ponticello-seven-changes",
+    "title": "Seven changes",
+    "artist": "Ponticello",
+    "key": "C",
+    "bpm": 80,
+    "bpmSource": "manual",
+    "sourceUrl": "",
+    "instrument": "chordpro",
+    "lyrics": "included",
+    "timing": "estimated",
+    "timingModel": null,
+    "chords": [
+      {
+        "symbol": "C",
+        "canonical": "C",
+        "keyboardPitchClasses": [],
+        "interpretation": null
+      },
+      {
+        "symbol": "F",
+        "canonical": "F",
+        "keyboardPitchClasses": [],
+        "interpretation": null
+      },
+      {
+        "symbol": "Am7",
+        "canonical": "Am7",
+        "keyboardPitchClasses": [],
+        "interpretation": null
+      },
+      {
+        "symbol": "G",
+        "canonical": "G",
+        "keyboardPitchClasses": [],
+        "interpretation": null
+      },
+      {
+        "symbol": "G/B",
+        "canonical": "G/B",
+        "keyboardPitchClasses": [],
+        "interpretation": null
+      },
+      {
+        "symbol": "Dm7",
+        "canonical": "Dm7",
+        "keyboardPitchClasses": [],
+        "interpretation": null
+      },
+      {
+        "symbol": "G7",
+        "canonical": "G7",
+        "keyboardPitchClasses": [],
+        "interpretation": null
+      }
+    ],
+    "lines": [
+      {
+        "id": "line-1",
+        "kind": "lyric",
+        "text": "Let the low string ring, let the daylight in.",
+        "changes": [
+          {
+            "symbol": "C",
+            "column": 0,
+            "beat": 0
+          },
+          {
+            "symbol": "F",
+            "column": 25,
+            "beat": 2
+          }
+        ],
+        "beats": 4,
+        "columns": 45
+      },
+      {
+        "id": "line-2",
+        "kind": "lyric",
+        "text": "Take one breath and listen, let the song begin.",
+        "changes": [
+          {
+            "symbol": "Am7",
+            "column": 0,
+            "beat": 0
+          },
+          {
+            "symbol": "G",
+            "column": 28,
+            "beat": 2
+          }
+        ],
+        "beats": 4,
+        "columns": 47
+      },
+      {
+        "id": "line-3",
+        "kind": "lyric",
+        "text": "One small step then find your way.",
+        "changes": [
+          {
+            "symbol": "C",
+            "column": 0,
+            "beat": 0
+          },
+          {
+            "symbol": "G/B",
+            "column": 4,
+            "beat": 1.1428571428571428
+          },
+          {
+            "symbol": "Am7",
+            "column": 10,
+            "beat": 2.2857142857142856
+          },
+          {
+            "symbol": "G",
+            "column": 15,
+            "beat": 3.4285714285714284
+          },
+          {
+            "symbol": "F",
+            "column": 20,
+            "beat": 4.571428571428571
+          },
+          {
+            "symbol": "Dm7",
+            "column": 25,
+            "beat": 5.714285714285714
+          },
+          {
+            "symbol": "G7",
+            "column": 30,
+            "beat": 6.857142857142857
+          }
+        ],
+        "beats": 8,
+        "columns": 34
+      },
+      {
+        "id": "line-4",
+        "kind": "lyric",
+        "text": "Hold the final note, carry it home.",
+        "changes": [
+          {
+            "symbol": "C",
+            "column": 0,
+            "beat": 0
+          },
+          {
+            "symbol": "F",
+            "column": 21,
+            "beat": 1.3333333333333333
+          },
+          {
+            "symbol": "C",
+            "column": 30,
+            "beat": 2.6666666666666665
+          }
+        ],
+        "beats": 4,
+        "columns": 35
+      }
+    ]
+  }
+]

@@ -1,11 +1,14 @@
 {
   "name": "ponticello",
   "main": "expo-router/entry",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",
     "@expo/ui": "~57.0.12",
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@tonaljs/chord-type": "5.1.1",
+    "@tonaljs/interval": "5.1.0",
+    "@tonaljs/note": "4.12.1",
     "expo": "~57.0.15",
     "expo-audio": "~57.0.4",
     "expo-constants": "~57.0.13",
@@ -37,12 +40,16 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
+    "cheerio": "1.2.0",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~57.0.1",
     "typescript": "~6.0.3",
     "vitest": "^3.2.7"
   },
   "scripts": {
+    "build:chords": "vite-node --config vitest.config.ts tools/build-cello-chords.ts",
+    "study:chords": "vite --config tools/chord-study/vite.config.ts",
+    "import:chords": "vite-node --config vitest.config.ts tools/import-chord-sheets.ts --",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",

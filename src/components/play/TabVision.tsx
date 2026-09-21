@@ -395,7 +395,9 @@ const TabBadge = memo(function TabBadge({
         justifyContent: 'center',
         backgroundColor: hasTape ? tapeColor : (active ? stringColor : chrome.bg),
         borderWidth: theme.rule(2),
-        borderColor: hasTape ? '#FFFFFF' : (played ? chrome.lineSoft : stringColor),
+        borderColor: hasTape
+          ? (chrome.dark ? '#FFFFFF' : (tapeTextColor(tapeColor) === '#000000' ? chrome.line : '#FFFFFF'))
+          : (played ? chrome.lineSoft : stringColor),
         opacity: played ? 0.45 : 1,
       }}
     >

@@ -131,7 +131,7 @@ const GROW: ViewStyle = { flex: 1 };
 
 // ─── Badges ──────────────────────────────────────────────────────────────────
 
-/** A square-cornered tag — difficulty, string name, position bracket. */
+/** A refined tag — difficulty, string name, position bracket. */
 export function Badge({
   label, background, color, style,
 }: { label: string; background?: string; color?: string; style?: StyleProp<ViewStyle> }) {
@@ -139,22 +139,28 @@ export function Badge({
   const box = useMemo<ViewStyle>(() => ({
     paddingHorizontal: theme.s(7),
     paddingVertical: theme.s(3),
+    borderRadius: theme.s(4),
     backgroundColor: background ?? theme.chrome.ink,
   }), [theme, background]);
   return (
     <View style={[box, style]}>
-      <Label size={10} color={color ?? theme.chrome.bg}>{label}</Label>
+      <Label size={10} color={color ?? (background ? '#FFFFFF' : theme.chrome.bg)}>{label}</Label>
     </View>
   );
 }
 
-/** A small square in a string's colour, used wherever a string is named. */
+/** A small pill in a string's colour, used wherever a string is named. */
 export function StringSwatch({ color, height = 16, width = 5 }: {
   color: string; height?: number; width?: number;
 }) {
   const theme = useTheme();
   return (
-    <View style={{ width: theme.s(width), height: theme.s(height), backgroundColor: color }} />
+    <View style={{
+      width: theme.s(width),
+      height: theme.s(height),
+      backgroundColor: color,
+      borderRadius: theme.s(2),
+    }} />
   );
 }
 
@@ -165,7 +171,14 @@ export function TapeChip({
   const theme = useTheme();
   return (
     <View style={{ alignItems: 'center', gap: theme.s(3) }}>
-      <View style={{ width: theme.s(width), height: theme.s(height), backgroundColor: color }} />
+      <View style={{
+        width: theme.s(width),
+        height: theme.s(height),
+        backgroundColor: color,
+        borderRadius: theme.s(3),
+        borderWidth: theme.rule(1),
+        borderColor: theme.chrome.dark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.12)',
+      }} />
       {label === undefined ? null : <Label size={10}>{label}</Label>}
     </View>
   );

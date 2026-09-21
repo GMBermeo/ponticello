@@ -51,8 +51,10 @@ export function useTheme(): Theme {
   return theme;
 }
 
-/** Convenience for the menu screens, which are always on paper. */
+/** Convenience wrapper for screens; inherits current theme or falls back to default. */
 export function MenuTheme({ children }: { children: React.ReactNode }) {
+  const existing = useContext(ThemeContext);
+  if (existing) return <>{children}</>;
   return <ThemeProvider chrome={MENU_CHROME}>{children}</ThemeProvider>;
 }
 

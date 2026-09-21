@@ -20,6 +20,7 @@
 import { globSync } from "glob";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import { DEFAULT_OLLAMA_HOST, DEFAULT_OLLAMA_MODEL } from './ollama/config';
 
 import {
   ARRANGEMENT_WEIGHTS,
@@ -83,8 +84,8 @@ function parseArgs(argv: string[]): CliOptions {
     resume: hasFlag("resume"),
     dryRun: hasFlag("dry-run"),
     max: getFlag("max") ? Number(getFlag("max")) : null,
-    model: getFlag("model", "qwen3.5:4b") ?? "qwen3.5:4b",
-    host: getFlag("host", "http://localhost:11434") ?? "http://localhost:11434",
+    model: getFlag("model", process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL) ?? DEFAULT_OLLAMA_MODEL,
+    host: getFlag("host", process.env.OLLAMA_HOST ?? DEFAULT_OLLAMA_HOST) ?? DEFAULT_OLLAMA_HOST,
     outDir: getFlag("out-dir", "_MIDIS/arranged") ?? "_MIDIS/arranged",
     cacheFile:
       getFlag("cache", "_MIDIS/arrangements_cache.json") ??

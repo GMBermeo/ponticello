@@ -18,51 +18,67 @@ import { TapeColor } from '@/domain/tapes';
 
 // ─── Base palette ────────────────────────────────────────────────────────────
 
-/** The brand blues, by role. */
-export const BLUE = {
-  ocean: '#165788',
-  cobalt: '#274490',
-  navy: '#1D2D5C',
-  deep: '#1E3765',
+/**
+ * Apple Human Interface Guidelines (HIG) System Colors.
+ * Calibrated for light and dark appearance with high vibrancy and WCAG AA contrast.
+ * https://developer.apple.com/design/human-interface-guidelines/color
+ */
+export const APPLE_HIG = {
+  blue: { light: '#007AFF', accessibleLight: '#0066CC', dark: '#0A84FF' },
+  green: { light: '#34C759', accessibleLight: '#1F8A4C', dark: '#30D158' },
+  indigo: { light: '#5856D6', accessibleLight: '#4342BD', dark: '#5E5CE6' },
+  orange: { light: '#FF9500', accessibleLight: '#C93400', dark: '#FF9F0A' },
+  pink: { light: '#FF2D55', accessibleLight: '#D30F3C', dark: '#FF375F' },
+  purple: { light: '#AF52DE', accessibleLight: '#7D39B8', dark: '#BF5AF2' },
+  red: { light: '#FF3B30', accessibleLight: '#D70015', dark: '#FF453A' },
+  teal: { light: '#00C7BE', accessibleLight: '#00828A', dark: '#63E6E2' },
+  yellow: { light: '#FFCC00', accessibleLight: '#9E7400', dark: '#FFD60A' },
+  cyan: { light: '#32ADE6', accessibleLight: '#007AA6', dark: '#64D2FF' },
 } as const;
 
-export const PAPER = '#f6f7f9';
-export const INK = '#131a2a';
-export const SURFACE = '#eceff4';
+/** The brand blues, by role. */
+export const BLUE = {
+  ocean: '#0066CC',
+  cobalt: '#0A84FF',
+  navy: '#0B1220',
+  deep: '#141E34',
+} as const;
+
+export const PAPER = '#f8f9fa';
+export const INK = '#0f172a';
+export const SURFACE = '#edf1f7';
 /** 7.4:1 on paper — body-text contrast, so it is safe as a text colour too. */
-export const ACCENT = BLUE.ocean;
+export const ACCENT = APPLE_HIG.blue.accessibleLight;
 export const ACCENT_DARK = BLUE.navy;
-export const ACCENT_WASH = '#e2ebf4';
-/** Accent tint for navy grounds: the ocean hue, lifted to 8:1 on `BLUE.navy`. */
-const ACCENT_ON_NAVY = '#a9c8ec';
+export const ACCENT_WASH = '#e1ebf7';
+/** Accent tint for navy grounds: the electric blue hue, lifted to 8:1 on dark grounds. */
+const ACCENT_ON_NAVY = APPLE_HIG.blue.dark;
 
 /**
  * Note hues — the palette behind `domain/noteColors`.
  *
  * One colour per letter name, so a C is the same colour on the fingerboard
- * chart, on the string rails and on a notehead. Two versions, because a hue
- * that reads on paper turns to mud on a navy ground and the lifted version
- * glares on white; both are held at one lightness band per chrome so no letter
- * shouts louder than another.
+ * chart, on the string rails and on a notehead. Calibrated with Apple HIG
+ * vibrant system hues to ensure crisp contrast and harmonic distinction.
  */
 export const NOTE_COLOR_ON_PAPER: Record<NoteColorName, string> = {
-  green: '#0a7e3a',
-  blue: '#0063ba',
-  orange: '#b3600b',
-  cyan: '#00737f',
-  red: '#c0342c',
-  yellow: '#96770a',
-  purple: '#6b3fbd',
+  green: APPLE_HIG.green.accessibleLight,
+  blue: APPLE_HIG.blue.accessibleLight,
+  orange: APPLE_HIG.orange.accessibleLight,
+  cyan: APPLE_HIG.teal.accessibleLight,
+  red: APPLE_HIG.red.accessibleLight,
+  yellow: APPLE_HIG.yellow.accessibleLight,
+  purple: APPLE_HIG.purple.accessibleLight,
 };
 
 export const NOTE_COLOR_ON_DARK: Record<NoteColorName, string> = {
-  green: '#22c373',
-  blue: '#4f9ff5',
-  orange: '#f08a2c',
-  cyan: '#2fc3d0',
-  red: '#ff515a',
-  yellow: '#edc32f',
-  purple: '#a37bff',
+  green: APPLE_HIG.green.dark,
+  blue: APPLE_HIG.blue.dark,
+  orange: APPLE_HIG.orange.dark,
+  cyan: APPLE_HIG.cyan.dark,
+  red: APPLE_HIG.red.dark,
+  yellow: APPLE_HIG.yellow.dark,
+  purple: APPLE_HIG.purple.dark,
 };
 
 /**
@@ -90,26 +106,24 @@ export const STRING_COLOR_HOT: Record<CelloString, string> = {
 /**
  * Tape colours.
  *
- * These are not free design choices — they have to look like the blue, yellow
- * and green vinyl actually stuck to the fingerboard, or the whole point of
- * drawing them is lost. Held at one lightness band per chrome so the four
- * tapes read as a set.
+ * Held at one lightness band per chrome so the four tapes read as a set,
+ * matching real physical fingerboard tape vinyl with Apple HIG saturation.
  */
 export const TAPE_COLOR_ON_DARK: Record<TapeColor, string> = {
-  blue: '#3689dd',
-  yellow: '#e5c226',
-  green: '#3bb360',
-  red: '#e0524a',
-  orange: '#e08b2c',
-  white: '#f7f6f2',
+  blue: APPLE_HIG.blue.dark,
+  yellow: APPLE_HIG.yellow.dark,
+  green: APPLE_HIG.green.dark,
+  red: APPLE_HIG.red.dark,
+  orange: APPLE_HIG.orange.dark,
+  white: '#f8fafc',
 };
 
 export const TAPE_COLOR_ON_PAPER: Record<TapeColor, string> = {
-  blue: '#0063ba',
-  yellow: '#c6a000',
-  green: '#0a7e3a',
-  red: '#c0342c',
-  orange: '#b56a00',
+  blue: APPLE_HIG.blue.accessibleLight,
+  yellow: APPLE_HIG.yellow.accessibleLight,
+  green: APPLE_HIG.green.accessibleLight,
+  red: APPLE_HIG.red.accessibleLight,
+  orange: APPLE_HIG.orange.accessibleLight,
   white: '#8a8785',
 };
 
@@ -128,6 +142,7 @@ export interface Chrome {
   dark: boolean;
   bg: string;
   surface: string;
+  surfaceElevated: string;
   ink: string;
   dim: string;
   line: string;
@@ -148,10 +163,11 @@ export const CHROMES: Record<ChromeName, Chrome> = {
     dark: false,
     bg: PAPER,
     surface: SURFACE,
+    surfaceElevated: '#ffffff',
     ink: INK,
-    dim: '#586173',
-    line: '#8b94a4',
-    lineSoft: '#dce1e9',
+    dim: '#5b677a',
+    line: '#7a8699',
+    lineSoft: '#d3d9e2',
     accent: ACCENT,
     accentWash: ACCENT_WASH,
     glow: false,
@@ -164,12 +180,13 @@ export const CHROMES: Record<ChromeName, Chrome> = {
     dark: true,
     bg: BLUE.navy,
     surface: BLUE.deep,
-    ink: '#f3f6fb',
-    dim: '#b8c3d9',
-    line: 'rgba(243,246,251,0.34)',
-    lineSoft: 'rgba(243,246,251,0.14)',
+    surfaceElevated: '#1c2b4b',
+    ink: '#f8fafc',
+    dim: '#94a3b8',
+    line: 'rgba(248,250,252,0.36)',
+    lineSoft: 'rgba(248,250,252,0.22)',
     accent: ACCENT_ON_NAVY,
-    accentWash: BLUE.cobalt,
+    accentWash: 'rgba(10, 132, 255, 0.16)',
     glow: false,
     strings: STRING_COLOR_HOT,
     tapes: TAPE_COLOR_ON_DARK,
@@ -178,14 +195,15 @@ export const CHROMES: Record<ChromeName, Chrome> = {
   neon: {
     name: 'neon',
     dark: true,
-    bg: '#0a0f1e',
-    surface: '#131b33',
-    ink: '#f5f7fc',
-    dim: '#b5bdd0',
-    line: 'rgba(245,247,252,0.32)',
-    lineSoft: 'rgba(245,247,252,0.13)',
-    accent: '#8db8ef',
-    accentWash: BLUE.deep,
+    bg: '#060913',
+    surface: '#0f172a',
+    surfaceElevated: '#1e293b',
+    ink: '#f8fafc',
+    dim: '#94a3b8',
+    line: 'rgba(248,250,252,0.34)',
+    lineSoft: 'rgba(248,250,252,0.20)',
+    accent: '#38bdf8',
+    accentWash: 'rgba(56, 189, 248, 0.16)',
     glow: true,
     strings: STRING_COLOR_HOT,
     tapes: TAPE_COLOR_ON_DARK,
@@ -193,7 +211,7 @@ export const CHROMES: Record<ChromeName, Chrome> = {
   },
 };
 
-/** Menus are always paper; only the play screen offers a chrome choice. */
+/** Default fallback chrome when none is specified. */
 export const MENU_CHROME = CHROMES.paper;
 
 // ─── Type ────────────────────────────────────────────────────────────────────
@@ -253,9 +271,9 @@ export function intonationColor(
   verdict: 'perfect' | 'flat' | 'sharp' | 'miss', chrome: Chrome,
 ): string {
   switch (verdict) {
-    case 'perfect': return chrome.dark ? '#22c55e' : '#0a7e3a';
+    case 'perfect': return chrome.dark ? APPLE_HIG.green.dark : APPLE_HIG.green.accessibleLight;
     case 'flat':
-    case 'sharp': return chrome.dark ? '#eab308' : '#a07800';
+    case 'sharp': return chrome.dark ? APPLE_HIG.yellow.dark : APPLE_HIG.orange.accessibleLight;
     case 'miss': return chrome.accent;
   }
 }

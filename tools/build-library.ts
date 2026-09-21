@@ -531,6 +531,32 @@ writeFileSync('src/scores/bundledSongs.json', JSON.stringify(compactList));
 // fallback and broke the typecheck.
 console.log('Done writing bundledSongs.json.');
 
+// ── Chord sheets by edition ──────────────────────────────────────────────────
+// In free edition, only original etudes & public domain chord sheets are bundled.
+// In full edition, personal imported chord sheets from _CHORDS/ are included.
+const baseChordsPath = 'src/scores/chordSheets.base.json';
+const baseChordSheets = existsSync(baseChordsPath) ? JSON.parse(readFileSync(baseChordsPath, 'utf8')) : [];
+let bundledChordSheets = [...baseChordSheets];
+
+if (edition === 'full') {
+  const customChordsFile = '_CHORDS/chordSheets.json';
+  if (existsSync(customChordsFile)) {
+    try {
+      const customSheets = JSON.parse(readFileSync(customChordsFile, 'utf8'));
+      const idMap = new Map(bundledChordSheets.map((s: { id: string }) => [s.id, s]));
+      for (const s of customSheets) {
+        idMap.set(s.id, s);
+      }
+      bundledChordSheets = [...idMap.values()].sort((a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id));
+    } catch (e) {
+      console.warn('Could not read _CHORDS/chordSheets.json:', e);
+    }
+  }
+}
+
+writeFileSync('src/scores/chordSheets.generated.json', `${JSON.stringify(bundledChordSheets, null, 2)}\n`);
+console.log(`Chord sheets (${edition}): ${bundledChordSheets.length} charts written to src/scores/chordSheets.generated.json.`);
+
 // ── Catalogue index and edition stamp ────────────────────────────────────────
 // The library screen lists rows from `catalogIndex.ts` so it never inflates
 // tens of megabytes of songs to draw a list. It has to be written by the same

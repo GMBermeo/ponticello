@@ -1,0 +1,2 @@
+# One song URL per line. Importer always requests instrument=keyboard.
+https://www.cifraclub.com.br/fresno/sexto-andar/?instrument=keyboard

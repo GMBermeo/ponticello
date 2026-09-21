@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { OPEN_STRING_MIDI } from '../cello';
 import {
-  detectKey, fingerboardMarkers, keyName, pitchClassHistogram, songPitchClasses,
+  detectKey, fingerboardMarkers, keyName, parseScaleKey, pitchClassHistogram, songPitchClasses,
   songPlayedNotes,
 } from '../key';
 import { CelloSongScore } from '../schema';
@@ -129,5 +129,57 @@ describe('songPlayedNotes', () => {
     expect(played[0].string).toBe('C');
     expect(played[0].isTonic).toBe(true);
     expect(played[1].isTonic).toBe(false);
+  });
+});
+
+describe('parseScaleKey', () => {
+  it('parses major and minor keys with accidentals and suffixes', () => {
+    const cMaj = parseScaleKey('C');
+    expect(cMaj).toEqual({
+      tonic: 0,
+      mode: 'major',
+      scale: [0, 2, 4, 5, 7, 9, 11],
+      name: 'C major',
+    });
+
+    const aMin = parseScaleKey('Am');
+    expect(aMin).toEqual({
+      tonic: 9,
+      mode: 'minor',
+      scale: [9, 11, 0, 2, 4, 5, 7],
+      name: 'A minor',
+    });
+
+    const bMin = parseScaleKey('Bm');
+    expect(bMin?.tonic).toBe(11);
+    expect(bMin?.mode).toBe('minor');
+    expect(bMin?.scale).toEqual([11, 1, 2, 4, 6, 7, 9]);
+
+    const fSharpMin = parseScaleKey('F#m');
+    expect(fSharpMin?.tonic).toBe(6);
+    expect(fSharpMin?.mode).toBe('minor');
+
+    const bFlat = parseScaleKey('Bb');
+    expect(bFlat?.tonic).toBe(10);
+    expect(bFlat?.mode).toBe('major');
+
+    const bFlatMin = parseScaleKey('Bbm');
+    expect(bFlatMin?.tonic).toBe(10);
+    expect(bFlatMin?.mode).toBe('minor');
+
+    const ebMajor = parseScaleKey('Eb major');
+    expect(ebMajor?.tonic).toBe(3);
+    expect(ebMajor?.mode).toBe('major');
+
+    const dMinor = parseScaleKey('D minor');
+    expect(dMinor?.tonic).toBe(2);
+    expect(dMinor?.mode).toBe('minor');
+  });
+
+  it('returns null for unknown or empty input', () => {
+    expect(parseScaleKey('')).toBeNull();
+    expect(parseScaleKey(null)).toBeNull();
+    expect(parseScaleKey('unknown')).toBeNull();
+    expect(parseScaleKey('XYZ')).toBeNull();
   });
 });

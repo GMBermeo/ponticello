@@ -207,8 +207,8 @@ export const Fingerboard = memo(function Fingerboard({
             stringGap={stringGap}
             y={layout.y}
             compact={compact}
-            background="#000000"
-            foreground="#FFFFFF"
+            background={chrome.ink}
+            foreground={chrome.bg}
           />
         ) : null}
         {resolvedActive ? (

@@ -56,7 +56,7 @@ export type NoteOverlayMode = 'off' | 'key' | 'song';
 export type ScoreColorMode = 'off' | 'string' | 'note';
 
 export interface Settings {
-  /** Chrome for the play screen only; menus are always paper. */
+  /** App visual theme: 'paper' (light), 'quiet' (dark navy), or 'neon' (midnight). */
   chrome: ChromeName;
   vision: VisionName;
   showFingerings: boolean;
@@ -390,4 +390,17 @@ export function useSettings(): SettingsContextValue {
     ready,
   }), [settings, store, ready]);
 }
+
+/** Theme preference and toggle helper. */
+export function useThemePreference() {
+  const chrome = useSettingsSelector((s) => s.chrome);
+  const { update } = useSettingsActions();
+  const isDark = chrome === 'quiet' || chrome === 'neon';
+  const setChrome = useCallback((next: ChromeName) => update({ chrome: next }), [update]);
+  const toggleDarkMode = useCallback(() => {
+    update({ chrome: isDark ? 'paper' : 'quiet' });
+  }, [isDark, update]);
+  return { chrome, isDark, setChrome, toggleDarkMode };
+}
+
 

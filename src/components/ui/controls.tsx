@@ -29,7 +29,7 @@ export function Button({ label, hint, onPress, tone = 'default', disabled = fals
   const theme = useTheme();
   const { chrome } = theme;
   const feedback = useControlFeedback();
-  const color = tone === 'accent' ? chrome.bg : chrome.ink;
+  const color = tone === 'accent' ? (chrome.dark ? '#060913' : '#FFFFFF') : chrome.ink;
   return (
     <Pressable {...feedback.events} onPress={onPress} disabled={disabled}
       accessibilityRole="button" accessibilityLabel={accessibilityLabel ?? (hint ? `${label}. ${hint}` : label)}
@@ -37,9 +37,9 @@ export function Button({ label, hint, onPress, tone = 'default', disabled = fals
       style={({ pressed }) => [{
         minHeight: theme.tap, justifyContent: 'center', borderRadius: theme.s(8),
         paddingHorizontal: theme.s(14), paddingVertical: theme.s(11),
-        backgroundColor: tone === 'accent' ? chrome.accent : feedback.hovered ? chrome.surface : 'transparent',
-        borderWidth: theme.rule(1), borderColor: tone === 'ghost' ? 'transparent' : tone === 'accent' ? chrome.accent : chrome.line,
-        opacity: disabled ? 0.4 : pressed ? 0.72 : 1,
+        backgroundColor: tone === 'accent' ? chrome.accent : feedback.hovered ? chrome.surfaceElevated : chrome.surface,
+        borderWidth: theme.rule(1), borderColor: tone === 'ghost' ? 'transparent' : tone === 'accent' ? chrome.accent : chrome.lineSoft,
+        opacity: disabled ? 0.4 : pressed ? 0.75 : 1,
       }, style, feedback.focusStyle, tone === 'accent' && feedback.focusStyle ? { outlineColor: chrome.bg, outlineOffset: -4 } : undefined]}>
       <Row gap={10}>
         <Title size={15} color={color} style={{ flexShrink: 1 }}>{label}</Title>
@@ -66,8 +66,13 @@ export function Toggle({ label, hint, value, onChange }: {
         <Title size={15}>{label}</Title>
         {hint === undefined ? null : <Body size={12} color={chrome.dim} style={{ marginTop: theme.s(3) }}>{hint}</Body>}
       </View>
-      <View style={{ width: theme.s(44), height: theme.s(26), borderRadius: theme.s(13), backgroundColor: value ? chrome.accent : chrome.line }}>
-        <View style={{ position: 'absolute', top: theme.s(3), left: theme.s(value ? 21 : 3), width: theme.s(20), height: theme.s(20), borderRadius: theme.s(10), backgroundColor: chrome.bg }} />
+      <View style={{ width: theme.s(44), height: theme.s(26), borderRadius: theme.s(13), backgroundColor: value ? chrome.accent : (chrome.dark ? 'rgba(248,250,252,0.18)' : 'rgba(15,23,42,0.16)') }}>
+        <View style={{
+          position: 'absolute', top: theme.s(3), left: theme.s(value ? 21 : 3),
+          width: theme.s(20), height: theme.s(20), borderRadius: theme.s(10),
+          backgroundColor: '#FFFFFF',
+          shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 2, shadowOffset: { width: 0, height: 1 },
+        }} />
       </View>
     </Pressable>
   );
@@ -79,7 +84,7 @@ export function Stepper({ label, value, display, onDecrement, onIncrement, canDe
 }) {
   const theme = useTheme();
   return (
-    <Row style={{ borderWidth: theme.rule(1), borderColor: theme.chrome.line, borderRadius: theme.s(8) }}>
+    <Row style={{ borderWidth: theme.rule(1), borderColor: theme.chrome.lineSoft, borderRadius: theme.s(8), backgroundColor: theme.chrome.surface }}>
       <Button label="−" accessibilityLabel={`Decrease ${label}`} onPress={onDecrement} disabled={!canDecrement} tone="ghost" style={{ paddingHorizontal: 0, minWidth: theme.tap, alignItems: 'center' }} />
       <View accessibilityLabel={`${label}: ${display ?? value}`} style={{ minWidth: theme.s(62), alignItems: 'center' }}>
         <Num size={15}>{display ?? String(value)}</Num>
@@ -123,8 +128,8 @@ function SegmentButton<T extends string>({ segment, selected, onPress, grow, com
       style={({ pressed }) => [{
         flex: grow ? 1 : undefined, minWidth: 0, minHeight: theme.tap,
         alignItems: 'center', justifyContent: 'center', paddingHorizontal: theme.s(compact ? 7 : 11),
-        borderRadius: theme.s(6), backgroundColor: selected ? theme.chrome.bg : feedback.hovered ? theme.chrome.lineSoft : 'transparent',
-        borderWidth: theme.rule(1), borderColor: selected ? theme.chrome.line : 'transparent', opacity: pressed ? 0.7 : 1,
+        borderRadius: theme.s(6), backgroundColor: selected ? theme.chrome.surfaceElevated : feedback.hovered ? theme.chrome.lineSoft : 'transparent',
+        borderWidth: theme.rule(1), borderColor: selected ? theme.chrome.lineSoft : 'transparent', opacity: pressed ? 0.7 : 1,
       }, feedback.focusStyle]}>
       <Title size={compact ? 12 : 13} color={selected ? theme.chrome.ink : theme.chrome.dim} style={{ textAlign: 'center' }}>{segment.label}</Title>
     </Pressable>

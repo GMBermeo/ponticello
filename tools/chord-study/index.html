@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cello chord atlas · Ponticello</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header><a href="#">PONTICELLO <span>/ study room</span></a><span>C2 · G2 · D3 · A3</span></header>
+  <main>
+    <div class="intro"><div><p class="eyebrow">FINGERBOARD REFERENCE</p><h1>Cello chord atlas</h1><p>Find the harmony. See where it lives.</p></div><p id="coverage" class="coverage"></p></div>
+    <section class="controls" aria-label="Find a chord">
+      <form id="search-form"><label for="symbol">Chord symbol</label><div class="search-row"><input id="symbol" value="Gm9" placeholder="Try C/E, Em7(9), D9(11)…" autocomplete="off" spellcheck="false" /><button type="submit">Find chord <span aria-hidden="true">→</span></button></div></form>
+      <div><label for="type">Chord family / formula</label><select id="type"></select></div>
+      <div><label for="orientation">String order</label><select id="orientation"><option value="low-to-high">C · G · D · A (chart)</option><option value="player">A · D · G · C (player)</option></select></div>
+    </section>
+    <p id="error" role="alert" hidden></p>
+    <div id="roots" class="roots" aria-label="Root note"></div>
+    <section class="workspace" aria-label="Chord study">
+      <div class="study-details">
+        <p class="eyebrow" id="chord-name"></p><h2 id="chord-title"></h2>
+        <div id="tones" class="tones" aria-label="Chord tones"></div>
+        <p id="formula" class="formula"></p>
+        <div class="study-actions"><label for="mode">Study as</label><select id="mode"><option value="voicing">Chord shape</option><option value="arpeggio">Full arpeggio</option></select></div>
+        <div class="study-actions"><label for="variant">Shape / inversion</label><select id="variant"></select></div>
+        <p id="technique" class="technique"></p><p id="omissions"></p>
+        <div class="legend"><span><i class="root-marker"></i> Root</span><span><i class="tone-marker"></i> Chord tone</span><span>0 Open</span><span>× Unused</span></div>
+        <p class="note">Numbers inside markers are fingers. Side numbers are semitones above the open string. Guides follow cello pitch spacing; they are not frets.</p>
+        <p class="note">Suggested fingerings, pending cellist review. Neck positions only. Three- and four-string chords are rolled.</p>
+      </div>
+      <figure class="main-diagram"><div id="diagram"></div><figcaption id="diagram-caption"></figcaption></figure>
+      <aside class="arpeggio"><p class="eyebrow">FULL CHORD · NOTE BY NOTE</p><ol id="sequence"></ol><p class="note">Play in order. Change hand position when needed. Every chord tone stays in the arpeggio.</p></aside>
+    </section>
+    <section class="reference"><div class="section-heading"><h2>Shapes from your reference</h2><p>Select a chord to explore its fingerings.</p></div><div id="examples" class="examples"></div></section>
+    <section class="lead-sheet"><div class="section-heading"><h2>From shape to song</h2><p>Original sample lines · future lyrics mode preview</p></div><div id="lyric-chords"></div><p class="note">Choose a chord above the words to inspect it. Chord names are harmony labels; the same label can have several cello shapes.</p></section>
+    <footer><a href="https://www.vsl.co.at/academy/strings/cello">Cello technique reference ↗</a><a href="https://tonaljs.github.io/tonal/docs/dictionaries/chord-types">Tonal chord dictionary ↗</a><span id="footer-status"></span></footer>
+  </main>
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

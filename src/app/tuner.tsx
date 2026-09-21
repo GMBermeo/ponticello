@@ -70,7 +70,7 @@ export default function TunerScreen() {
           <Body size={15} color={chrome.dim}>Bow one open string at a time, starting with low C.</Body>
         </Stack>
         <View style={{ flexDirection: theme.scale.compact ? 'column' : 'row', gap: theme.s(24) }}>
-        <View style={{ flex: theme.scale.compact ? undefined : 1, backgroundColor: chrome.surface, borderRadius: theme.s(12), padding: theme.s(24), gap: theme.s(20) }}>
+        <View style={{ flex: theme.scale.compact ? undefined : 1, backgroundColor: chrome.surfaceElevated, borderRadius: theme.s(16), borderWidth: theme.rule(1), borderColor: chrome.lineSoft, padding: theme.s(24), gap: theme.s(20) }}>
           <Row gap={16} style={{ alignItems: 'center' }}>
             <View style={{ flex: 1 }}>
               <Title size={72} style={{ lineHeight: theme.font(80) }}>{reading.heard ?? '—'}</Title>

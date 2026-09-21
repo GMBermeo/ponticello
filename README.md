@@ -79,9 +79,10 @@ ever one layout to reason about. `useTheme()` exposes `s(units)` for sizes,
 `font(units)` with a legibility floor, and `rule(units)` clamped to the device
 hairline. Tap targets never scale below 44 dp.
 
-Running `npm run web` in a browser wider than 900 px frames the app in the Fold
-5's aspect ratio (`src/components/DeviceCanvas.tsx`), so what you see in the
-browser is what lands on the device.
+Running `npm run web` in a desktop browser runs full screen by default,
+scaling and reflowing responsively (`src/components/DeviceCanvas.tsx`).
+A floating pill button (or pressing `f`) lets you toggle into the Fold 5
+preview frame to inspect the layout exactly as it lands on the physical device.
 
 ---
 

@@ -22,6 +22,7 @@ import { ListenMode } from '@/audio/backing/types';
 import { BoardView, FlowAxis, ScoreColorMode, useSettings, useTrackChoice, VisionName } from '@/state/settings';
 import { useTheme } from '@/theme/ThemeProvider';
 import { ChromeName } from '@/theme/tokens';
+import { getChordSheet } from '@/scores/chordSheets';
 
 const ARRANGEMENT_SEGMENTS = [
   { value: 'Beginner' as const, label: 'Beginner', hint: 'Held bass notes and gentle drones. A low, spacious part with time to move.' },
@@ -67,9 +68,9 @@ const SCORE_COLORS = [
 ];
 
 const CHROMES = [
-  { value: 'paper' as const, label: 'Paper' },
-  { value: 'quiet' as const, label: 'Quiet' },
-  { value: 'neon' as const, label: 'Neon' },
+  { value: 'paper' as const, label: 'Paper (Light)' },
+  { value: 'quiet' as const, label: 'Dark (Navy)' },
+  { value: 'neon' as const, label: 'Neon (OLED)' },
 ];
 
 /**
@@ -84,6 +85,9 @@ export default function SongScreen() {
   const theme = useTheme();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const chordSheet = getChordSheet(id);
+  const [chordsSelectedFor, setChordsSelectedFor] = useState<string | null>(null);
+  const chordsSelected = !!chordSheet && chordsSelectedFor === id;
   const { settings, update, setTrackChoice } = useSettings();
   const { setup, update: updateSetup, openSong } = useSession();
   // Subscribed, not read through a getter: see `useTrackChoice`.
@@ -217,8 +221,12 @@ export default function SongScreen() {
             </Stack>
             <Stack gap={8}>
               <Label size={11}>Read the music as</Label>
-              <Segmented accessibilityLabel="Music view" segments={VISIONS} value={settings.vision} onChange={(vision: VisionName) => update({ vision })} grow />
-              <Body size={12} color={theme.chrome.dim}>{VISION_BLURB[settings.vision]}</Body>
+              <Segmented accessibilityLabel="Music view" segments={chordSheet ? [...VISIONS, { value: 'chords' as const, label: 'Chords' }] : VISIONS}
+                value={chordsSelected ? 'chords' : settings.vision} onChange={(vision: VisionName | 'chords') => {
+                  if (vision === 'chords') { setChordsSelectedFor(id ?? null); setPreviewFor(null); }
+                  else { setChordsSelectedFor(null); update({ vision }); }
+                }} grow />
+              <Body size={12} color={theme.chrome.dim}>{chordsSelected ? 'Lyrics and chord changes, with cello shapes and adjustable auto-scroll. Phrasing is estimated.' : VISION_BLURB[settings.vision]}</Body>
             </Stack>
             <View>
               <Disclosure title="Display preferences" summary={`${settings.showFingerings ? 'Fingerings on' : 'Fingerings hidden'} · ${settings.chrome} theme`}>
@@ -232,8 +240,8 @@ export default function SongScreen() {
                 <Toggle label="Show the same note elsewhere" hint="Ring the other places the note being played could be taken, in its tape colour where there is one." value={settings.showAlternatePlacements} onChange={(showAlternatePlacements) => update({ showAlternatePlacements })} />
                 <Toggle label="Show all position guides" hint="Include every fingerboard landmark and bracket." value={settings.cueDensity === 'full'} onChange={(full) => update({ cueDensity: full ? 'full' : 'essentials' })} />
                 <Toggle label="Hide the switchers while playing" hint="The view and sound rows leave the screen once the music starts, and come back when you pause." value={settings.hideControlsWhilePlaying} onChange={(hideControlsWhilePlaying) => update({ hideControlsWhilePlaying })} />
-                <Label size={11}>Practice theme</Label>
-                <Segmented accessibilityLabel="Practice theme" segments={CHROMES} value={settings.chrome} onChange={(chrome: ChromeName) => update({ chrome })} grow />
+                <Label size={11}>App theme</Label>
+                <Segmented accessibilityLabel="App theme" segments={CHROMES} value={settings.chrome} onChange={(chrome: ChromeName) => update({ chrome })} grow />
               </Disclosure>
               <Disclosure title="Sound & listening" summary={settings.listenMode === 'off' ? 'Accompaniment off' : settings.listenMode === 'solo' ? 'Cello guide on' : settings.listenMode === 'both' ? 'Backing and cello guide on' : 'Backing track on'}>
                 <ListenControl mode={settings.listenMode} onModeChange={(listenMode: ListenMode) => update({ listenMode })}
@@ -254,7 +262,7 @@ export default function SongScreen() {
       </ScrollView>
       <Row padX={24} padY={14} gap={16} style={{ borderTopWidth: theme.rule(1), borderColor: theme.chrome.lineSoft, backgroundColor: theme.chrome.bg }}>
         <View style={{ flex: 1 }}><Title size={14}>{`Bars ${setup.loopFromBar}–${setup.loopToBar}`}</Title><Body size={12} color={theme.chrome.dim} numberOfLines={1}>{bpm} BPM{adaptive ? ` · ${arrangement?.label}` : ''}{adaptive && line.partId ? ` · ${trackChoiceSummary(line)}` : ''}</Body></View>
-        <Button label={row.playable ? 'Start practice' : 'Import a score'} hint="→" tone="accent" onPress={() => { setPreviewFor(null); router.push(row.playable ? `/play/${row.id}` : '/settings/import'); }} />
+        <Button label={chordsSelected ? 'Read chords' : row.playable ? 'Start practice' : 'Import a score'} hint="→" tone="accent" onPress={() => { setPreviewFor(null); router.push(chordsSelected ? `/chord-song/${row.id}` : row.playable ? `/play/${row.id}` : '/settings/import'); }} />
       </Row>
     </Screen>
   );

@@ -85,7 +85,7 @@ function rotate(profile: readonly number[], tonic: number): number[] {
   return profile.map((_, i) => profile[(i - tonic + 12) % 12]!);
 }
 
-function scaleFor(tonic: PitchClass, mode: KeyMode): PitchClass[] {
+export function scaleFor(tonic: PitchClass, mode: KeyMode): PitchClass[] {
   const steps = mode === 'major' ? MAJOR_SCALE_STEPS : NATURAL_MINOR_STEPS;
   return steps.map((step) => (tonic + step) % 12);
 }
@@ -242,3 +242,43 @@ export function fingerboardMarkers(
 export function markerMm(marker: FingerboardMarker): number {
   return stopDistanceMm(marker.semitones);
 }
+
+export interface ParsedScaleKey {
+  readonly tonic: PitchClass;
+  readonly mode: KeyMode;
+  readonly scale: readonly PitchClass[];
+  readonly name: string;
+}
+
+const TONIC_PITCH_CLASS: Record<string, PitchClass> = {
+  c: 0, 'c♯': 1, 'c#': 1, 'd♭': 1, db: 1,
+  d: 2, 'd♯': 3, 'd#': 3, 'e♭': 3, eb: 3,
+  e: 4, 'e♯': 5, 'e#': 5, 'f♭': 4, fb: 4,
+  f: 5, 'f♯': 6, 'f#': 6, 'g♭': 6, gb: 6,
+  g: 7, 'g♯': 8, 'g#': 8, 'a♭': 8, ab: 8,
+  a: 9, 'a♯': 10, 'a#': 10, 'b♭': 10, bb: 10,
+  b: 11, 'b♯': 0, 'b#': 0, 'c♭': 11, cb: 11,
+};
+
+/**
+ * Parses key signatures like "C", "Dm", "F#m", "Bb", "Eb minor", "A major", etc.
+ * Returns the scale's tonic pitch class, diatonic scale pitch classes, and mode.
+ */
+export function parseScaleKey(raw?: string | null): ParsedScaleKey | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  const match = trimmed.match(/^([a-g][#b♭♯]?)\s*(minor|min|m|major|maj)?$/i);
+  if (!match) return null;
+  const letter = match[1]!.toLowerCase();
+  const tonic = TONIC_PITCH_CLASS[letter];
+  if (tonic === undefined) return null;
+  const suffix = (match[2] ?? '').toLowerCase();
+  const mode: KeyMode = suffix === 'm' || suffix.startsWith('min') ? 'minor' : 'major';
+  return {
+    tonic,
+    mode,
+    scale: scaleFor(tonic, mode),
+    name: keyName(tonic, mode),
+  };
+}
+

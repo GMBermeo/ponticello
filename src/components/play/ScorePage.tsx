@@ -10,6 +10,7 @@ import { noteColorNames } from '@/domain/noteColors';
 import { CelloSongScore } from '@/domain/schema';
 import { ScoreColorMode } from '@/state/settings';
 import { useTheme } from '@/theme/ThemeProvider';
+import { Chrome } from '@/theme/tokens';
 import { Label } from '../ui/primitives';
 import { staffStep } from './staff';
 import { Playhead, usePlayheadPosition, usePlayheadTransport } from './usePlayhead';
@@ -252,7 +253,7 @@ export const ScorePage = memo(function ScorePage({
         <Svg width={width} height={pageHeight}>
           {systems.map((system, s) => (
             <G key={s} y={TOP_MARGIN + s * systemHeight}>
-              <StaveLines width={width} gap={gap} colour={chrome.lineSoft} />
+              <StaveLines width={width} gap={gap} colour={chrome.dark ? chrome.line : chrome.lineSoft} />
               {/* Clef and key repeat on every system, as engraving requires;
                   the meter is stated once. */}
               <Head
@@ -402,7 +403,7 @@ function beamYAt(beam: BeamGeometry, x: number): number {
 interface MeasureProps {
   laid: LaidMeasure;
   gap: number;
-  chrome: { ink: string; dim: string; accent: string; line: string; lineSoft: string };
+  chrome: Chrome;
   activeIndex: number;
   showFingerings: boolean;
   inkFor: (glyph: NoteGlyph) => NoteInk;
@@ -501,7 +502,7 @@ function GlyphMark({
   laid: LaidGlyph;
   next: LaidGlyph | undefined;
   gap: number;
-  chrome: { ink: string; dim: string; accent: string; line: string; lineSoft: string };
+  chrome: Chrome;
   active: boolean;
   showFingerings: boolean;
   inkFor: (glyph: NoteGlyph) => NoteInk;
@@ -535,7 +536,7 @@ function GlyphMark({
           key={step}
           x1={laid.x - gap * 0.95} x2={laid.x + gap * 0.95}
           y1={-(step / 2) * gap} y2={-(step / 2) * gap}
-          stroke={chrome.lineSoft} strokeWidth={Math.max(0.6, gap * 0.07)}
+          stroke={chrome.dark ? chrome.line : chrome.lineSoft} strokeWidth={Math.max(0.6, gap * 0.07)}
         />
       ))}
 
