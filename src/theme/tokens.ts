@@ -12,9 +12,7 @@
  * lighter tint of the same hue, or it disappears into the background.
  */
 
-import { CelloString } from '@/domain/cello';
-import { NoteColorName, STRING_NOTE_COLOR } from '@/domain/noteColors';
-import { TapeColor } from '@/domain/tapes';
+import { CelloString, NoteColorName, STRING_NOTE_COLOR, TapeColor } from '@domain';
 
 // ─── Base palette ────────────────────────────────────────────────────────────
 

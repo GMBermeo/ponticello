@@ -38,7 +38,7 @@
 export function wrapIntoLoop(timeMs: number, startMs: number, endMs: number): number {
   'worklet';
   const span = endMs - startMs;
-  if (!(span > 0)) return startMs;
+  if (Number.isNaN(span) || span <= 0) return startMs;
   const into = (timeMs - startMs) % span;
   return startMs + (into < 0 ? into + span : into);
 }
@@ -76,7 +76,7 @@ export function loopDistance(
   'worklet';
   const raw = toMs - fromMs;
   const span = endMs - startMs;
-  if (!(span > 0)) return raw;
+  if (Number.isNaN(span) || span <= 0) return raw;
   let distance = raw % span;
   if (distance > span / 2) distance -= span;
   else if (distance < -span / 2) distance += span;

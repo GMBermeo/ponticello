@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ponticello — practise the cello, not points</title>
+  <meta name="description" content="Ponticello is a free, open-source cello practice app: your own fingerboard tapes on screen, tab, score or highway reading, a tuner, cello chord shapes and scrolling chord charts. No account, no scores, nothing leaves your phone.">
+  <meta name="theme-color" content="#0A84FF">
+  <link rel="icon" href="assets/brand/favicon.png">
+  <link rel="apple-touch-icon" href="assets/brand/ponticello-icon-512.png">
+  <meta property="og:title" content="Ponticello — practise the cello, not points">
+  <meta property="og:description" content="Your tapes on screen, three ways to read, a tuner, and chords for the cello. Free and open source.">
+  <meta property="og:image" content="assets/screenshots/play-tab.webp">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="nav">
+    <a class="brand" href="#top" aria-label="Ponticello home">
+      <img src="assets/brand/ponticello-icon-512.png" alt="" width="36" height="36">
+      <span>Ponticello</span>
+    </a>
+    <nav aria-label="Sections">
+      <a href="#features">Features</a>
+      <a href="#chords">Chords</a>
+      <a href="#open-source">Open source</a>
+      <a class="button small" href="https://github.com/GMBermeo/ponticello/releases">Download</a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="kicker">Cello practice app · Android, iOS and web</p>
+        <h1>Practise the cello,<br><span>not points.</span></h1>
+        <p class="lede">
+          Ponticello puts <strong>your own fingerboard tapes</strong> on the screen, lets you read the music as
+          tab, score or a falling highway, and slows it, loops it and arranges it down to where you are.
+          No account, no scoreboard, and nothing leaves your phone.
+        </p>
+        <div class="actions">
+          <a class="button" href="https://github.com/GMBermeo/ponticello/releases">Download the APK</a>
+          <a class="button ghost" href="https://github.com/GMBermeo/ponticello">View the source</a>
+        </div>
+        <ul class="facts" aria-label="At a glance">
+          <li><strong>1,272</strong> cello chord voicings</li>
+          <li><strong>4</strong> arrangement levels</li>
+          <li><strong>0</strong> accounts or uploads</li>
+        </ul>
+      </div>
+      <figure class="hero-shot">
+        <picture>
+          <source media="(max-width: 640px)" srcset="assets/screenshots/play-tab-phone.webp">
+          <img src="assets/screenshots/play-tab.webp" alt="The play screen: Bach's Prélude from Cello Suite No. 1 as tab, with the fingerboard panel showing tape positions on the left." width="1600" height="1025">
+        </picture>
+      </figure>
+    </section>
+
+    <section class="idea">
+      <img class="mark" src="assets/brand/ponticello-mark.svg" alt="" width="120" height="120">
+      <div>
+        <h2>Built around the tapes on your cello</h2>
+        <p>
+          A beginner's fingerboard has coloured tapes where the fingers go. Ponticello's mark is exactly that
+          board — the four first-position tapes at their true stopping distances, bunching as they climb — and so is
+          the app: every note you are asked to play is drawn on <em>your</em> tapes, in <em>your</em> colours,
+          so what you read on screen is what you see on the neck.
+        </p>
+      </div>
+    </section>
+
+    <section id="features" class="features">
+      <h2 class="section-title">Everything a practice session needs</h2>
+
+      <article class="feature">
+        <div class="copy">
+          <p class="kicker">Three ways to read</p>
+          <h3>Tab, score or highway — same music, your choice</h3>
+          <p>Finger numbers on four string lines, engraved bass-clef notation with fingerings, or a Rocksmith-style
+            highway falling or sliding towards the hit line. The fingerboard panel beside it lights the note you are
+            playing, and can show the whole key to improvise in.</p>
+        </div>
+        <div class="shots">
+          <img loading="lazy" src="assets/screenshots/play-score.webp" alt="Score view: engraved bass clef with finger numbers above each note." width="1600" height="1025">
+          <img loading="lazy" src="assets/screenshots/play-highway-neon.webp" alt="Highway view in the dark Neon theme: notes falling in four coloured string lanes towards the hit line." width="1600" height="1025">
+        </div>
+      </article>
+
+      <article class="feature reverse">
+        <div class="copy">
+          <p class="kicker">Make it your practice</p>
+          <h3>Arranged down to where you are</h3>
+          <p>Every song comes in four levels, from held bass notes a beginner can reach to the full melody. Pick the
+            bars to loop, slow the tempo, choose which part of the original to play, and hear a backing track or the
+            cello line while you practise.</p>
+        </div>
+        <div class="shots single">
+          <img loading="lazy" src="assets/screenshots/practice-setup.webp" alt="Practice setup: arrangement level, tempo, loop bars and how to read the music." width="1600" height="1025">
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="copy">
+          <p class="kicker">Tuner</p>
+          <h3>One pitch engine, one answer</h3>
+          <p>The tuner uses the same analysis as the play screen, built for the cello's low register — so it never
+            confuses a low C for the C an octave up, and it agrees with the practice feedback about every note.</p>
+        </div>
+        <div class="shots single">
+          <img loading="lazy" src="assets/screenshots/tuner.webp" alt="The tuner, with a cents dial and the four open strings C, G, D and A." width="1600" height="1025">
+        </div>
+      </article>
+    </section>
+
+    <section id="chords" class="features">
+      <h2 class="section-title">Chords, worked out for the cello</h2>
+
+      <article class="feature reverse">
+        <div class="copy">
+          <p class="kicker">Chord atlas</p>
+          <h3>Shapes for C–G–D–A, not a guitar</h3>
+          <p>Pick a tonic and a scale and see every chord in it — triads, sevenths and extensions — drawn on the
+            cello's fingerboard in your tape colours, with roots as squares. Where no comfortable grip exists,
+            Ponticello says so and gives you the arpeggio instead.</p>
+        </div>
+        <div class="shots single">
+          <img loading="lazy" src="assets/screenshots/chords-grid.webp" alt="Chord atlas: C, F, G and Dm drawn as cello fingering diagrams with coloured finger markers." width="1600" height="1025">
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="copy">
+          <p class="kicker">Chord charts</p>
+          <h3>Lyrics and chords that scroll with you</h3>
+          <p>Read a song as chord names over the lyrics or as cello shapes. The chart rolls along at your tempo,
+            showing the current and next chords, and can preview the next fingering in grey on the one you are
+            holding.</p>
+        </div>
+        <div class="shots single">
+          <img loading="lazy" src="assets/screenshots/chord-chart.webp" alt="A scrolling chord chart with the current, next and following chord shapes beside the lyrics." width="1600" height="1025">
+        </div>
+      </article>
+
+      <article class="feature reverse">
+        <div class="copy">
+          <p class="kicker">Progression builder</p>
+          <h3>Write your own progressions</h3>
+          <p>Start from a preset such as the pop axis or a jazz turnaround, or from nothing. Choose a key and a mode,
+            tap chords into phrases, reorder them, and play the progression at your tempo. Drafts save themselves and
+            export as JSON.</p>
+        </div>
+        <div class="shots single">
+          <img loading="lazy" src="assets/screenshots/chord-progression.webp" alt="The chord progression builder with key, scale, chord palette and a row of chord shapes." width="1600" height="1025">
+        </div>
+      </article>
+    </section>
+
+    <section class="more">
+      <h2 class="section-title">And the rest of the kit</h2>
+      <div class="cards">
+        <figure>
+          <img loading="lazy" src="assets/screenshots/fingerboard-chart.webp" alt="Fingerboard chart showing every note, coloured by its letter name." width="1600" height="1025">
+          <figcaption><strong>Fingerboard chart.</strong> Every note, coloured by its name, as printed or as you see it.</figcaption>
+        </figure>
+        <figure>
+          <img loading="lazy" src="assets/screenshots/scales.webp" alt="Scales by key, ordered by how many songs in your library use each key." width="1600" height="1025">
+          <figcaption><strong>Scales by key.</strong> Drills for the keys your music actually uses, most-used first.</figcaption>
+        </figure>
+        <figure>
+          <img loading="lazy" src="assets/screenshots/reading-guide.webp" alt="The reading guide explaining the nut, finger numbers and tapes." width="1600" height="1025">
+          <figcaption><strong>Reading guide.</strong> The nut is zero, the numbers are fingers, and your tapes are the map.</figcaption>
+        </figure>
+        <figure>
+          <img loading="lazy" src="assets/screenshots/practice-record.webp" alt="Practice record with a calendar heatmap of days practised." width="1600" height="1025">
+          <figcaption><strong>Practice record.</strong> Time actually played, per day — kept on the phone, never uploaded.</figcaption>
+        </figure>
+        <figure>
+          <img loading="lazy" src="assets/screenshots/library-dark.webp" alt="The library in the dark Quiet theme." width="1600" height="1025">
+          <figcaption><strong>Light and dark.</strong> Paper, the navy Quiet theme, or Neon for OLED screens.</figcaption>
+        </figure>
+        <figure>
+          <img loading="lazy" src="assets/screenshots/library.webp" alt="The library of studies, public-domain works and songs, with a level filter." width="1600" height="1025">
+          <figcaption><strong>Your library.</strong> Studies, public-domain works, your own MIDI imports and chord charts.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="principles">
+      <h2 class="section-title">What it will not do</h2>
+      <ul>
+        <li><strong>No points, streak-shaming or leaderboards.</strong> Twenty minutes played badly is twenty minutes practised.</li>
+        <li><strong>No account and no upload.</strong> The microphone is a tuner; nothing is recorded and nothing leaves the device.</li>
+        <li><strong>No transposition behind your back.</strong> Arrangements move octaves, never keys, so the backing always agrees with you.</li>
+      </ul>
+    </section>
+
+    <section id="open-source" class="open-source">
+      <div>
+        <h2>Free and open source</h2>
+        <p>
+          Ponticello is built with Expo and React Native, with a pure-TypeScript core — the fingering solver,
+          the MIDI arranger, the pitch detector and the chord catalogue — covered by over 1,600 tests.
+          Build your own library from your own MIDI files, fix a fingering, or add a feature.
+        </p>
+        <div class="actions">
+          <a class="button" href="https://github.com/GMBermeo/ponticello">Star it on GitHub</a>
+          <a class="button ghost" href="https://github.com/GMBermeo/ponticello#contributing">How to contribute</a>
+        </div>
+      </div>
+      <pre class="code" aria-label="Getting started"><code>git clone https://github.com/GMBermeo/ponticello
+cd ponticello
+npm install
+npm run web          # try it in the browser
+npm run build:library:free
+npm test</code></pre>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <img src="assets/brand/ponticello-wordmark.png" alt="Ponticello" class="wordmark light-only" width="200" height="50">
+    <img src="assets/brand/ponticello-wordmark-light.png" alt="Ponticello" class="wordmark dark-only" width="200" height="50">
+    <p>
+      App development by <a href="https://gm.bermeo.dev">Guilherme Yuri Bermeo</a> ·
+      <a href="https://gm.bermeo.dev">gm.bermeo.dev</a>
+    </p>
+    <p class="fine">
+      Released under the MIT License. Arranged songs in the full library are study reductions for personal practice
+      and are not distributed; the shareable edition contains only public-domain works and original etudes.
+    </p>
+  </footer>
+</body>
+</html>

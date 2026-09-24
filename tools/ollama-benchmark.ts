@@ -59,20 +59,10 @@ import {
 } from "node:fs";
 import { basename, join, resolve } from "node:path";
 
-import { OPEN_STRING_MIDI } from "../src/domain/cello";
 import {
-  ARRANGEMENT_WEIGHTS,
-  CelloState,
-  firstPositionFingering,
-  RawNoteEvent,
-  solveFingering,
-} from "../src/domain/fingering";
-import { parseMidi } from "../src/domain/midi";
-import {
-  DifficultyTier,
-  measureDurationMs,
-  validateScore,
-} from "../src/domain/schema";
+  OPEN_STRING_MIDI, ARRANGEMENT_WEIGHTS, CelloState, firstPositionFingering, RawNoteEvent,
+  solveFingering, parseMidi, DifficultyTier, measureDurationMs, validateScore,
+} from "@domain";
 import {
   AmbiguousNoteAudit,
   ArrangementBlueprint,
@@ -94,6 +84,7 @@ import {
   buildFingeringSystemPrompt,
   buildFingeringUserPrompt,
   chunkByBars,
+  type NoteChunk,
   emptyMetrics,
   extractJson,
   FINGERING_RESPONSE_SCHEMA,
@@ -117,8 +108,16 @@ import {
   withCelloScoringSkill,
 } from "./ollama/celloScoringSkill";
 
+function withoutTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url[end - 1] === "/") end--;
+  return url.slice(0, end);
+}
+
 // ─── Options ─────────────────────────────────────────────────────────────────
 
+// Ollama serves plain HTTP on the local network; there is no TLS endpoint to use.
+// eslint-disable-next-line sonarjs/no-clear-text-protocols
 const DEFAULT_HOST = "http://100.124.192.6:11434";
 const DEFAULT_FILES = [
   "_MIDIS/downloaded/Coheed and Cambria - Welcome Home.mid",
@@ -192,7 +191,7 @@ function parseArgs(argv: string[]): BenchmarkOptions {
         });
 
   return {
-    host: (value("host") ?? DEFAULT_HOST).replace(/\/+$/, ""),
+    host: withoutTrailingSlashes(value("host") ?? DEFAULT_HOST),
     models: list("models"),
     skipModels: list("skip-models"),
     files: files.length > 0 ? files : DEFAULT_FILES,
@@ -570,6 +569,134 @@ function codeFor(
   return `${state.string}${note.midiNumber - OPEN_STRING_MIDI[state.string]}-${state.finger}`;
 }
 
+type SongFeatures = ReturnType<typeof extractMidiFeatures>;
+type Blueprint = Awaited<ReturnType<typeof requestBlueprint>>["blueprint"];
+
+interface TierContext {
+  tier: DifficultyTier;
+  events: RawNoteEvent[];
+  barMs: number;
+  blueprint: Blueprint;
+  features: SongFeatures;
+  model: BenchmarkModel;
+  options: BenchmarkOptions;
+  skill: CelloScoringSkill;
+  folder: string;
+  dir: string;
+  /** Collects the model's stated reasons, for the thinking log. */
+  reasons: string[];
+}
+
+type PhraseTally = { accepted: number; invalid: number; missing: number };
+
+const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+function tokensPerSecond(metrics: RequestMetrics): string {
+  return metrics.evalSeconds > 0 ? (metrics.evalTokens / metrics.evalSeconds).toFixed(1) : "?";
+}
+
+/**
+ * Asks the model to finger one phrase, retrying once. Accepted answers are
+ * written into `states`; when no answer arrives, the solver's fingering stays.
+ */
+async function fingerPhrase(
+  context: TierContext,
+  phrase: { chunk: NoteChunk; index: number; count: number; directive: string },
+  fingering: { solver: CelloState[]; states: CelloState[]; request: RequestMetrics },
+): Promise<PhraseTally> {
+  const { tier, events, blueprint, features, model, options, skill } = context;
+  const { chunk, index: k, count } = phrase;
+  const { solver, states, request } = fingering;
+  const prompt = buildFingeringUserPrompt({
+    songTitle: blueprint.songTitle,
+    tier,
+    key: features.detectedKey,
+    bpm: features.bpm,
+    chunkNumber: k + 1,
+    chunkCount: count,
+    previousCode: codeFor(states[chunk.from - 1], events[chunk.from - 1]),
+    directive: phrase.directive,
+    notes: events.slice(chunk.from, chunk.to).map((note, offset) => ({ index: chunk.from + offset, ...note })),
+  });
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const reply = await chat(
+        options.host,
+        model,
+        [
+          { role: "system", content: buildFingeringSystemPrompt() },
+          { role: "user", content: attempt === 1 ? prompt : `${prompt}\n\nReply with ONLY the JSON object.` },
+        ],
+        {
+          format: FINGERING_RESPONSE_SCHEMA,
+          skill,
+          numCtx: options.numCtx,
+          timeoutMs: options.requestTimeoutMs,
+          label: `${tier} phrase ${k + 1}/${count}`,
+        },
+      );
+      addMetrics(request, reply.metrics);
+      const json = extractJson(reply.content);
+      const outcome = applyFingeringAnswers(events, chunk, tier, parseFingeringAnswers(json), solver, states);
+      const reason = (json as { reason?: unknown } | null)?.reason;
+      if (typeof reason === "string" && reason.trim()) context.reasons.push(`- **${tier}, phrase ${k + 1}:** ${reason.trim()}`);
+      console.log(
+        `      phrase ${k + 1}/${count}: ${outcome.accepted} placed, ${outcome.invalid} illegal, ${outcome.missing} missing (${reply.metrics.seconds.toFixed(0)}s, ${tokensPerSecond(reply.metrics)} tok/s)`,
+      );
+      return { accepted: outcome.accepted, invalid: outcome.invalid, missing: outcome.missing };
+    } catch (err) {
+      request.failedRequests++;
+      console.warn(`      phrase ${k + 1}/${count} attempt ${attempt}/2 failed: ${errorText(err).slice(0, 200)}`);
+      if (err instanceof ContextError) break; // a retry would not fit either
+    }
+  }
+  return { accepted: 0, invalid: 0, missing: chunk.to - chunk.from };
+}
+
+/** Fingers one tier — by the solver, then by the model phrase by phrase — and writes its score. */
+async function benchmarkTier(context: TierContext): Promise<{ tier: TierBenchmark; audits: AmbiguousNoteAudit[] }> {
+  const { tier, events, barMs, blueprint, model, options, folder, dir } = context;
+  const solver: CelloState[] = tier === "Beginner"
+    ? events.map((event) => firstPositionFingering(event.midiNumber))
+    : solveFingering(events, ARRANGEMENT_WEIGHTS).states;
+  const states = [...solver];
+  const askModel = tier !== "Beginner" && options.tiers.includes(tier) && events.length > 0;
+  const chunks = askModel ? chunkByBars(events, barMs, options.chunkNotes) : [];
+  const request = emptyMetrics();
+  const tally: PhraseTally = { accepted: 0, invalid: 0, missing: 0 };
+
+  if (askModel) console.log(`    [2/3] ${tier}: ${events.length} notes in ${chunks.length} phrases…`);
+  const directive = String(blueprint.topDownTierDirectives?.[tier.toLowerCase() as "expert"] ?? "").slice(0, 600);
+  for (const [index, chunk] of chunks.entries()) {
+    const phrase = await fingerPhrase(context, { chunk, index, count: chunks.length, directive }, { solver, states, request });
+    tally.accepted += phrase.accepted;
+    tally.invalid += phrase.invalid;
+    tally.missing += phrase.missing;
+  }
+
+  const audits = auditFretboardNotes(events, states, tier);
+  const score = synthesizeScore(folder, blueprint, events, states, tier, model.name);
+  const problems = validateScore(score);
+  if (problems.length > 0) console.warn(`    [WARN] ${tier} score has ${problems.length} validation problems`, problems.slice(0, 2));
+  writeFileSync(join(dir, `${tier.toLowerCase()}.json`), JSON.stringify(score));
+
+  return {
+    audits,
+    tier: {
+      tier,
+      notes: events.length,
+      askedModel: askModel,
+      chunks: chunks.length,
+      ...tally,
+      request,
+      model: fingeringStats(events, states),
+      solver: fingeringStats(events, solver),
+      validationProblems: problems.length,
+      flaggedUnidiomatic: audits.filter((audit) => audit.verdict === "FLAGGED_UNIDIOMATIC").length,
+    },
+  };
+}
+
 async function benchmarkSong(
   filePath: string,
   model: BenchmarkModel,
@@ -642,144 +769,11 @@ async function benchmarkSong(
   const reasons: string[] = [];
 
   for (const tier of ALL_TIERS) {
-    const events = tierNotes[tier];
-    const solver: CelloState[] =
-      tier === "Beginner"
-        ? events.map((event) => firstPositionFingering(event.midiNumber))
-        : solveFingering(events, ARRANGEMENT_WEIGHTS).states;
-    const states = [...solver];
-    const askModel =
-      tier !== "Beginner" && options.tiers.includes(tier) && events.length > 0;
-    const chunks = askModel
-      ? chunkByBars(events, barMs, options.chunkNotes)
-      : [];
-    const request = emptyMetrics();
-    let accepted = 0;
-    let invalid = 0;
-    let missing = 0;
-
-    if (askModel)
-      console.log(
-        `    [2/3] ${tier}: ${events.length} notes in ${chunks.length} phrases…`,
-      );
-    const directive = String(
-      blueprint.topDownTierDirectives?.[tier.toLowerCase() as "expert"] ?? "",
-    ).slice(0, 600);
-
-    for (let k = 0; k < chunks.length; k++) {
-      const chunk = chunks[k];
-      const prompt = buildFingeringUserPrompt({
-        songTitle: blueprint.songTitle,
-        tier,
-        key: features.detectedKey,
-        bpm: features.bpm,
-        chunkNumber: k + 1,
-        chunkCount: chunks.length,
-        previousCode: codeFor(states[chunk.from - 1], events[chunk.from - 1]),
-        directive,
-        notes: events
-          .slice(chunk.from, chunk.to)
-          .map((note, offset) => ({ index: chunk.from + offset, ...note })),
-      });
-
-      let answered = false;
-      for (let attempt = 1; attempt <= 2 && !answered; attempt++) {
-        try {
-          const reply = await chat(
-            options.host,
-            model,
-            [
-              { role: "system", content: buildFingeringSystemPrompt() },
-              {
-                role: "user",
-                content:
-                  attempt === 1
-                    ? prompt
-                    : `${prompt}\n\nReply with ONLY the JSON object.`,
-              },
-            ],
-            {
-              format: FINGERING_RESPONSE_SCHEMA,
-              skill,
-              numCtx: options.numCtx,
-              timeoutMs: options.requestTimeoutMs,
-              label: `${tier} phrase ${k + 1}/${chunks.length}`,
-            },
-          );
-          addMetrics(request, reply.metrics);
-          const json = extractJson(reply.content);
-          const outcome = applyFingeringAnswers(
-            events,
-            chunk,
-            tier,
-            parseFingeringAnswers(json),
-            solver,
-            states,
-          );
-          accepted += outcome.accepted;
-          invalid += outcome.invalid;
-          missing += outcome.missing;
-          const reason = (json as { reason?: unknown } | null)?.reason;
-          if (typeof reason === "string" && reason.trim())
-            reasons.push(`- **${tier}, phrase ${k + 1}:** ${reason.trim()}`);
-          const rate =
-            reply.metrics.evalSeconds > 0
-              ? (reply.metrics.evalTokens / reply.metrics.evalSeconds).toFixed(
-                  1,
-                )
-              : "?";
-          console.log(
-            `      phrase ${k + 1}/${chunks.length}: ${outcome.accepted} placed, ${outcome.invalid} illegal, ${outcome.missing} missing (${reply.metrics.seconds.toFixed(0)}s, ${rate} tok/s)`,
-          );
-          answered = true;
-        } catch (err) {
-          request.failedRequests++;
-          console.warn(
-            `      phrase ${k + 1}/${chunks.length} attempt ${attempt}/2 failed: ${(err instanceof Error ? err.message : String(err)).slice(0, 200)}`,
-          );
-          if (err instanceof ContextError) break; // a retry would not fit either
-        }
-      }
-      if (!answered) missing += chunk.to - chunk.from; // solver fingering stays in place
-    }
-
-    const tierAudits = auditFretboardNotes(events, states, tier);
-    audits[tier] = tierAudits;
-    const score = synthesizeScore(
-      folder,
-      blueprint,
-      events,
-      states,
-      tier,
-      model.name,
-    );
-    const problems = validateScore(score);
-    if (problems.length > 0)
-      console.warn(
-        `    [WARN] ${tier} score has ${problems.length} validation problems`,
-        problems.slice(0, 2),
-      );
-    writeFileSync(
-      join(dir, `${tier.toLowerCase()}.json`),
-      JSON.stringify(score),
-    );
-
-    tiers.push({
-      tier,
-      notes: events.length,
-      askedModel: askModel,
-      chunks: chunks.length,
-      accepted,
-      invalid,
-      missing,
-      request,
-      model: fingeringStats(events, states),
-      solver: fingeringStats(events, solver),
-      validationProblems: problems.length,
-      flaggedUnidiomatic: tierAudits.filter(
-        (audit) => audit.verdict === "FLAGGED_UNIDIOMATIC",
-      ).length,
+    const result = await benchmarkTier({
+      tier, events: tierNotes[tier], barMs, blueprint, features, model, options, skill, folder, dir, reasons,
     });
+    audits[tier] = result.audits;
+    tiers.push(result.tier);
   }
 
   writeFileSync(join(dir, "fretboard_audit.json"), JSON.stringify(audits));
@@ -818,6 +812,12 @@ const CHUNK_LADDER = [40, 32, 24, 16, 12, 8];
 type ModelPlan =
   | { kind: "run"; chunkNotes: number }
   | { kind: "skip"; reason: string };
+
+function planSummary(plan: ModelPlan, contextLength: number | null): string {
+  if (plan.kind === "skip") return `WILL NOT RUN — ${plan.reason}`;
+  const window = contextLength === null ? " (window not reported; the server decides)" : ` (${contextLength} tokens)`;
+  return `fits at ${plan.chunkNotes} notes per phrase${window}`;
+}
 
 interface RequestSizes {
   file: string;
@@ -1026,6 +1026,125 @@ function writeSummary(options: BenchmarkOptions): void {
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
+type SizesByFile = Map<string, ReturnType<typeof requestSizes>>;
+
+/** Phrases the model would be asked to finger per tier, for the dry-run report. */
+function dryRunPhrases(file: string, options: BenchmarkOptions): { features: SongFeatures; phrases: string[]; requests: number } {
+  const features = extractMidiFeatures(parseMidi(new Uint8Array(readFileSync(file))), basename(file));
+  const expert = buildMasterExpertNotes(features, fallbackBlueprint(features));
+  const advanced = deriveAdvancedNotes(expert);
+  const perTier: Record<string, RawNoteEvent[]> = { Expert: expert, Advanced: advanced, Intermediate: deriveIntermediateNotes(advanced) };
+  const barMs = measureDurationMs(features.timeSignature, features.bpm);
+  const fingered = options.tiers.filter((tier) => tier !== "Beginner");
+  const phraseCounts = fingered.map((tier) => chunkByBars(perTier[tier]!, barMs, options.chunkNotes).length);
+  return {
+    features,
+    phrases: fingered.map((tier, i) => `${tier} ${perTier[tier]!.length} notes / ${phraseCounts[i]} phrases`),
+    requests: 1 + phraseCounts.reduce((total, count) => total + count, 0),
+  };
+}
+
+function printDryRun(files: readonly string[], models: readonly BenchmarkModel[], sizesByFile: SizesByFile, options: BenchmarkOptions): void {
+  for (const file of files) {
+    const { features, phrases, requests } = dryRunPhrases(file, options);
+    console.log(`\n${basename(file)} → ${songIdFor(file)}--<model>`);
+    console.log(`  ${features.totalBars} bars · ${features.detectedKey} · ${features.bpm} BPM · ${phrases.join(" · ")}`);
+    const sizes = sizesByFile.get(file);
+    console.log(
+      `  ${requests} requests per model (1 blueprint + fingering phrases); with the skill: blueprint ~${sizes?.blueprintTokens ?? 0} tokens, largest phrase ~${sizes?.fingeringTokens(options.chunkNotes) ?? 0} tokens`,
+    );
+  }
+  console.log("\nContext check (complete skill in every request, phrase size reduced where a window is tight):");
+  for (const model of models) {
+    const plan = planForModel(model, [...sizesByFile.values()], options.chunkNotes);
+    console.log(`  - ${model.name.padEnd(22)} ${planSummary(plan, model.contextLength)}`);
+  }
+  console.log("\n[DRY RUN] Nothing was generated or written.");
+}
+
+type RunInputs = { files: readonly string[]; sizesByFile: SizesByFile; options: BenchmarkOptions; skill: CelloScoringSkill };
+type RunOutcome = { completed: number; failed: number };
+
+function pendingFiles(model: BenchmarkModel, files: readonly string[], options: BenchmarkOptions): string[] {
+  if (options.force) return [...files];
+  return files.filter((file) =>
+    readRecord(join(options.outDir, variantFolderName(songIdFor(file), model.name)))?.status !== "completed");
+}
+
+/** Every pending song for one model: load it, benchmark each song, unload it. */
+async function runModel(model: BenchmarkModel, inputs: RunInputs): Promise<RunOutcome> {
+  const { sizesByFile, options, skill } = inputs;
+  const outcome: RunOutcome = { completed: 0, failed: 0 };
+  const pending = pendingFiles(model, inputs.files, options);
+  if (pending.length === 0) {
+    console.log("  Already completed for every song — skipping (use --force to re-run).");
+    return outcome;
+  }
+
+  const sizes = pending.map((file) => sizesByFile.get(file)).filter((size): size is RequestSizes => size !== undefined);
+  const plan = planForModel(model, sizes, options.chunkNotes);
+  if (plan.kind === "skip") {
+    console.warn(`  Skipping ${model.name}: ${plan.reason}`);
+    for (const file of pending) writeRecord(options, failureRecord(file, model, options, skill, plan.reason, Date.now(), null));
+    writeSummary(options);
+    return { completed: 0, failed: pending.length };
+  }
+  const modelOptions: BenchmarkOptions = plan.chunkNotes === options.chunkNotes ? options : { ...options, chunkNotes: plan.chunkNotes };
+  if (plan.chunkNotes !== options.chunkNotes) {
+    console.log(`  Asking about ${plan.chunkNotes} notes per phrase instead of ${options.chunkNotes}, so the complete skill fits ${model.name}'s ${model.contextLength}-token window.`);
+  }
+
+  const modelStarted = Date.now();
+  console.log(`  Loading ${model.name}…`);
+  const loadSeconds = await loadModel(options.host, model);
+  console.log(loadSeconds === null ? "  Load did not confirm; continuing." : `  Loaded in ${loadSeconds.toFixed(1)}s.`);
+
+  for (const file of pending) {
+    console.log(`\n  [SONG] ${basename(file)}`);
+    try {
+      const record = await benchmarkSong(file, model, modelOptions, loadSeconds, skill);
+      outcome.completed++;
+      console.log(`  Done in ${(record.seconds / 60).toFixed(1)} min → ${join(options.outDir, record.folder)}`);
+    } catch (err) {
+      outcome.failed++;
+      const message = errorText(err);
+      console.error(`  [ERROR] ${basename(file)} with ${model.name}: ${message}`);
+      writeRecord(options, failureRecord(file, model, options, skill, message, modelStarted, loadSeconds));
+    }
+    writeSummary(options);
+  }
+
+  console.log(`\n  Unloading ${model.name} (${((Date.now() - modelStarted) / 60_000).toFixed(1)} min for this model)…`);
+  await unloadModel(options.host, model);
+  return outcome;
+}
+
+function rebuildLibrary(): void {
+  console.log(
+    "\nRebuilding the full library so the results appear in the app…",
+  );
+  const build = spawnSync(
+    // A developer tool run from the repo: `npx` is resolved from the developer's own PATH on purpose.
+    // eslint-disable-next-line sonarjs/no-os-command-from-path
+    "npx",
+    [
+      "vite-node",
+      "--config",
+      "vitest.config.ts",
+      "tools/build-library.ts",
+      "--",
+      "--edition=full",
+    ],
+    { stdio: "inherit" },
+  );
+  if (build.status !== 0) {
+    console.error(
+      "Library rebuild failed; run `yarn build:library` once the error above is fixed.",
+    );
+    process.exitCode = 1;
+  }
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const files = options.files.map((file) => resolve(file));
@@ -1065,66 +1184,7 @@ async function main() {
   );
 
   if (options.dryRun) {
-    for (const file of files) {
-      const features = extractMidiFeatures(
-        parseMidi(new Uint8Array(readFileSync(file))),
-        basename(file),
-      );
-      const expert = buildMasterExpertNotes(
-        features,
-        fallbackBlueprint(features),
-      );
-      const advanced = deriveAdvancedNotes(expert);
-      const intermediate = deriveIntermediateNotes(advanced);
-      const barMs = measureDurationMs(features.timeSignature, features.bpm);
-      const perTier: Record<string, RawNoteEvent[]> = {
-        Expert: expert,
-        Advanced: advanced,
-        Intermediate: intermediate,
-      };
-      const phrases = options.tiers
-        .filter((tier) => tier !== "Beginner")
-        .map(
-          (tier) =>
-            `${tier} ${perTier[tier].length} notes / ${chunkByBars(perTier[tier], barMs, options.chunkNotes).length} phrases`,
-        );
-      const requests =
-        1 +
-        options.tiers
-          .filter((tier) => tier !== "Beginner")
-          .reduce(
-            (total, tier) =>
-              total +
-              chunkByBars(perTier[tier], barMs, options.chunkNotes).length,
-            0,
-          );
-      console.log(`\n${basename(file)} → ${songIdFor(file)}--<model>`);
-      console.log(
-        `  ${features.totalBars} bars · ${features.detectedKey} · ${features.bpm} BPM · ${phrases.join(" · ")}`,
-      );
-      const sizes = sizesByFile.get(file);
-      console.log(
-        `  ${requests} requests per model (1 blueprint + fingering phrases); with the skill: blueprint ~${sizes?.blueprintTokens ?? 0} tokens, largest phrase ~${sizes?.fingeringTokens(options.chunkNotes) ?? 0} tokens`,
-      );
-    }
-    console.log(
-      "\nContext check (complete skill in every request, phrase size reduced where a window is tight):",
-    );
-    for (const model of models) {
-      const plan = planForModel(
-        model,
-        [...sizesByFile.values()],
-        options.chunkNotes,
-      );
-      console.log(
-        `  - ${model.name.padEnd(22)} ${
-          plan.kind === "skip"
-            ? `WILL NOT RUN — ${plan.reason}`
-            : `fits at ${plan.chunkNotes} notes per phrase${model.contextLength === null ? " (window not reported; the server decides)" : ` (${model.contextLength} tokens)`}`
-        }`,
-      );
-    }
-    console.log("\n[DRY RUN] Nothing was generated or written.");
+    printDryRun(files, models, sizesByFile, options);
     return;
   }
 
@@ -1143,116 +1203,14 @@ async function main() {
 
   // Sequential by construction: plain loops, one awaited request at a time.
   for (const [index, model] of models.entries()) {
-    const pending = files.filter((file) => {
-      if (options.force) return true;
-      const record = readRecord(
-        join(options.outDir, variantFolderName(songIdFor(file), model.name)),
-      );
-      return record?.status !== "completed";
-    });
-
-    console.log(
-      `\n================================================================`,
-    );
+    console.log(`\n================================================================`);
     console.log(`[MODEL ${index + 1}/${models.length}] ${model.name}`);
-    console.log(
-      `================================================================`,
-    );
-    if (pending.length === 0) {
-      console.log(
-        "  Already completed for every song — skipping (use --force to re-run).",
-      );
-      continue;
-    }
-
-    const plan = planForModel(
-      model,
-      pending
-        .map((file) => sizesByFile.get(file))
-        .filter((size): size is RequestSizes => size !== undefined),
-      options.chunkNotes,
-    );
-    if (plan.kind === "skip") {
-      console.warn(`  Skipping ${model.name}: ${plan.reason}`);
-      for (const file of pending) {
-        writeRecord(
-          options,
-          failureRecord(
-            file,
-            model,
-            options,
-            skill,
-            plan.reason,
-            Date.now(),
-            null,
-          ),
-        );
-        failed++;
-      }
-      writeSummary(options);
-      continue;
-    }
-    const modelOptions: BenchmarkOptions =
-      plan.chunkNotes === options.chunkNotes
-        ? options
-        : { ...options, chunkNotes: plan.chunkNotes };
-    if (plan.chunkNotes !== options.chunkNotes) {
-      console.log(
-        `  Asking about ${plan.chunkNotes} notes per phrase instead of ${options.chunkNotes}, so the complete skill fits ${model.name}'s ${model.contextLength}-token window.`,
-      );
-    }
-
+    console.log(`================================================================`);
     activeModel = model;
-    const modelStarted = Date.now();
-    console.log(`  Loading ${model.name}…`);
-    const loadSeconds = await loadModel(options.host, model);
-    console.log(
-      loadSeconds === null
-        ? "  Load did not confirm; continuing."
-        : `  Loaded in ${loadSeconds.toFixed(1)}s.`,
-    );
-
-    for (const file of pending) {
-      console.log(`\n  [SONG] ${basename(file)}`);
-      try {
-        const record = await benchmarkSong(
-          file,
-          model,
-          modelOptions,
-          loadSeconds,
-          skill,
-        );
-        completed++;
-        console.log(
-          `  Done in ${(record.seconds / 60).toFixed(1)} min → ${join(options.outDir, record.folder)}`,
-        );
-      } catch (err) {
-        failed++;
-        const message = err instanceof Error ? err.message : String(err);
-        console.error(
-          `  [ERROR] ${basename(file)} with ${model.name}: ${message}`,
-        );
-        writeRecord(
-          options,
-          failureRecord(
-            file,
-            model,
-            options,
-            skill,
-            message,
-            modelStarted,
-            loadSeconds,
-          ),
-        );
-      }
-      writeSummary(options);
-    }
-
-    console.log(
-      `\n  Unloading ${model.name} (${((Date.now() - modelStarted) / 60_000).toFixed(1)} min for this model)…`,
-    );
-    await unloadModel(options.host, model);
+    const outcome = await runModel(model, { files, sizesByFile, options, skill });
     activeModel = null;
+    completed += outcome.completed;
+    failed += outcome.failed;
   }
 
   writeSummary(options);
@@ -1261,29 +1219,7 @@ async function main() {
   );
   console.log(`Comparison: ${join(options.reportDir, "summary.md")}`);
 
-  if (options.rebuildLibrary && completed > 0) {
-    console.log(
-      "\nRebuilding the full library so the results appear in the app…",
-    );
-    const build = spawnSync(
-      "npx",
-      [
-        "vite-node",
-        "--config",
-        "vitest.config.ts",
-        "tools/build-library.ts",
-        "--",
-        "--edition=full",
-      ],
-      { stdio: "inherit" },
-    );
-    if (build.status !== 0) {
-      console.error(
-        "Library rebuild failed; run `yarn build:library` once the error above is fixed.",
-      );
-      process.exitCode = 1;
-    }
-  }
+  if (options.rebuildLibrary && completed > 0) rebuildLibrary();
 }
 
 main().catch((err) => {

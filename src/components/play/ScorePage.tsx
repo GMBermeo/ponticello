@@ -2,16 +2,13 @@ import { memo, useEffect, useMemo, useRef } from 'react';
 import { ScrollView, View } from 'react-native';
 import Svg, { Circle, Ellipse, G, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
 
-import { CelloString } from '@/domain/cello';
 import {
-  EngravedMeasure, engrave, Glyph, locateMeasure, NoteGlyph, RepeatBlock,
-} from '@/domain/engrave';
-import { noteColorNames } from '@/domain/noteColors';
-import { CelloSongScore } from '@/domain/schema';
-import { ScoreColorMode } from '@/state/settings';
-import { useTheme } from '@/theme/ThemeProvider';
-import { Chrome } from '@/theme/tokens';
-import { Label } from '../ui/primitives';
+  CelloString, EngravedMeasure, engrave, Glyph, locateMeasure, NoteGlyph, RepeatBlock,
+  noteColorNames, CelloSongScore,
+} from '@domain';
+import { ScoreColorMode } from '@state';
+import { useTheme, Chrome } from '@theme';
+import { Label } from '../ui';
 import { staffStep } from './staff';
 import { Playhead, usePlayheadPosition, usePlayheadTransport } from './usePlayhead';
 
@@ -520,83 +517,151 @@ function GlyphMark({
   const ink = inkFor(glyph);
   const colour = active ? chrome.accent : ink.fill;
 
-  const hollow = glyph.sixteenths >= 8;
   // Under a beam the whole group shares one stem direction, or the beam would
   // have to cross the stave to reach them.
   const up = beam ? beam.up : laid.step < 4;
-  const stemX = laid.x + (up ? gap * 0.62 : -gap * 0.62);
-  const stemY = beam ? beamYAt(beam, stemX) : y + (up ? -gap * 3.2 : gap * 3.2);
-  const flags = glyph.sixteenths <= 1 ? 2 : glyph.sixteenths < 4 ? 1 : 0;
 
   return (
     <G>
-      {/* Ledger lines, above and below the stave. */}
-      {ledgerSteps(laid.step).map((step) => (
-        <Line
-          key={step}
-          x1={laid.x - gap * 0.95} x2={laid.x + gap * 0.95}
-          y1={-(step / 2) * gap} y2={-(step / 2) * gap}
-          stroke={chrome.dark ? chrome.line : chrome.lineSoft} strokeWidth={Math.max(0.6, gap * 0.07)}
-        />
-      ))}
+      <LedgerLines x={laid.x} step={laid.step} gap={gap} chrome={chrome} />
 
-      {active ? <Circle cx={laid.x} cy={y} r={gap * 1.25} fill={chrome.accent} opacity={0.18} /> : null}
+      <Notehead x={laid.x} y={y} gap={gap} accidental={laid.accidental} dotted={glyph.dots > 0}
+        hollow={glyph.sixteenths >= 8} colour={colour} ring={active ? undefined : (ink.ring ?? undefined)}
+        halo={active ? chrome.accent : undefined} />
 
-      {laid.accidental ? (
-        <SvgText
-          x={laid.x - gap * 1.1} y={y + gap * 0.42}
-          fill={colour} fontSize={gap * 1.7} textAnchor="end"
-        >
-          {laid.accidental}
-        </SvgText>
-      ) : null}
+      <NoteStem x={laid.x} y={y} up={up} beam={beam} sixteenths={glyph.sixteenths} gap={gap} colour={colour} />
 
-      <Ellipse
-        cx={laid.x} cy={y} rx={gap * 0.62} ry={gap * 0.46}
-        fill={hollow ? 'none' : colour}
-        stroke={!active && ink.ring ? ink.ring : colour}
-        strokeWidth={hollow ? Math.max(1, gap * 0.13)
-          : (!active && ink.ring ? Math.max(1, gap * 0.16) : 0)}
-      />
-
-      {glyph.dots > 0 ? (
-        <Circle cx={laid.x + gap * 1.0} cy={y - gap * 0.25} r={gap * 0.14} fill={colour} />
-      ) : null}
-
-      {glyph.sixteenths < 16 ? (
-        <Line x1={stemX} y1={y} x2={stemX} y2={stemY} stroke={colour} strokeWidth={Math.max(0.9, gap * 0.1)} />
-      ) : null}
-
-      {!beam && flags > 0
-        ? Array.from({ length: flags }, (_, i) => (
-          <Path
-            key={i}
-            d={`M ${stemX} ${stemY + (up ? i * gap * 0.5 : -i * gap * 0.5)}
-                q ${gap * 0.9} ${up ? gap * 0.5 : -gap * 0.5} ${gap * 0.55} ${up ? gap * 1.5 : -gap * 1.5}`}
-            stroke={colour} strokeWidth={Math.max(0.9, gap * 0.11)} fill="none"
-          />
-        ))
-        : null}
-
-      {glyph.tiedTo && next ? (
-        <Path
-          d={`M ${laid.x + gap * 0.7} ${y + gap * 0.6}
-              Q ${(laid.x + next.x) / 2} ${y + gap * 1.5} ${next.x - gap * 0.7} ${y + gap * 0.6}`}
-          stroke={colour} strokeWidth={Math.max(0.8, gap * 0.09)} fill="none"
-        />
-      ) : null}
+      {glyph.tiedTo && next ? <TieArc fromX={laid.x} toX={next.x} y={y} gap={gap} colour={colour} /> : null}
 
       {showFingerings && !glyph.tiedFrom ? (
-        <SvgText
-          x={laid.x} y={y - gap * (up ? 4.2 : 1.4)}
-          fill={active ? chrome.accent : chrome.dim}
-          fontSize={gap * 1.15} fontWeight="700" textAnchor="middle"
-        >
-          {glyph.finger}
-        </SvgText>
+        <FingerLabel x={laid.x} y={y} up={up} gap={gap} finger={glyph.finger} colour={active ? chrome.accent : chrome.dim} />
       ) : null}
     </G>
   );
+}
+
+type NoteheadProps = {
+  x: number;
+  y: number;
+  gap: number;
+  accidental: string | null | undefined;
+  dotted: boolean;
+  hollow: boolean;
+  colour: string;
+  /** Outline in the colour code's second colour, when there is one. */
+  ring: string | undefined;
+  /** Wash behind the sounding note. */
+  halo: string | undefined;
+};
+
+function Notehead({ x, y, gap, accidental, dotted, hollow, colour, ring, halo }: NoteheadProps) {
+  return (
+    <>
+      {halo ? <Circle cx={x} cy={y} r={gap * 1.25} fill={halo} opacity={0.18} /> : null}
+      {accidental ? (
+        <SvgText x={x - gap * 1.1} y={y + gap * 0.42} fill={colour} fontSize={gap * 1.7} textAnchor="end">
+          {accidental}
+        </SvgText>
+      ) : null}
+      <Ellipse
+        cx={x} cy={y} rx={gap * 0.62} ry={gap * 0.46}
+        fill={hollow ? 'none' : colour}
+        stroke={ring ?? colour}
+        strokeWidth={noteheadStrokeWidth(gap, hollow, !!ring)}
+      />
+      {dotted ? <Circle cx={x + gap * 1.0} cy={y - gap * 0.25} r={gap * 0.14} fill={colour} /> : null}
+    </>
+  );
+}
+
+function NoteStem({ x, y, up, beam, sixteenths, gap, colour }: {
+  x: number; y: number; up: boolean; beam: BeamGeometry | null; sixteenths: number; gap: number; colour: string;
+}) {
+  /** −1 draws towards the top of the stave, +1 towards the bottom. */
+  const stemSign = up ? -1 : 1;
+  const stemX = x - stemSign * gap * 0.62;
+  const stemY = beam ? beamYAt(beam, stemX) : y + stemSign * gap * 3.2;
+  return (
+    <>
+      {sixteenths < 16 ? (
+        <Line x1={stemX} y1={y} x2={stemX} y2={stemY} stroke={colour} strokeWidth={Math.max(0.9, gap * 0.1)} />
+      ) : null}
+      {beam ? null : (
+        <NoteFlags count={flagCount(sixteenths)} stemX={stemX} stemY={stemY} flagSign={-stemSign} gap={gap} colour={colour} />
+      )}
+    </>
+  );
+}
+
+function FingerLabel({ x, y, up, gap, finger, colour }: {
+  x: number; y: number; up: boolean; gap: number; finger: NoteGlyph['finger']; colour: string;
+}) {
+  return (
+    <SvgText x={x} y={y - gap * (up ? 4.2 : 1.4)} fill={colour} fontSize={gap * 1.15} fontWeight="700" textAnchor="middle">
+      {finger}
+    </SvgText>
+  );
+}
+
+/** Ledger lines, above and below the stave. */
+function LedgerLines({ x, step, gap, chrome }: { x: number; step: number; gap: number; chrome: Chrome }) {
+  return (
+    <>
+      {ledgerSteps(step).map((ledger) => (
+        <Line
+          key={ledger}
+          x1={x - gap * 0.95} x2={x + gap * 0.95}
+          y1={-(ledger / 2) * gap} y2={-(ledger / 2) * gap}
+          stroke={chrome.dark ? chrome.line : chrome.lineSoft} strokeWidth={Math.max(0.6, gap * 0.07)}
+        />
+      ))}
+    </>
+  );
+}
+
+function TieArc({ fromX, toX, y, gap, colour }: { fromX: number; toX: number; y: number; gap: number; colour: string }) {
+  return (
+    <Path
+      d={`M ${fromX + gap * 0.7} ${y + gap * 0.6}
+          Q ${(fromX + toX) / 2} ${y + gap * 1.5} ${toX - gap * 0.7} ${y + gap * 0.6}`}
+      stroke={colour} strokeWidth={Math.max(0.8, gap * 0.09)} fill="none"
+    />
+  );
+}
+
+/** Semiquavers take two flags, quavers one, anything longer none. */
+function flagCount(sixteenths: number): number {
+  if (sixteenths <= 1) return 2;
+  return sixteenths < 4 ? 1 : 0;
+}
+
+function noteheadStrokeWidth(gap: number, hollow: boolean, ringed: boolean): number {
+  if (hollow) return Math.max(1, gap * 0.13);
+  return ringed ? Math.max(1, gap * 0.16) : 0;
+}
+
+/** Flags curl away from the stem's end: `flagSign` is +1 on an up-stem, −1 on a down-stem. */
+function NoteFlags({ count, stemX, stemY, flagSign, gap, colour }: {
+  count: number; stemX: number; stemY: number; flagSign: number; gap: number; colour: string;
+}) {
+  return (
+    <>
+      {Array.from({ length: count }, (_, i) => (
+        <Path
+          key={i}
+          d={`M ${stemX} ${stemY + flagSign * i * gap * 0.5}
+              q ${gap * 0.9} ${flagSign * gap * 0.5} ${gap * 0.55} ${flagSign * gap * 1.5}`}
+          stroke={colour} strokeWidth={Math.max(0.9, gap * 0.11)} fill="none"
+        />
+      ))}
+    </>
+  );
+}
+
+/** Quarter-note rests take one stroke, quavers two, semiquavers three. */
+function restStrokeCount(sixteenths: number): number {
+  if (sixteenths >= 4) return 1;
+  return sixteenths >= 2 ? 2 : 3;
 }
 
 /** Every ledger line a notehead at `step` needs, above or below the stave. */
@@ -617,7 +682,7 @@ function RestMark({
   if (sixteenths >= 8) {
     return <Rect x={x - gap * 0.55} y={-gap * 2} width={gap * 1.1} height={gap * 0.42} fill={colour} />;
   }
-  const strokes = sixteenths >= 4 ? 1 : sixteenths >= 2 ? 2 : 3;
+  const strokes = restStrokeCount(sixteenths);
   return (
     <G>
       {Array.from({ length: strokes }, (_, i) => (

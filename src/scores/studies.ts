@@ -7,8 +7,7 @@
  * minutes teaches more than one you get through once.
  */
 
-import { CelloString, STRING_ORDER } from '@/domain/cello';
-import { CelloSongScore } from '@/domain/schema';
+import { CelloString, STRING_ORDER, CelloSongScore, BackingTrack, BackingPart } from '@domain';
 import { alternateBows, buildScore, Event } from './build';
 
 const ORIGINAL = 'Original study written for this app — free to copy and change.';
@@ -183,7 +182,6 @@ export const STUDIES: CelloSongScore[] = [
   THUMB_POSITION_LADDER,
 ];
 
-import { BackingTrack, BackingPart } from '@/domain/backing';
 
 function makePulsePart(id: string, totalMs: number, beatMs: number): BackingPart {
   const notes = [];

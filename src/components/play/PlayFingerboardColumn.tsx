@@ -1,18 +1,12 @@
 import { memo } from 'react';
 import { View } from 'react-native';
 
-import { Fingerboard, FingerboardProps, FingerboardStringLabels } from '@/components/Fingerboard';
-import { useMeasuredSize } from '@/components/useMeasuredSize';
-import { Label, Row } from '@/components/ui/primitives';
-import { fingerboardExtentMm } from '@/domain/cello';
-import { CelloSongScore } from '@/domain/schema';
-import {
-  shallowEqual,
-  useSettingsSelector,
-  useTapeSettings,
-  useVisionPreferences,
-} from '@/state/settings';
-import { useTheme } from '@/theme/ThemeProvider';
+import { Fingerboard, FingerboardProps, FingerboardStringLabels } from '../Fingerboard';
+import { useMeasuredSize } from '../useMeasuredSize';
+import { Label, Row } from '../ui';
+import { fingerboardExtentMm, CelloSongScore } from '@domain';
+import { shallowEqual, useSettingsSelector, useTapeSettings, useVisionPreferences } from '@state';
+import { useTheme } from '@theme';
 import { Playhead, usePlayheadPosition } from './usePlayhead';
 
 export interface PlayFingerboardColumnProps {

@@ -19,15 +19,10 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 
 import {
-  midiToFrequency, midiToPitchName,
-} from '../src/domain/cello';
-import { arrangeMidi } from '../src/domain/arrangement';
-import { detectShifts, RawNoteEvent, seatLine } from '../src/domain/fingering';
-import type { DifficultyTier } from '../src/domain/schema';
-import {
-  CelloMeasure, CelloNote, CelloSongScore, measureDurationMs, validateScore,
-} from '../src/domain/schema';
-import { parseMidi } from '../src/domain/midi';
+  midiToFrequency, midiToPitchName, arrangeMidi, detectShifts, RawNoteEvent, seatLine,
+  type DifficultyTier, CelloMeasure, CelloNote, CelloSongScore, measureDurationMs, validateScore,
+  parseMidi,
+} from '@domain';
 
 interface Options {
   input: string;
@@ -120,8 +115,9 @@ function main() {
       durationMs: Math.max(1, Math.min(event.durationMs, limitMs - event.startTimeMs)),
     }));
 
+  const trackLabel = arranged.sourceTrack === null ? '' : ` track ${arranged.sourceTrack}`;
   console.log(
-    `  source ${arranged.sourceKind}${arranged.sourceTrack === null ? '' : ` track ${arranged.sourceTrack}`}: `
+    `  source ${arranged.sourceKind}${trackLabel}: `
       + `${arranged.originalNoteCount} notes, ${kept.length} kept at ${options.difficulty}`,
   );
 
@@ -210,14 +206,14 @@ function main() {
  * Rights: ${options.rights}
  */
 
-import { CelloSongScore } from '@/domain/schema';
+import { CelloSongScore } from '@domain';
 
 export const SCORE: CelloSongScore = ${JSON.stringify(score, null, 2)};
 `;
 
   writeFileSync(outPath, module);
   console.log(`  wrote ${outPath}`);
-  console.log(`  add it to the SCORES array in src/scores/index.ts to see it in the library.`);
+  console.log(`  add it to the SCORES array in src/scores/library.ts to see it in the library.`);
 }
 
 main();

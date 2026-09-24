@@ -1,7 +1,14 @@
-import { OPEN_STRING_MIDI, STRING_ORDER } from '../cello';
+import { OPEN_STRING_MIDI, STRING_ORDER, toPitchClass } from '../cello';
 import type { ChordFinger, CelloChordShape, CelloChordType, FourStrings } from './types';
 
 /** Half position through fourth position, including chromatic intermediate seats. */
+/**
+ * First position is the normal study home. Half position costs a little, so
+ * its second finger is not recommended for a note usually taken with first
+ * finger; anything higher costs by distance.
+ */
+const ANCHOR_COST: Readonly<Record<number, number>> = { 1: 3, 2: 0 };
+
 export const MAX_CHORD_ANCHOR = 7;
 export const CHORD_FRAMES = {
   closed: [0, 1, 2, 3],
@@ -14,7 +21,6 @@ interface Candidate extends CelloChordShape {
   readonly cost: number;
 }
 
-const pc = (n: number) => ((n % 12) + 12) % 12;
 
 function candidates(): readonly Candidate[] {
   const unique = new Map<string, Candidate>();
@@ -47,20 +53,18 @@ function candidates(): readonly Candidate[] {
           const string = STRING_ORDER[i];
           if (stop === null || !string) return;
           const midi = OPEN_STRING_MIDI[string] + stop;
-          mask |= 1 << pc(midi);
+          mask |= 1 << toPitchClass(midi);
           bassMidi = Math.min(bassMidi, midi);
         });
         const stopped = stops.filter((n): n is number => n !== null && n > 0);
         const flattened = new Set(fingers.filter((f) => f !== null && f !== '0')).size < stopped.length;
-        // First position is the normal study home. Avoid recommending half
-        // position's second finger for a note usually played with first finger.
-        const anchorCost = anchor === 2 ? 0 : anchor === 1 ? 3 : anchor * 2;
+        const anchorCost = ANCHOR_COST[anchor] ?? anchor * 2;
         const cost = anchorCost + stopped.length * 3 + (frame === 'extended' ? 5 : 0)
           + (flattened ? 4 : 0) + active.length;
         const shape: Candidate = {
           stops: stops as unknown as FourStrings<number | null>,
           fingers: fingers as unknown as FourStrings<ChordFinger | null>,
-          anchor, frame, omittedIntervals: [], mask, bassPc: pc(bassMidi), cost,
+          anchor, frame, omittedIntervals: [], mask, bassPc: toPitchClass(bassMidi), cost,
         };
         const key = stops.join(',');
         const previous = unique.get(key);
@@ -80,7 +84,7 @@ export function findCelloChordShapes(
   type: CelloChordType, root: number, bassPitchClass?: number,
 ): readonly CelloChordShape[] {
   pool ??= candidates();
-  const pitchClasses = type.semitones.map((n) => pc(root + n));
+  const pitchClasses = type.semitones.map((n) => toPitchClass(root + n));
   const mask = pitchClasses.reduce((m, n) => m | (1 << n), 0);
   const required = type.intervals.reduce((m, interval, i) => {
     const pitch = pitchClasses[i];

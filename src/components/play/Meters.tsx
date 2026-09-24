@@ -2,8 +2,8 @@ import { memo, useMemo } from 'react';
 import { View } from 'react-native';
 import Animated, { SharedValue, useAnimatedStyle } from 'react-native-reanimated';
 
-import { useTheme } from '@/theme/ThemeProvider';
-import { Label } from '../ui/primitives';
+import { useTheme } from '@theme';
+import { Label } from '../ui';
 
 /**
  * Input level meter, shared by the tuner screen and the play screen's tuner

@@ -11,6 +11,16 @@ import {
   moveChordWithinRow,
   removeChord,
   removeRow,
+  countChords,
+  END_OF_ROW,
+  MAX_PROGRESSION_BPM,
+  MIN_PROGRESSION_BPM,
+  msPerChord,
+  parseProgressionBpm,
+  parseSavedProgressions,
+  parseStoredProgression,
+  progressionFileName,
+  upsertSavedEntry,
 } from '../customProgression';
 
 describe('custom progression domain', () => {
@@ -112,3 +122,73 @@ describe('custom progression domain', () => {
   });
 });
 
+
+describe('progression helpers', () => {
+  it('counts chords across every row', () => {
+    const prog = createDefaultProgression();
+    expect(countChords(prog)).toBe(prog.rows.reduce((total, row) => total + row.chords.length, 0));
+  });
+
+  it('moves a chord to the end of another row with END_OF_ROW', () => {
+    const prog = addRow(createDefaultProgression());
+    const symbol = prog.rows[0].chords[0].symbol;
+    const moved = moveChordBetweenRows(prog, 0, 0, 1, END_OF_ROW);
+    expect(moved.rows[1].chords.at(-1)?.symbol).toBe(symbol);
+  });
+
+  it('accepts BPM at both bounds and rejects outside them', () => {
+    expect([MIN_PROGRESSION_BPM - 1, MIN_PROGRESSION_BPM, MAX_PROGRESSION_BPM, MAX_PROGRESSION_BPM + 1]
+      .map((bpm) => parseProgressionBpm(String(bpm))))
+      .toEqual([null, MIN_PROGRESSION_BPM, MAX_PROGRESSION_BPM, null]);
+  });
+
+  it('rejects BPM text that is not a number', () => {
+    expect(parseProgressionBpm('slow')).toBeNull();
+  });
+
+  it('times one chord as beats at the tempo, scaled by speed', () => {
+    expect(msPerChord(60, 2, 4)).toBe(2000);
+  });
+
+  it('never plays slower than the minimum tempo', () => {
+    expect(msPerChord(1, 1, 1)).toBe(msPerChord(MIN_PROGRESSION_BPM, 1, 1));
+  });
+
+  it('replaces a saved entry with the same title, ignoring case', () => {
+    const first = createSavedEntry({ ...createDefaultProgression(), title: 'Warm up' });
+    const second = createSavedEntry({ ...createDefaultProgression(), title: 'WARM UP' });
+    expect(upsertSavedEntry([first], second)).toEqual([second]);
+  });
+
+  it('puts a newly titled entry first', () => {
+    const first = createSavedEntry({ ...createDefaultProgression(), title: 'One' });
+    const second = createSavedEntry({ ...createDefaultProgression(), title: 'Two' });
+    expect(upsertSavedEntry([first], second).map((entry) => entry.title)).toEqual(['Two', 'One']);
+  });
+
+  it('gives saved entries distinct ids even when created together', () => {
+    const prog = createDefaultProgression();
+    expect(createSavedEntry(prog).id).not.toBe(createSavedEntry(prog).id);
+  });
+
+  it('makes a safe file name from a title', () => {
+    expect(progressionFileName('My Song: Take 2')).toBe('my_song__take_2.json');
+  });
+
+  it('names an untitled export "progression"', () => {
+    expect(progressionFileName('')).toBe('progression.json');
+  });
+
+  it('reads back a stored draft', () => {
+    const prog = createDefaultProgression();
+    expect(parseStoredProgression(JSON.stringify(prog))).toEqual(prog);
+  });
+
+  it('ignores stored text that is not a progression', () => {
+    expect([parseStoredProgression(null), parseStoredProgression('{"title":"x"}')]).toEqual([null, null]);
+  });
+
+  it('reads an empty saved list from missing or malformed storage', () => {
+    expect([parseSavedProgressions(null), parseSavedProgressions('{}')]).toEqual([[], []]);
+  });
+});

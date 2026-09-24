@@ -3,9 +3,9 @@ import {
 } from 'react';
 import { SharedValue, useFrameCallback, useSharedValue } from 'react-native-reanimated';
 
-import { PracticeLoop } from '@/domain/loop';
-import { activeNoteIndex, CelloSongScore, measureAt } from '@/domain/schema';
-import { DriftEstimator, scoreTimeAt } from '@/domain/transportClock';
+import {
+  PracticeLoop, activeNoteIndex, CelloSongScore, measureAt, DriftEstimator, scoreTimeAt,
+} from '@domain';
 
 export interface PlayheadOptions {
   score: CelloSongScore;

@@ -1,5 +1,5 @@
 import { defineConfig } from 'vitest/config';
-import path from 'node:path';
+import { PATH_ALIASES } from './tools/pathAliases';
 
 /**
  * Unit tests cover the pure layers only — DSP, cello geometry, the fingering
@@ -7,9 +7,7 @@ import path from 'node:path';
  * in plain Node with no Metro or native runtime in the way.
  */
 export default defineConfig({
-  resolve: {
-    alias: { '@': path.resolve(__dirname, 'src') },
-  },
+  resolve: { alias: PATH_ALIASES },
   test: {
     include: ['src/**/*.test.ts', 'tools/**/*.test.ts'],
     environment: 'node',

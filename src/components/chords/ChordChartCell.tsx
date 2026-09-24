@@ -1,7 +1,6 @@
 import { createContext, useContext } from 'react';
 import { View, type CellRendererProps } from 'react-native';
-import type { SheetLine } from '@/domain/chordSheet';
-import type { ChordSheetLayout } from '@/domain/chordSheetLayout';
+import type { SheetLine, ChordSheetLayout } from '@domain';
 
 export type ChordChartItem = { kind: 'preview'; id: string }
   | { kind: 'line'; id: string; line: SheetLine; lineIndex: number };

@@ -1,6 +1,6 @@
 import data from './chordSheets.generated.json';
-import { validateChordSheet, type ChordSheet } from '../domain/chordSheet';
-import type { LibraryRow } from './index';
+import { validateChordSheet, type ChordSheet } from '@domain';
+import type { LibraryRow } from './library';
 
 data.forEach(validateChordSheet);
 export const CHORD_SHEETS: readonly ChordSheet[] = data as ChordSheet[];

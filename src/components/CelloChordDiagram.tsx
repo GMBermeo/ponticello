@@ -1,9 +1,11 @@
 import { SvgXml } from 'react-native-svg';
 import { View } from 'react-native';
-import type { CelloChordStudy } from '@/domain/celloChords';
-import { celloChordSvg, CHORD_DIAGRAM_SIZE, CHORD_ATLAS_DIAGRAM_SIZE, chordTapeMarkerColors, type ChordDiagramOptions } from '@/domain/chords/diagram';
-import { useTheme } from '@/theme/ThemeProvider';
-import { useSettingsSelector } from '@/state/settings';
+import {
+  type CelloChordStudy, celloChordSvg, CHORD_DIAGRAM_SIZE, CHORD_ATLAS_DIAGRAM_SIZE,
+  chordTapeMarkerColors, type ChordDiagramOptions,
+} from '@domain';
+import { useTheme } from '@theme';
+import { useSettingsSelector } from '@state';
 
 export interface CelloChordDiagramProps {
   chord: CelloChordStudy;
@@ -39,11 +41,17 @@ export function CelloChordDiagram({
     presentation, markerColors: tapeSets ? chordTapeMarkerColors(tapeSets, chrome.tapes) : undefined, nextChord,
     scaleKey, scalePitchClasses, scaleTonic, scaleColor,
   }).replace(/ (?:aria-label|data-[a-z-]+|role)="[^"]*"/g, '');
+  const accessibilityLabel = [
+    `${chord.symbol}. Squares mark roots.`,
+    mode === 'arpeggio' || !chord.voicings.length ? 'Arpeggio: play notes separately.' : 'Suggested chord fingering.',
+    nextChord ? `Grey notes prepare ${nextChord.symbol}.` : '',
+    scaleKey ? `Scale notes for key ${scaleKey}.` : '',
+  ].filter(Boolean).join(' ');
   // SvgXml camel-cases arbitrary XML attributes on web. Expose accessibility
   // through the native View adapter; retain SVG metadata in standalone exports.
   return <View
     accessible accessibilityRole="image"
-    accessibilityLabel={`${chord.symbol}. Squares mark roots. ${mode === 'arpeggio' || !chord.voicings.length ? 'Arpeggio: play notes separately.' : 'Suggested chord fingering.'}${nextChord ? ` Grey notes prepare ${nextChord.symbol}.` : ''}${scaleKey ? ` Scale notes for key ${scaleKey}.` : ''}`}
+    accessibilityLabel={accessibilityLabel}
   ><SvgXml xml={xml} width={deviceWidth} height={deviceWidth * size.height / size.width} /></View>;
 }
 

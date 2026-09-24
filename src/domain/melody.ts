@@ -27,6 +27,9 @@
 import { OPEN_STRING_MIDI } from './cello';
 import { MidiNote, MidiTrack, monophonic } from './midi';
 
+/** Scores closer than this are a tie; they are sums of floats. */
+const SCORE_EPSILON = 1e-9;
+
 /** Lowest note on the instrument. */
 const CELLO_LOW = OPEN_STRING_MIDI.C; // 36
 
@@ -110,7 +113,8 @@ export function bestOctaveShiftToRange(
     const median = medianOf(pitches) + shift;
     const score = fit * 100 - Math.max(0, median - medianCeiling) * ABOVE_CEILING_COST;
     // Ties go to the smaller move: leave the music where it was written.
-    if (score > bestScore || (score === bestScore && Math.abs(shift) < Math.abs(best.shift))) {
+    const tied = Math.abs(score - bestScore) < SCORE_EPSILON;
+    if ((score > bestScore && !tied) || (tied && Math.abs(shift) < Math.abs(best.shift))) {
       best = { shift, fit };
       bestScore = score;
     }

@@ -2,16 +2,17 @@ import { useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { View } from 'react-native';
 
-import { pickMidi } from '@/audio/backing/pickMidi';
-import { Button, PressableRow } from '@/components/ui/controls';
-import { Body, Grow, Kicker, Label, Num, Row, Rule, Stack, Title } from '@/components/ui/primitives';
-import { Screen, ScreenHeader } from '@/components/ui/Screen';
-import { instrumentForProgram } from '@/domain/backing';
-import { midiToPitchName } from '@/domain/cello';
-import { importScore, suggestSoloTrack } from '@/domain/importScore';
-import { ParsedMidi, parseMidi } from '@/domain/midi';
-import { encodeForStorage, idForFile, MAX_MIDI_BYTES, useImportedLibrary } from '@/state/library';
-import { useTheme } from '@/theme/ThemeProvider';
+import { pickMidi } from '@audio';
+import {
+  Button, PressableRow, Body, Grow, Kicker, Label, Num, Row, Rule, Stack, Title, Screen,
+  ScreenHeader,
+} from '@components';
+import {
+  instrumentForProgram, midiToPitchName, importScore, suggestSoloTrack, ParsedMidi, parseMidi,
+  type ImportedPiece,
+} from '@domain';
+import { encodeForStorage, idForFile, MAX_MIDI_BYTES, useImportedLibrary } from '@state';
+import { useTheme } from '@theme';
 
 interface Staged {
   name: string;
@@ -72,15 +73,15 @@ export default function ImportScreen() {
   );
 
   /** Dry run, so problems surface before the piece joins the library. */
-  const preview = useMemo(() => {
+  const preview = useMemo((): ImportPreviewState => {
     if (!staged || soloTrack === null) return null;
     try {
       const piece = importScore(staged.parsed, {
         id: 'preview', title, composer: 'Imported', soloTrack,
       });
-      return { piece, error: null as string | null };
+      return { piece };
     } catch (cause) {
-      return { piece: null, error: cause instanceof Error ? cause.message : String(cause) };
+      return { error: cause instanceof Error ? cause.message : String(cause) };
     }
   }, [staged, soloTrack, title]);
 
@@ -164,7 +165,7 @@ export default function ImportScreen() {
               return (
                 <View key={track.index}>
                   <PressableRow
-                    accessibilityLabel={`Use ${track.name ?? `track ${track.index + 1}`} as the cello line`}
+                    accessibilityLabel={`Use ${trackName(track)} as the cello line`}
                     selected={selected}
                     onPress={() => setSoloTrack(track.index)}
                   >
@@ -201,26 +202,7 @@ export default function ImportScreen() {
             })}
 
             <Stack padX={22} padY={18} gap={10}>
-              {preview?.error ? (
-                <Body size={13} color={chrome.accent}>{preview.error}</Body>
-              ) : preview?.piece ? (
-                <>
-                  <Label size={11}>WHAT YOU WILL GET</Label>
-                  <Row gap={16} style={{ flexWrap: 'wrap' }}>
-                    <Num size={14}>{`${preview.piece.score.notes.length} NOTES`}</Num>
-                    <Num size={14}>{`${preview.piece.score.measures.length} BARS`}</Num>
-                    <Num size={14}>{`${preview.piece.shiftCount} SHIFTS`}</Num>
-                    <Num size={14}>
-                      {`${preview.piece.backing.parts.filter((p) => p.role === 'accompaniment').length} BACKING PARTS`}
-                    </Num>
-                  </Row>
-                  {preview.piece.skippedNotes > 0 ? (
-                    <Body size={12} color={chrome.dim}>
-                      {`${preview.piece.skippedNotes} notes fall outside the cello's range and were dropped. Notes merely too high are moved down an octave rather than lost.`}
-                    </Body>
-                  ) : null}
-                </>
-              ) : null}
+              <ImportPreview preview={preview} />
 
               <Button
                 label="Add to library"
@@ -234,5 +216,36 @@ export default function ImportScreen() {
         )}
       </Screen>
     </Screen>
+  );
+}
+
+function trackName(track: { name?: string | null; index: number }): string {
+  return track.name ?? `track ${track.index + 1}`;
+}
+
+type ImportPreviewState = { piece?: ImportedPiece; error?: string } | null;
+
+/** What the chosen track becomes: counts of notes, bars, shifts and backing parts, or why it failed. */
+function ImportPreview({ preview }: { preview: ImportPreviewState }) {
+  const { chrome } = useTheme();
+  if (preview?.error) return <Body size={13} color={chrome.accent}>{preview.error}</Body>;
+  const piece = preview?.piece;
+  if (!piece) return null;
+  const backingParts = piece.backing.parts.filter((part) => part.role === 'accompaniment').length;
+  return (
+    <>
+      <Label size={11}>WHAT YOU WILL GET</Label>
+      <Row gap={16} style={{ flexWrap: 'wrap' }}>
+        <Num size={14}>{`${piece.score.notes.length} NOTES`}</Num>
+        <Num size={14}>{`${piece.score.measures.length} BARS`}</Num>
+        <Num size={14}>{`${piece.shiftCount} SHIFTS`}</Num>
+        <Num size={14}>{`${backingParts} BACKING PARTS`}</Num>
+      </Row>
+      {piece.skippedNotes > 0 ? (
+        <Body size={12} color={chrome.dim}>
+          {`${piece.skippedNotes} notes fall outside the cello's range and were dropped. Notes merely too high are moved down an octave rather than lost.`}
+        </Body>
+      ) : null}
+    </>
   );
 }

@@ -3,7 +3,7 @@ import React from 'react';
 import { Pressable, ScrollView, StyleProp, View, ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useTheme } from '@/theme/ThemeProvider';
+import { useTheme } from '@theme';
 import { Grow, Label, Rule } from './primitives';
 
 /**

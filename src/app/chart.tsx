@@ -1,22 +1,21 @@
 import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
 
-import { FingerboardChart, NoteDisc } from '@/components/FingerboardChart';
-import { Segmented, Toggle } from '@/components/ui/controls';
-import { Body, Label, Num, Row, Rule, Stack, Title } from '@/components/ui/primitives';
-import { Screen, ScreenHeader } from '@/components/ui/Screen';
+import {
+  FingerboardChart, NoteDisc, Segmented, Toggle, Body, Label, Num, Row, Rule, Stack, Title,
+  Screen, ScreenHeader,
+  type Segment,
+} from '@components';
 import {
   DISPLAY_STRING_ORDER, midiAt, midiToPitchName, OPEN_STRING_MIDI, STRING_NUMERAL,
-} from '@/domain/cello';
-import {
   LETTER_PITCH_CLASS, NOTE_COLOR, NOTE_COLOR_LABEL, NOTE_LETTERS,
-} from '@/domain/noteColors';
-import { BoardView, useSettings } from '@/state/settings';
-import { useTheme } from '@/theme/ThemeProvider';
+} from '@domain';
+import { BoardView, useTapeSettings, useVisionPreferences } from '@state';
+import { useTheme } from '@theme';
 
-const BOARD_VIEWS = [
-  { value: 'reader' as const, label: 'Diagram', hint: 'Nut at the top, as a chart is printed' },
-  { value: 'player' as const, label: 'Player', hint: 'Nut at the bottom, as you see it' },
+const BOARD_VIEWS: readonly Segment<BoardView>[] = [
+  { value: 'reader', label: 'Diagram', hint: 'Nut at the top, as a chart is printed' },
+  { value: 'player', label: 'Player', hint: 'Nut at the bottom, as you see it' },
 ];
 
 /**
@@ -35,15 +34,16 @@ const BOARD_VIEWS = [
 export default function ChartScreen() {
   const theme = useTheme();
   const { chrome } = theme;
-  const { settings } = useSettings();
+  const { tapeSets, showTapes: preferTapes } = useTapeSettings();
+  const { boardView: preferredBoardView } = useVisionPreferences();
   const wide = !theme.scale.compact;
 
   // Local, not the shared preference. Turning the chart round to read it the
   // way a poster is printed should not quietly turn the play screen's
   // fingerboard round too — but it is worth arriving on whichever way up the
   // player already reads everything else.
-  const [boardView, setBoardView] = useState<BoardView>(settings.boardView);
-  const [showTapes, setShowTapes] = useState(settings.showTapes);
+  const [boardView, setBoardView] = useState<BoardView>(preferredBoardView);
+  const [showTapes, setShowTapes] = useState(preferTapes);
 
   // Tall enough that the crowded rows near the octave still take a disc each.
   const boardHeight = theme.s(720);
@@ -90,7 +90,7 @@ export default function ChartScreen() {
                 <View>
                   <FingerboardChart
                     height={boardHeight}
-                    tapeSets={settings.tapeSets}
+                    tapeSets={tapeSets}
                     showTapes={showTapes}
                     invert={boardView === 'player'}
                   />

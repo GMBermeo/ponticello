@@ -1,4 +1,5 @@
-import { getCelloChord, type CelloChordStudy } from './celloChords';
+import { getCelloChord } from './celloChords';
+import type { CelloChordStudy } from './chords';
 import { chordsInScale, type ChordScaleId } from './chordScales';
 
 export interface ProgressionChordItem {
@@ -24,6 +25,18 @@ export interface CustomProgressionData {
   rows: ProgressionRowItem[];
 }
 
+let idSequence = 0;
+
+/**
+ * An identifier unique on this device: the clock keeps it distinct across
+ * launches, the sequence within one. These are list keys and storage ids,
+ * never secrets, so no randomness is needed.
+ */
+function uniqueId(prefix: string): string {
+  idSequence += 1;
+  return `${prefix}-${Date.now().toString(36)}-${idSequence.toString(36)}`;
+}
+
 export interface SavedProgressionEntry {
   id: string;
   title: string;
@@ -35,7 +48,7 @@ export interface SavedProgressionEntry {
 
 export function createSavedEntry(data: CustomProgressionData): SavedProgressionEntry {
   return {
-    id: `saved-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    id: uniqueId('saved'),
     title: data.title.trim() || 'Untitled Progression',
     savedAt: new Date().toISOString(),
     keyRoot: data.keyRoot,
@@ -204,7 +217,7 @@ export function addChordToRow(
   degree?: string | null
 ): CustomProgressionData {
   const chord: ProgressionChordItem = {
-    id: `chord-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    id: uniqueId('chord'),
     symbol,
     degree: degree ?? getRomanDegree(symbol, progression.keyRoot, progression.keyScale),
     beats: progression.beatsPerChord,
@@ -308,7 +321,7 @@ export function addRow(
     rows: [
       ...progression.rows,
       {
-        id: `row-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        id: uniqueId('row'),
         label: label ?? `Row ${rowNum}`,
         chords: [],
       },
@@ -357,4 +370,60 @@ export function applyPreset(
       })),
     })),
   };
+}
+
+/** Index that `moveChordBetweenRows` clamps to the end of the target row. */
+export const END_OF_ROW = Number.MAX_SAFE_INTEGER;
+
+export const MIN_PROGRESSION_BPM = 30;
+export const MAX_PROGRESSION_BPM = 240;
+export const DEFAULT_PROGRESSION_BPM = 80;
+
+/** A typed BPM, or null when it is not a whole number in the usable range. */
+export function parseProgressionBpm(text: string): number | null {
+  const value = Number.parseInt(text, 10);
+  if (Number.isNaN(value)) return null;
+  return value >= MIN_PROGRESSION_BPM && value <= MAX_PROGRESSION_BPM ? value : null;
+}
+
+/** How long each chord sounds at a tempo and playback speed. */
+export function msPerChord(bpm: number, speed: number, beatsPerChord: number): number {
+  const effectiveBpm = Math.max(MIN_PROGRESSION_BPM, bpm) * speed;
+  return (60_000 / effectiveBpm) * beatsPerChord;
+}
+
+export function countChords(progression: CustomProgressionData): number {
+  return progression.rows.reduce((total, row) => total + row.chords.length, 0);
+}
+
+/** Replaces a saved entry with the same title, ignoring case, or puts the new one first. */
+export function upsertSavedEntry(
+  saved: readonly SavedProgressionEntry[],
+  entry: SavedProgressionEntry,
+): SavedProgressionEntry[] {
+  const title = entry.title.toLowerCase();
+  const existing = saved.findIndex((candidate) => candidate.title.trim().toLowerCase() === title);
+  if (existing < 0) return [entry, ...saved];
+  return saved.map((candidate, index) => (index === existing ? entry : candidate));
+}
+
+/** A file name for an exported progression: its title with anything unsafe replaced. */
+export function progressionFileName(title: string): string {
+  const slug = (title || 'progression').toLowerCase().replaceAll(/[^a-z0-9_-]/gi, '_');
+  return `${slug}.json`;
+}
+
+/** A stored draft, or null when the stored text is not a progression. */
+export function parseStoredProgression(raw: string | null): CustomProgressionData | null {
+  if (!raw) return null;
+  const parsed: unknown = JSON.parse(raw);
+  const looksValid = typeof parsed === 'object' && parsed !== null && Array.isArray((parsed as { rows?: unknown }).rows);
+  return looksValid ? (parsed as CustomProgressionData) : null;
+}
+
+/** The stored saved list, or an empty one when the stored text is not a list. */
+export function parseSavedProgressions(raw: string | null): SavedProgressionEntry[] {
+  if (!raw) return [];
+  const parsed: unknown = JSON.parse(raw);
+  return Array.isArray(parsed) ? (parsed as SavedProgressionEntry[]) : [];
 }

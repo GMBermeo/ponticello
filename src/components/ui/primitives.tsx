@@ -2,9 +2,8 @@ import { useMemo } from 'react';
 import { StyleProp, Text, TextProps, TextStyle, View, ViewProps, ViewStyle } from 'react-native';
 
 import {
-  bodyStyle, labelStyle, labelTracking, numberStyle, titleStyle, useTheme,
-} from '@/theme/ThemeProvider';
-import { FONT } from '@/theme/tokens';
+  bodyStyle, labelStyle, labelTracking, numberStyle, titleStyle, useTheme, FONT,
+} from '@theme';
 
 /**
  * Shared text, spacing, and musical cues for the matte practice interface. Every size arrives in design units and is converted through the

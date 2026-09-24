@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { BackingPart } from '@/domain/backing';
-import { loopOffsetSeconds, practiceLoop } from '@/domain/loop';
-import { CelloSongScore } from '@/domain/schema';
+import { BackingPart, loopOffsetSeconds, practiceLoop, CelloSongScore } from '@domain';
 import { buildProgram, estimatePeak, notesActiveAtOffset, resolveAudibleProgram } from '../backing/program';
 import { renderProgramInto } from '../synth';
 

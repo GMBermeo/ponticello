@@ -3,7 +3,7 @@ import React, {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useSyncExternalStore,
 } from 'react';
 
-import { PracticeLog, recordSession } from '@/domain/practice';
+import { PracticeLog, recordSession } from '@domain';
 
 /**
  * The practice log, on this phone only.

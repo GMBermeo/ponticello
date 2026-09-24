@@ -1,14 +1,13 @@
 /** Pure chord data + cello placements. See docs/cello-chords.md for scope/sources. */
 import * as Note from '@tonaljs/note';
 import * as Interval from '@tonaljs/interval';
-import { OPEN_STRING_MIDI, STRING_ORDER } from './cello';
+import { OPEN_STRING_MIDI, STRING_ORDER, toPitchClass } from './cello';
 import rawCatalog from './chords/catalog.generated.json';
-import { CHORD_FRAMES, findCelloChordShapes } from './chords/shapeSearch';
-import type {
-  CelloChordCatalog, CelloChordEntry, CelloChordShape, CelloChordStudy, CelloChordType,
-  ChordFinger, ChordPlacement, ChordTone, ChordVoicing,
-} from './chords/types';
-export type * from './chords/types';
+import {
+  CHORD_FRAMES, findCelloChordShapes, type CelloChordCatalog, type CelloChordEntry,
+  type CelloChordShape, type CelloChordStudy, type CelloChordType, type ChordFinger,
+  type ChordPlacement, type ChordTone, type ChordVoicing,
+} from './chords';
 
 function deepFreeze<T>(value: T): T {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -29,7 +28,6 @@ export const CELLO_CHORD_ROOTS = Object.freeze(['C', 'Db', 'D', 'Eb', 'E', 'F', 
 
 const typesByAlias = new Map(CELLO_CHORD_TYPES.flatMap((type) =>
   [...new Set([type.id, type.name, ...type.aliases])].map((alias) => [alias, type] as const)));
-const pc = (n: number) => ((n % 12) + 12) % 12;
 
 function normalize(text: string): string {
   return text.trim().replace(/♯/g, '#').replace(/♭/g, 'b').replace(/º/g, '°');
@@ -59,8 +57,8 @@ function chordTones(root: string, type: CelloChordType): readonly ChordTone[] {
     const semitones = type.semitones[i];
     if (semitones === undefined) throw new Error(`Missing interval in ${type.id}`);
     return {
-      interval, semitones, pitchClass: pc(rootPc + semitones),
-      name: Note.transpose(root, interval), isRoot: pc(semitones) === 0,
+      interval, semitones, pitchClass: toPitchClass(rootPc + semitones),
+      name: Note.transpose(root, interval), isRoot: toPitchClass(semitones) === 0,
     };
   });
 }
@@ -75,12 +73,19 @@ function placement(
   };
 }
 
+/** Three stopped notes, a flattened finger or an extension is advanced; leaving first position, or two stops, intermediate. */
+function shapeDifficulty(stoppedCount: number, flattened: boolean, shape: CelloChordShape): ChordVoicing['difficulty'] {
+  if (stoppedCount >= 3 || flattened || shape.frame === 'extended') return 'advanced';
+  if (shape.anchor > 2 || stoppedCount > 1) return 'intermediate';
+  return 'basic';
+}
+
 function expandShape(shape: CelloChordShape, tones: readonly ChordTone[]): ChordVoicing {
   const notes = STRING_ORDER.flatMap((string, i) => {
     const stop = shape.stops[i];
     const finger = shape.fingers[i];
     if (stop === null || stop === undefined || !finger) return [];
-    const tone = tones.find((t) => t.pitchClass === pc(OPEN_STRING_MIDI[string] + stop));
+    const tone = tones.find((t) => t.pitchClass === toPitchClass(OPEN_STRING_MIDI[string] + stop));
     if (!tone) throw new Error('Shape contains a non-chord tone');
     return [placement(string, stop, finger, shape.anchor, shape.frame, tone)];
   });
@@ -94,8 +99,7 @@ function expandShape(shape: CelloChordShape, tones: readonly ChordTone[]): Chord
     bass, inversion: tones.findIndex((tone) => tone.pitchClass === bass.pitchClass),
     technique: notes.length === 2 ? 'double-stop' : 'rolled-chord',
     completeness: omittedTones.length ? 'reduced' : 'complete', omittedTones,
-    difficulty: stopped.length >= 3 || flattened || shape.frame === 'extended' ? 'advanced'
-      : shape.anchor > 2 || stopped.length > 1 ? 'intermediate' : 'basic',
+    difficulty: shapeDifficulty(stopped.length, flattened, shape),
     review: 'generated-needs-cellist-review',
   };
 }
@@ -135,7 +139,7 @@ function study(root: string, type: CelloChordType, bassName: string | null, shap
     // never relabel it as the root or silently substitute root-position shapes.
     const bassMidi = 36 + bassPc;
     const slashTone: ChordTone = bassTone ?? {
-      interval: Interval.distance(root, bassName!), semitones: pc(bassPc - rootPc),
+      interval: Interval.distance(root, bassName!), semitones: toPitchClass(bassPc - rootPc),
       pitchClass: bassPc, name: bassName!, isRoot: bassPc === rootPc,
     };
     const ascending = tones.map((tone) => {
@@ -146,7 +150,7 @@ function study(root: string, type: CelloChordType, bassName: string | null, shap
     arpeggio = [arpeggioPlacement(bassMidi, slashTone), ...ascending.filter((n) => n.midi !== bassMidi)];
   }
   return deepFreeze({
-    symbol: `${root}${type.id}${bassName ? `/${bassName}` : ''}`, root, type, tones,
+    symbol: bassName ? `${root}${type.id}/${bassName}` : `${root}${type.id}`, root, type, tones,
     requestedBass: bassName, voicings, arpeggio,
     status: voicings.length ? 'shapes-available' : 'arpeggio-only',
   });
@@ -194,7 +198,7 @@ export function createCelloChord(rootName: string, intervals: readonly string[])
     }
     return { interval: value.name, semitones: value.semitones };
   }).sort((a, b) => a.semitones - b.semitones);
-  if (new Set(parsed.map((p) => pc(p.semitones))).size !== parsed.length) {
+  if (new Set(parsed.map((p) => toPitchClass(p.semitones))).size !== parsed.length) {
     throw new Error('Custom intervals must have distinct pitch classes');
   }
   const type: CelloChordType = {

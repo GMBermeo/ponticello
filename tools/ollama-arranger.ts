@@ -23,14 +23,9 @@ import { basename, join, resolve } from "node:path";
 import { DEFAULT_OLLAMA_HOST, DEFAULT_OLLAMA_MODEL } from './ollama/config';
 
 import {
-  ARRANGEMENT_WEIGHTS,
-  CelloState,
-  firstPositionFingering,
-  RawNoteEvent,
-  solveFingering,
-} from "../src/domain/fingering";
-import { parseMidi } from "../src/domain/midi";
-import { DifficultyTier, validateScore } from "../src/domain/schema";
+  ARRANGEMENT_WEIGHTS, CelloState, firstPositionFingering, RawNoteEvent, solveFingering,
+  parseMidi, DifficultyTier, validateScore,
+} from '@domain';
 import {
   AmbiguousNoteAudit,
   auditFretboardNotes,
@@ -253,6 +248,51 @@ async function processFile(filePath: string, options: CliOptions, skill: CelloSc
 
 // ─── Main Batch Orchestrator ─────────────────────────────────────────────────
 
+type RunCache = Record<string, { status: string; timestamp: string }>;
+
+function loadRunCache(file: string): RunCache {
+  if (!existsSync(file)) return {};
+  try {
+    return JSON.parse(readFileSync(file, "utf-8"));
+  } catch {
+    // A corrupt cache only costs a re-run of songs already done.
+    return {};
+  }
+}
+
+type RunOptions = Parameters<typeof processFile>[1];
+type Skill = Parameters<typeof processFile>[2];
+
+/** Arranges every downloaded MIDI file in turn, recording each outcome so a later run can resume. */
+async function processAll(options: RunOptions, skill: Skill): Promise<void> {
+  const midiFiles = globSync("_MIDIS/downloaded/*.{mid,midi}").sort();
+  console.log(`Found ${midiFiles.length} files in _MIDIS/downloaded/`);
+  const cache = loadRunCache(options.cacheFile);
+  let processedCount = 0;
+  for (const filePath of midiFiles) {
+    const fileName = basename(filePath);
+    if (options.resume && cache[fileName]?.status === "completed") {
+      console.log(`  [SKIP] ${fileName} (already completed)`);
+      continue;
+    }
+    if (options.max !== null && processedCount >= options.max) {
+      console.log(`\nReached maximum batch limit of ${options.max} songs.`);
+      break;
+    }
+    let status = "completed";
+    try {
+      await processFile(filePath, options, skill);
+      processedCount++;
+    } catch (err) {
+      console.error(`  [ERROR] Failed processing ${fileName}:`, err);
+      status = "failed";
+    }
+    cache[fileName] = { status, timestamp: new Date().toISOString() };
+    writeFileSync(options.cacheFile, JSON.stringify(cache, null, 2));
+  }
+  console.log(`\nBatch run completed. Processed: ${processedCount} songs.`);
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
 
@@ -271,52 +311,7 @@ async function main() {
   }
 
   if (options.all) {
-    const midiFiles = globSync("_MIDIS/downloaded/*.{mid,midi}").sort();
-    console.log(`Found ${midiFiles.length} files in _MIDIS/downloaded/`);
-
-    // Load cache
-    let cache: Record<string, { status: string; timestamp: string }> = {};
-    if (existsSync(options.cacheFile)) {
-      try {
-        cache = JSON.parse(readFileSync(options.cacheFile, "utf-8"));
-      } catch {
-        cache = {};
-      }
-    }
-
-    let processedCount = 0;
-    for (const filePath of midiFiles) {
-      const fileName = basename(filePath);
-
-      if (options.resume && cache[fileName]?.status === "completed") {
-        console.log(`  [SKIP] ${fileName} (already completed)`);
-        continue;
-      }
-
-      if (options.max !== null && processedCount >= options.max) {
-        console.log(`\nReached maximum batch limit of ${options.max} songs.`);
-        break;
-      }
-
-      try {
-        await processFile(filePath, options, skill);
-        cache[fileName] = {
-          status: "completed",
-          timestamp: new Date().toISOString(),
-        };
-        processedCount++;
-      } catch (err) {
-        console.error(`  [ERROR] Failed processing ${fileName}:`, err);
-        cache[fileName] = {
-          status: "failed",
-          timestamp: new Date().toISOString(),
-        };
-      }
-
-      writeFileSync(options.cacheFile, JSON.stringify(cache, null, 2));
-    }
-
-    console.log(`\nBatch run completed. Processed: ${processedCount} songs.`);
+    await processAll(options, skill);
     return;
   }
 

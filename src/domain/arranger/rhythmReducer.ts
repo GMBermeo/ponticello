@@ -67,6 +67,70 @@ export function noteSalience(
   return score;
 }
 
+type Salience = (index: number) => number;
+
+/** Notes grouped into windows one attack long, keeping the most salient of each. */
+function mostSalientPerBucket(notes: readonly MidiNote[], bucketMs: number, salience: Salience): number[] {
+  const origin = notes[0]?.startTimeMs ?? 0;
+  const buckets = new Map<number, number[]>();
+  notes.forEach((note, index) => {
+    const bucket = Math.floor((note.startTimeMs - origin) / bucketMs);
+    const entries = buckets.get(bucket) ?? [];
+    entries.push(index);
+    buckets.set(bucket, entries);
+  });
+  return [...buckets.values()].map((indices) => indices.reduce(
+    (best, index) => (salience(index) > salience(best) ? index : best),
+    indices[0] ?? 0,
+  ));
+}
+
+/** Where two kept notes land closer than one attack apart, keeps the more salient. */
+function spaceAttacks(notes: readonly MidiNote[], chosen: readonly number[], bucketMs: number, salience: Salience): number[] {
+  const spaced: number[] = [];
+  for (const index of chosen) {
+    const note = notes[index];
+    if (!note) continue;
+    const previousIndex = spaced.at(-1);
+    const previous = previousIndex === undefined ? undefined : notes[previousIndex];
+    if (!previous || note.startTimeMs - previous.startTimeMs >= bucketMs) spaced.push(index);
+    else if (previousIndex !== undefined && salience(index) > salience(previousIndex)) spaced[spaced.length - 1] = index;
+  }
+  return spaced;
+}
+
+/**
+ * A later note, still before `limitMs` and after `floorMs`, that rings on
+ * longer than the kept one — so a held note is not lost to a short attack
+ * that happened to fall on the beat. −1 when there is none.
+ */
+function longerRingingNote(notes: readonly MidiNote[], index: number, floorMs: number, limitMs: number, bucketMs: number): number {
+  const note = notes[index]!;
+  const endOf = (n: MidiNote) => n.startTimeMs + n.durationMs;
+  let swap = -1;
+  for (let j = index + 1; j < notes.length && notes[j]!.startTimeMs < limitMs; j++) {
+    const candidate = notes[j]!;
+    const fits = candidate.startTimeMs >= floorMs && limitMs - candidate.startTimeMs >= bucketMs;
+    const ringsLonger = endOf(candidate) > endOf(note);
+    if (fits && ringsLonger && (swap === -1 || endOf(candidate) > endOf(notes[swap]!))) swap = j;
+  }
+  return swap;
+}
+
+/** Prefers a longer-ringing note wherever the kept one leaves a gap before the next. */
+function preferRingingNotes(notes: readonly MidiNote[], spaced: number[], bucketMs: number): void {
+  for (let i = 1; i < spaced.length; i++) {
+    const note = notes[spaced[i]!]!;
+    const next = spaced[i + 1];
+    if (next === undefined) continue;
+    const limitMs = notes[next]!.startTimeMs;
+    if (note.startTimeMs + note.durationMs + bucketMs >= limitMs) continue;
+    const floorMs = notes[spaced[i - 1]!]!.startTimeMs + bucketMs;
+    const swap = longerRingingNote(notes, spaced[i]!, floorMs, limitMs, bucketMs);
+    if (swap !== -1) spaced[i] = swap;
+  }
+}
+
 /**
  * Reduces bow attacks while retaining phrase starts, beats, long/loud notes,
  * contour turns, and anchors of recurring motifs.
@@ -82,59 +146,10 @@ export function simplifyLine(
   const bucketMs = 1000 / attackCeiling;
   const beatMs = 60000 / Math.max(20, bpm || 120);
   const anchors = recurringAnchorIndices(notes);
-  const origin = notes[0]?.startTimeMs ?? 0;
-  const buckets = new Map<number, number[]>();
+  const salience: Salience = (index) => noteSalience(notes, index, beatMs, anchors);
 
-  notes.forEach((note, index) => {
-    const bucket = Math.floor((note.startTimeMs - origin) / bucketMs);
-    const entries = buckets.get(bucket) ?? [];
-    entries.push(index);
-    buckets.set(bucket, entries);
-  });
-
-  const chosen = [...buckets.values()].map((indices) => indices.reduce((best, index) => {
-    const candidateScore = noteSalience(notes, index, beatMs, anchors);
-    const bestScore = noteSalience(notes, best, beatMs, anchors);
-    return candidateScore > bestScore ? index : best;
-  }, indices[0] ?? 0));
-
-  const spaced: number[] = [];
-  for (const index of chosen) {
-    const previousIndex = spaced[spaced.length - 1];
-    const note = notes[index];
-    const previous = previousIndex === undefined ? undefined : notes[previousIndex];
-    if (!note) continue;
-    if (!previous || note.startTimeMs - previous.startTimeMs >= bucketMs) {
-      spaced.push(index);
-      continue;
-    }
-    if (previousIndex !== undefined
-      && noteSalience(notes, index, beatMs, anchors) > noteSalience(notes, previousIndex, beatMs, anchors)) {
-      spaced[spaced.length - 1] = index;
-    }
-  }
-
-  for (let i = 1; i < spaced.length; i++) {
-    const index = spaced[i]!;
-    const note = notes[index]!;
-    const next = spaced[i + 1];
-    const limit = next === undefined ? Infinity : notes[next]!.startTimeMs;
-    if (!Number.isFinite(limit) || note.startTimeMs + note.durationMs + bucketMs >= limit) continue;
-    const previous = spaced[i - 1];
-    const floor = previous === undefined ? -Infinity : notes[previous]!.startTimeMs + bucketMs;
-    let swap = -1;
-    for (let j = index + 1; j < notes.length && notes[j]!.startTimeMs < limit; j++) {
-      const candidate = notes[j]!;
-      if (candidate.startTimeMs < floor) continue;
-      if (limit - candidate.startTimeMs < bucketMs) continue;
-      if (candidate.startTimeMs + candidate.durationMs <= note.startTimeMs + note.durationMs) continue;
-      if (swap === -1
-        || candidate.startTimeMs + candidate.durationMs > notes[swap]!.startTimeMs + notes[swap]!.durationMs) {
-        swap = j;
-      }
-    }
-    if (swap !== -1) spaced[i] = swap;
-  }
+  const spaced = spaceAttacks(notes, mostSalientPerBucket(notes, bucketMs, salience), bucketMs, salience);
+  preferRingingNotes(notes, spaced, bucketMs);
 
   return spaced.map((index, outputIndex) => {
     const note = notes[index];

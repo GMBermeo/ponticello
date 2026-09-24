@@ -51,6 +51,54 @@ const SLICE_SEC = 2;
 /** Yields to the event loop so the UI can paint between slices. */
 const yieldToLoop = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
+/**
+ * Renders a program to WAV bytes in slices, yielding to the event loop between
+ * them so a long song costs patience rather than dropped frames. Returns null
+ * as soon as `isCurrent` says a newer program has superseded this one: the
+ * loop may have moved three times while this render was halfway through.
+ */
+async function renderProgramWav(
+  program: BackingProgram,
+  isCurrent: () => boolean,
+  onProgress: (fraction: number) => void,
+): Promise<Uint8Array | null> {
+  const totalSamples = Math.max(1, Math.ceil(program.durationSec * SAMPLE_RATE));
+  const bytes = new Uint8Array(wavByteLength(totalSamples));
+  writeWavHeader(bytes, totalSamples, SAMPLE_RATE);
+
+  const sliceSamples = SLICE_SEC * SAMPLE_RATE;
+  const slice = new Float32Array(sliceSamples);
+
+  for (let from = 0; from < totalSamples; from += sliceSamples) {
+    const length = Math.min(sliceSamples, totalSamples - from);
+    const view = length === sliceSamples ? slice : slice.subarray(0, length);
+
+    renderProgramInto(view, program, from, SAMPLE_RATE);
+    // Fade the very first and very last few milliseconds, or the loop point
+    // clicks on every repeat.
+    if (from === 0) fadeIn(view, SAMPLE_RATE);
+    if (from + length >= totalSamples) fadeOut(view, SAMPLE_RATE);
+    encodeWavInto(bytes, view, from);
+
+    if (!isCurrent()) return null;
+    onProgress(Math.min(0.99, (from + length) / totalSamples));
+    await yieldToLoop();
+    if (!isCurrent()) return null;
+  }
+  return bytes;
+}
+
+/** Writes the rendered loop to one of two cache slots, so the playing file is never overwritten. */
+function writeBackingFile(bytes: Uint8Array, slot: number): File {
+  const directory = new Directory(Paths.cache, CACHE_DIRECTORY);
+  if (!directory.exists) directory.create({ intermediates: true });
+  const file = new File(directory, `backing-${slot}.wav`);
+  if (file.exists) file.delete();
+  file.create();
+  file.write(bytes);
+  return file;
+}
+
 export function useBackingPlayer(enabled: boolean): BackingPlayer {
   const playerRef = useRef<AudioPlayer | null>(null);
   const slotRef = useRef(0);
@@ -115,48 +163,18 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
     setProgress(0);
 
     try {
-      const totalSamples = Math.max(1, Math.ceil(program.durationSec * SAMPLE_RATE));
-      const bytes = new Uint8Array(wavByteLength(totalSamples));
-      writeWavHeader(bytes, totalSamples, SAMPLE_RATE);
-
-      const sliceSamples = SLICE_SEC * SAMPLE_RATE;
-      const slice = new Float32Array(sliceSamples);
-
-      for (let from = 0; from < totalSamples; from += sliceSamples) {
-        const length = Math.min(sliceSamples, totalSamples - from);
-        const view = length === sliceSamples ? slice : slice.subarray(0, length);
-
-        renderProgramInto(view, program, from, SAMPLE_RATE);
-        // Fade the very first and very last few milliseconds, or the loop point
-        // clicks on every repeat.
-        if (from === 0) fadeIn(view, SAMPLE_RATE);
-        if (from + length >= totalSamples) fadeOut(view, SAMPLE_RATE);
-        encodeWavInto(bytes, view, from);
-
-        // Abandon a superseded render rather than finish it: the loop may have
-        // moved three times while this one was halfway through.
-        if (loadGenerationRef.current !== generation) return;
-        setProgress(Math.min(0.99, (from + length) / totalSamples));
-        await yieldToLoop();
-        if (loadGenerationRef.current !== generation) return;
-      }
-
-      const directory = new Directory(Paths.cache, CACHE_DIRECTORY);
-      if (!directory.exists) directory.create({ intermediates: true });
-
+      const isCurrent = () => loadGenerationRef.current === generation;
+      const bytes = await renderProgramWav(program, isCurrent, setProgress);
+      if (!bytes) return;
       slotRef.current = slotRef.current === 0 ? 1 : 0;
-      const file = new File(directory, `backing-${slotRef.current}.wav`);
-      if (file.exists) file.delete();
-      file.create();
-      file.write(bytes);
-
-      if (loadGenerationRef.current !== generation) return;
+      const file = writeBackingFile(bytes, slotRef.current);
+      if (!isCurrent()) return;
 
       const player = createAudioPlayer({ uri: file.uri });
       player.loop = true;
       player.volume = volumeRef.current;
 
-      if (loadGenerationRef.current !== generation) {
+      if (!isCurrent()) {
         dispose(player);
         return;
       }

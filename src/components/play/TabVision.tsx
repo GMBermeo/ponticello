@@ -2,13 +2,12 @@ import { memo, useMemo } from 'react';
 import { View } from 'react-native';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 
-import { DISPLAY_STRING_ORDER, OPEN_STRING_MIDI } from '@/domain/cello';
-import { CelloNote, CelloSongScore } from '@/domain/schema';
-import { TapeSet, tapeForSemitones } from '@/domain/tapes';
-import { FlowAxis } from '@/state/settings';
-import { Theme, useTheme } from '@/theme/ThemeProvider';
-import { alpha } from '@/theme/tokens';
-import { Label, Num } from '../ui/primitives';
+import {
+  DISPLAY_STRING_ORDER, OPEN_STRING_MIDI, CelloNote, CelloSongScore, TapeSet, tapeForSemitones,
+} from '@domain';
+import { FlowAxis } from '@state';
+import { Theme, useTheme, alpha, type Chrome } from '@theme';
+import { Label, Num } from '../ui';
 import { flowWindow, laneGeometry, timeAlongOffset, visibleSlice } from './flow';
 import { Playhead, usePlayheadPosition } from './usePlayhead';
 
@@ -360,6 +359,20 @@ export const TabVision = memo(function TabVision({
   );
 });
 
+type BadgeColors = { background: string; border: string; ink: string };
+
+/** A taped note wears its tape; otherwise the badge follows the string colour and the note's state. */
+function tabBadgeColors(chrome: Chrome, stringColor: string, tapeColor: string | null, active: boolean, played: boolean): BadgeColors {
+  if (tapeColor !== null) {
+    const ink = tapeTextColor(tapeColor);
+    const lightInkBorder = ink === '#000000' ? chrome.line : '#FFFFFF';
+    return { background: tapeColor, border: chrome.dark ? '#FFFFFF' : lightInkBorder, ink };
+  }
+  if (active) return { background: stringColor, border: stringColor, ink: chrome.bg };
+  if (played) return { background: chrome.bg, border: chrome.lineSoft, ink: chrome.dim };
+  return { background: chrome.bg, border: stringColor, ink: stringColor };
+}
+
 const TabBadge = memo(function TabBadge({
   note, along, lane, vertical, tapeColor, showFinger, active, played,
 }: {
@@ -381,7 +394,7 @@ const TabBadge = memo(function TabBadge({
   const h = theme.s(BADGE.height);
 
   const fret = Math.max(0, note.midiNumber - OPEN_STRING_MIDI[note.string]);
-  const hasTape = tapeColor !== null;
+  const colors = tabBadgeColors(chrome, stringColor, tapeColor, active, played);
 
   return (
     <View
@@ -393,18 +406,13 @@ const TabBadge = memo(function TabBadge({
         height: h,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: hasTape ? tapeColor : (active ? stringColor : chrome.bg),
+        backgroundColor: colors.background,
         borderWidth: theme.rule(2),
-        borderColor: hasTape
-          ? (chrome.dark ? '#FFFFFF' : (tapeTextColor(tapeColor) === '#000000' ? chrome.line : '#FFFFFF'))
-          : (played ? chrome.lineSoft : stringColor),
+        borderColor: colors.border,
         opacity: played ? 0.45 : 1,
       }}
     >
-      <Num
-        size={13}
-        color={hasTape ? tapeTextColor(tapeColor) : (active ? chrome.bg : (played ? chrome.dim : stringColor))}
-      >
+      <Num size={13} color={colors.ink}>
         {showFinger ? fret : '·'}
       </Num>
       {note.bowDirection === 'down' || note.bowDirection === 'up' ? (

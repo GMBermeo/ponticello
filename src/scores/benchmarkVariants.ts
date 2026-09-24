@@ -13,13 +13,11 @@
  * rebase to the first note — so the two stay in step by construction.
  */
 
-import { BackingPart, BackingTrack, InstrumentName, PartRole } from '@/domain/backing';
 import {
-  CelloFinger, CelloPosition, CelloString, midiToFrequency, midiToPitchName,
-} from '@/domain/cello';
-import {
-  CelloExtension, CelloMeasure, CelloNote, CelloSongScore, DifficultyTier, measureDurationMs,
-} from '@/domain/schema';
+  BackingPart, BackingTrack, InstrumentName, PartRole, CelloFinger, CelloPosition, CelloString,
+  midiToFrequency, midiToPitchName, CelloExtension, CelloMeasure, CelloNote, CelloSongScore,
+  DifficultyTier, measureDurationMs,
+} from '@domain';
 import rawData from './benchmarkVariants.json';
 
 /** `[midi, startMs, durationMs, string, finger, position, extension, accent]`. */

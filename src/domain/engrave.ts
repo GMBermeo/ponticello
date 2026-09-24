@@ -30,7 +30,9 @@ export const SIXTEENTHS_PER_BEAT = 4;
  * or two dots. Anything else is written as tied notes, which is what a
  * copyist does too.
  */
-const WRITABLE: { sixteenths: number; dots: 0 | 1 | 2 }[] = [
+type DotCount = 0 | 1 | 2;
+
+const WRITABLE: { sixteenths: number; dots: DotCount }[] = [
   { sixteenths: 16, dots: 0 }, // semibreve
   { sixteenths: 14, dots: 2 },
   { sixteenths: 12, dots: 1 }, // dotted minim
@@ -50,7 +52,7 @@ export interface NoteGlyph {
   midiNumber: number;
   pitchName: string;
   sixteenths: number;
-  dots: 0 | 1 | 2;
+  dots: DotCount;
   /** Position within the measure, in sixteenths from its start. */
   offset: number;
   /** Continues a note begun in the previous glyph. */
@@ -64,7 +66,7 @@ export interface NoteGlyph {
 export interface RestGlyph {
   kind: 'rest';
   sixteenths: number;
-  dots: 0 | 1 | 2;
+  dots: DotCount;
   offset: number;
 }
 
@@ -112,8 +114,8 @@ export interface EngravedScore {
  * Greedy from the longest value down, which is what makes 5 come out as a
  * crotchet tied to a semiquaver rather than five separate semiquavers.
  */
-export function decomposeDuration(sixteenths: number): { sixteenths: number; dots: 0 | 1 | 2 }[] {
-  const out: { sixteenths: number; dots: 0 | 1 | 2 }[] = [];
+export function decomposeDuration(sixteenths: number): { sixteenths: number; dots: DotCount }[] {
+  const out: { sixteenths: number; dots: DotCount }[] = [];
   let left = Math.max(1, Math.round(sixteenths));
   let guard = 0;
   while (left > 0 && guard++ < 64) {
@@ -299,11 +301,42 @@ export function buildMeasures(
 
 /** A measure's content as a string, for comparing bars. */
 function measureKey(m: EngravedMeasure): string {
-  return m.glyphs
-    .map((g) => (g.kind === 'note'
-      ? `n${g.midiNumber}.${g.sixteenths}.${g.dots}${g.tiedFrom ? 't' : ''}`
-      : `r${g.sixteenths}.${g.dots}`))
-    .join('|');
+  return m.glyphs.map(glyphKey).join('|');
+}
+
+function glyphKey(glyph: EngravedMeasure['glyphs'][number]): string {
+  if (glyph.kind !== 'note') return `r${glyph.sixteenths}.${glyph.dots}`;
+  const tie = glyph.tiedFrom ? 't' : '';
+  return `n${glyph.midiNumber}.${glyph.sixteenths}.${glyph.dots}${tie}`;
+}
+
+/** Whether bars `[a, a + size)` and `[b, b + size)` have identical content. */
+function sameBars(keys: readonly string[], a: number, b: number, size: number): boolean {
+  for (let k = 0; k < size; k++) {
+    if (keys[a + k] !== keys[b + k]) return false;
+  }
+  return true;
+}
+
+/** How many times the `size`-bar block at `start` plays in a row, counting itself. */
+function consecutiveTimes(keys: readonly string[], start: number, size: number): number {
+  let times = 1;
+  while (start + size * (times + 1) <= keys.length && sameBars(keys, start, start + size * times, size)) times++;
+  return times;
+}
+
+/**
+ * The longest block starting at `start` that repeats at once, or null.
+ * Prefer the longest: a four-bar phrase read as two repeated two-bar halves
+ * is not how anyone counts it.
+ */
+function repeatAt(keys: readonly string[], start: number): { size: number; times: number } | null {
+  for (let size = MAX_REPEAT_BARS; size >= MIN_REPEAT_BARS; size--) {
+    if (start + size * 2 > keys.length) continue;
+    const times = consecutiveTimes(keys, start, size);
+    if (times > 1) return { size, times };
+  }
+  return null;
 }
 
 /** Shortest block worth collapsing. One repeated bar is not worth the marks. */
@@ -324,24 +357,7 @@ export function detectRepeats(measures: EngravedMeasure[]): RepeatBlock[] {
   let i = 0;
 
   while (i < measures.length) {
-    let chosen: { size: number; times: number } | null = null;
-
-    for (let size = MAX_REPEAT_BARS; size >= MIN_REPEAT_BARS; size--) {
-      if (i + size * 2 > measures.length) continue;
-      let times = 1;
-      while (i + size * (times + 1) <= measures.length) {
-        let same = true;
-        for (let k = 0; k < size; k++) {
-          if (keys[i + k] !== keys[i + size * times + k]) { same = false; break; }
-        }
-        if (!same) break;
-        times++;
-      }
-      // Prefer the longest block that actually repeats; a four-bar phrase read
-      // as two repeated two-bar halves is not how anyone counts it.
-      if (times > 1) { chosen = { size, times }; break; }
-    }
-
+    const chosen = repeatAt(keys, i);
     const here = measures[i];
     if (!here) break;
 

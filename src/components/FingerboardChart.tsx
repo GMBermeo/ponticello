@@ -3,11 +3,10 @@ import { View } from 'react-native';
 
 import {
   CelloString, DISPLAY_STRING_ORDER, midiAt, POSITION_BASE_SEMITONES, stopDistanceMm,
-} from '@/domain/cello';
-import { lettersForPitchClass, NOTE_COLOR } from '@/domain/noteColors';
-import { TapeSet, tapeGeometry } from '@/domain/tapes';
-import { useTheme } from '@/theme/ThemeProvider';
-import { Label, Num } from './ui/primitives';
+  lettersForPitchClass, NOTE_COLOR, TapeSet, tapeGeometry,
+} from '@domain';
+import { useTheme } from '@theme';
+import { Label, Num } from './ui';
 
 /**
  * The printed fingerboard chart, drawn from the app's own constants.

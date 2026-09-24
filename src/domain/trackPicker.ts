@@ -30,7 +30,7 @@
 
 import {
   ArrangementLevel, ARRANGEMENT_PROFILES, simplifyLine, smoothLeaps,
-} from './arrangement';
+} from './arranger';
 import { BackingPart, InstrumentName } from './backing';
 import { midiToFrequency, midiToPitchName, OPEN_STRING_MIDI } from './cello';
 import { RawNoteEvent, seatLine } from './fingering';
@@ -154,6 +154,22 @@ function rangeLabelOf(low: number, high: number, preferFlats: boolean): string {
  * so on those levels an extension counts towards `reseated`. Above them the
  * stretch is allowed and is merely reported.
  */
+type PitchTally = { lowMidi: number; highMidi: number; belowFloor: number; aboveCeiling: number; extended: number };
+
+/** Where a part's pitches land once shifted: its span, and how many fall outside the range or need a stretch. */
+function tallyShiftedPitches(pitches: readonly number[], shift: number, range: { low: number; high: number }): PitchTally {
+  const tally: PitchTally = { lowMidi: Infinity, highMidi: -Infinity, belowFloor: 0, aboveCeiling: 0, extended: 0 };
+  for (const pitch of pitches) {
+    const moved = pitch + shift;
+    tally.lowMidi = Math.min(tally.lowMidi, moved);
+    tally.highMidi = Math.max(tally.highMidi, moved);
+    if (moved < range.low) tally.belowFloor++;
+    else if (moved > range.high) tally.aboveCeiling++;
+    else if (NEEDS_EXTENSION.has(moved)) tally.extended++;
+  }
+  return tally;
+}
+
 export function describeOctaveFit(
   pitches: readonly number[], octaves: number, level: ArrangementLevel,
   preferFlats = false,
@@ -162,27 +178,13 @@ export function describeOctaveFit(
   const shift = octaves * 12;
   const noteCount = pitches.length;
 
-  let lowMidi = Infinity;
-  let highMidi = -Infinity;
-  let belowFloor = 0;
-  let aboveCeiling = 0;
-  let extended = 0;
-
-  for (const pitch of pitches) {
-    const moved = pitch + shift;
-    if (moved < lowMidi) lowMidi = moved;
-    if (moved > highMidi) highMidi = moved;
-    if (moved < profile.range.low) belowFloor++;
-    else if (moved > profile.range.high) aboveCeiling++;
-    else if (NEEDS_EXTENSION.has(moved)) extended++;
-  }
+  const { lowMidi, highMidi, belowFloor, aboveCeiling, extended } = tallyShiftedPitches(pitches, shift, profile.range);
 
   const reseated = belowFloor + aboveCeiling + (profile.closedFrameOnly ? extended : 0);
   const placed = Math.max(0, noteCount - reseated);
   const placedShare = noteCount === 0 ? 0 : placed / noteCount;
-  const verdict: OctaveVerdict = noteCount === 0 || placedShare < REFUSAL_SHARE
-    ? 'refused'
-    : reseated > 0 ? 'folds' : 'fits';
+  let verdict: OctaveVerdict = reseated > 0 ? 'folds' : 'fits';
+  if (noteCount === 0 || placedShare < REFUSAL_SHARE) verdict = 'refused';
 
   const rangeLabel = noteCount === 0
     ? '—'
@@ -295,17 +297,27 @@ export function nearestWorkableOctave(
 // ─── Naming a part the way a player would ────────────────────────────────────
 
 /**
+ * A case-insensitive match for any of `words` as a whole word. Each entry is a
+ * regex fragment, so `sax\w*` also takes "saxophone".
+ */
+function wordPattern(words: readonly string[]): RegExp {
+  return new RegExp(`\\b(${words.join('|')})\\b`, 'i');
+}
+
+/**
  * Word-boundary matching throughout, for the reason `melody.ts` documents at
  * length: Tool's bassist is Justin Chan**cello**r, and a substring match on
  * "cello" transcribes Lateralus from the bass.
  */
-const NAME_CELLO = /\b(cello|violoncello|celli|vc)\b/i;
+const CELLO_WORDS = ['cello', 'violoncello', 'celli', 'vc'];
+const NAME_CELLO = wordPattern(CELLO_WORDS);
 
 /**
  * Bass, spelled out rather than matched with a suffix wildcard, because a
  * bassoon is a reed instrument playing an inner part and not a bass line.
  */
-const NAME_BASS = /\b(bass|basses|basse|bassline|contrabass|bajo)\b/i;
+const BASS_WORDS = ['bass', 'basses', 'basse', 'bassline', 'contrabass', 'bajo'];
+const NAME_BASS = wordPattern(BASS_WORDS);
 
 /**
  * The tune. Suffixes are allowed here — "Leadvocal", "Voices", "vocals2" are
@@ -313,7 +325,8 @@ const NAME_BASS = /\b(bass|basses|basse|bassline|contrabass|bajo)\b/i;
  * safe in a way it is not for `cello`, whose one dangerous false positive
  * ("Chancellor") is a *prefix* match.
  */
-const NAME_TUNE = /\b(vocal\w*|voice\w*|vox|sing\w*|lyric\w*|melod\w*|tune|theme|lead\w*|riff|solo)\b/i;
+const TUNE_WORDS = ['vocal\\w*', 'voice\\w*', 'vox', 'sing\\w*', 'lyric\\w*', 'melod\\w*', 'tune', 'theme', 'lead\\w*', 'riff', 'solo'];
+const NAME_TUNE = wordPattern(TUNE_WORDS);
 
 /**
  * A drum part, whatever channel it was programmed on.
@@ -325,7 +338,11 @@ const NAME_TUNE = /\b(vocal\w*|voice\w*|vox|sing\w*|lyric\w*|melod\w*|tune|theme
  * bass line. They do have pitches; they are not music. `tom` and `clap` are
  * deliberately absent, being too common in a musician's name for the risk.
  */
-const NAME_DRUM = /\b(drum\w*|snare|kick|cymbal|hi-?hat|hihat|conga|bongo|tambourine|cabasa|shaker|cowbell|timbale|perc\w*)\b/i;
+const DRUM_WORDS = [
+  'drum\\w*', 'snare', 'kick', 'cymbal', 'hi-?hat', 'hihat', 'conga', 'bongo', 'tambourine', 'cabasa', 'shaker',
+  'cowbell', 'timbale', 'perc\\w*',
+];
+const NAME_DRUM = wordPattern(DRUM_WORDS);
 
 const NAME_PLACEHOLDER = /^(track|channel|chan|part|midi|inst|instrument|untitled|new)\s*[\d.]*$/i;
 
@@ -341,11 +358,19 @@ const NAME_PLACEHOLDER = /^(track|channel|chan|part|midi|inst|instrument|untitle
  * "Acoustic", "Backing", "Intro" — are kept, because those are exactly the
  * distinctions a player is choosing between when a song has four guitars.
  */
-const NAME_INFORMATIVE = new RegExp([
-  NAME_CELLO.source, NAME_BASS.source, NAME_TUNE.source, NAME_DRUM.source,
-  /\b(guitar\w*|gtr|drum\w*|perc\w*|piano|keys?|organ|synth\w*|horn\w*|brass|sax\w*|trumpet|trombone|flute|clarinet|oboe|bassoon|violin\w*|viola|harp|strings?|pad|choir|orch\w*)\b/.source,
-  /\b(clean|overdrive\w*|overdriven|distort\w*|acoustic|electric|rhythm|backing|accomp\w*|harmony|counter\w*|intro|verse|chorus|bridge|outro|fill|pedal|drone|arpegg\w*|tremolo|pizz\w*|staccato)\b/.source,
-].join('|'), 'i');
+const OTHER_INSTRUMENT_WORDS = [
+  'guitar\\w*', 'gtr', 'piano', 'keys?', 'organ', 'synth\\w*', 'horn\\w*', 'brass', 'sax\\w*', 'trumpet',
+  'trombone', 'flute', 'clarinet', 'oboe', 'violin\\w*', 'viola', 'harp', 'strings?', 'pad',
+];
+const TONE_AND_SECTION_WORDS = [
+  'clean', 'overdrive\\w*', 'overdriven', 'distort\\w*', 'acoustic', 'electric', 'rhythm', 'backing', 'accomp\\w*',
+  'harmony', 'counter\\w*', 'intro', 'verse', 'chorus', 'bridge', 'outro', 'fill', 'pedal', 'drone', 'arpegg\\w*',
+  'tremolo', 'pizz\\w*', 'staccato',
+];
+const NAME_INFORMATIVE = wordPattern([
+  ...CELLO_WORDS, ...BASS_WORDS, ...TUNE_WORDS, ...DRUM_WORDS, ...OTHER_INSTRUMENT_WORDS,
+  'bassoon', 'choir', 'orch\\w*', ...TONE_AND_SECTION_WORDS,
+]);
 
 /**
  * Instrument words that make a General MIDI program of 42 a lie.
@@ -357,7 +382,9 @@ const NAME_INFORMATIVE = new RegExp([
  * name says what it is beats a program number that was probably never set
  * deliberately.
  */
-const NAME_NOT_CELLO = /\b(bass|basses|basse|guitar\w*|gtr|drum\w*|perc\w*|vocal\w*|voice\w*|vox|sing\w*|piano|keys?|organ|synth\w*|horn\w*|brass|sax\w*|trumpet|trombone|flute|clarinet|oboe|violin\w*|viola|harp|pad|strings?)\b/i;
+const NAME_NOT_CELLO = wordPattern([
+  'bass', 'basses', 'basse', 'drum\\w*', 'perc\\w*', 'vocal\\w*', 'voice\\w*', 'vox', 'sing\\w*', ...OTHER_INSTRUMENT_WORDS,
+]);
 
 export type CelloPartKind =
   | 'arrangement' | 'cello' | 'melody' | 'bass' | 'harmony' | 'percussion';
@@ -681,10 +708,7 @@ export function scoreFromPart(
     };
   });
 
-  const move = choice.octaves === 0
-    ? 'at written pitch'
-    : `${Math.abs(choice.octaves)} octave${Math.abs(choice.octaves) === 1 ? '' : 's'} `
-      + `${choice.octaves < 0 ? 'down' : 'up'}`;
+  const move = octaveMoveLabel(choice.octaves);
 
   return {
     fit: built.fit,
@@ -702,4 +726,12 @@ export function scoreFromPart(
       notes,
     },
   };
+}
+
+/** "at written pitch", or "2 octaves down", "1 octave up". */
+export function octaveMoveLabel(octaves: number): string {
+  if (octaves === 0) return 'at written pitch';
+  const size = Math.abs(octaves);
+  const unit = size === 1 ? 'octave' : 'octaves';
+  return `${size} ${unit} ${octaves < 0 ? 'down' : 'up'}`;
 }

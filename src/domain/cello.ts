@@ -51,13 +51,44 @@ export function centsBetween(detectedHz: number, targetHz: number): number {
   return 1200 * Math.log2(detectedHz / targetHz);
 }
 
+/** Whole cents with an explicit sign: `+12¢`, `−7¢`, `0¢`. Uses a true minus sign. */
+export function formatCents(cents: number): string {
+  const rounded = Math.round(cents);
+  let sign = '';
+  if (rounded > 0) sign = '+';
+  else if (rounded < 0) sign = '−';
+  return `${sign}${Math.abs(rounded)}¢`;
+}
+
+/** Beyond a whole tone away, the player is not tuning that open string. */
+const OPEN_STRING_CAPTURE_CENTS = 200;
+
+/** The open string a sounding pitch is closest to, or null when none is within a whole tone. */
+export function nearestOpenString(frequency: number): CelloString | null {
+  let best: CelloString | null = null;
+  let bestDistance = Infinity;
+  for (const string of STRING_ORDER) {
+    const distance = Math.abs(centsBetween(frequency, midiToFrequency(OPEN_STRING_MIDI[string])));
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = string;
+    }
+  }
+  return bestDistance <= OPEN_STRING_CAPTURE_CENTS ? best : null;
+}
+
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const;
 /** Spelling used when the key signature has flats. */
 const NOTE_NAMES_FLAT = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'] as const;
 
+/** 0 = C … 11 = B, for any integer — negative intervals included. */
+export function toPitchClass(n: number): number {
+  return ((n % 12) + 12) % 12;
+}
+
 export function midiToPitchName(midi: number, preferFlats = false): string {
   const names = preferFlats ? NOTE_NAMES_FLAT : NOTE_NAMES;
-  return `${names[((midi % 12) + 12) % 12]}${Math.floor(midi / 12) - 1}`;
+  return `${names[toPitchClass(midi)]}${Math.floor(midi / 12) - 1}`;
 }
 
 // ─── Intonation tolerance ────────────────────────────────────────────────────
@@ -236,7 +267,7 @@ const FLAT_LETTERS: { [pc: number]: { letter: string; accidental: '♭' | null }
 };
 
 function createNoteInfo(midi: number, preferFlats = false): CelloNoteInfo {
-  const pc = ((midi % 12) + 12) % 12;
+  const pc = toPitchClass(midi);
   const spec = (preferFlats ? FLAT_LETTERS[pc] : SHARP_LETTERS[pc]) ?? { letter: 'C', accidental: null };
   const octave = Math.floor(midi / 12) - 1;
   const letterOffset = LETTER_STEP[spec.letter] ?? 0;

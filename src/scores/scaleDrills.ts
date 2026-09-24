@@ -46,15 +46,10 @@
  */
 
 import {
-  CelloString, OPEN_STRING_MIDI, midiToPitchName,
-} from '@/domain/cello';
-import { BackingPart, BackingTrack } from '@/domain/backing';
-import { firstPositionFingering } from '@/domain/fingering';
-import { KeyMode, PitchClass } from '@/domain/key';
-import {
-  DRILLS_EARNED, canonicalKeyName, fifthsOf, keyDemand, openStringTonic,
-} from '@/domain/keyCensus';
-import { CelloSongScore, DifficultyTier } from '@/domain/schema';
+  CelloString, OPEN_STRING_MIDI, midiToPitchName, BackingPart, BackingTrack,
+  firstPositionFingering, KeyMode, PitchClass, DRILLS_EARNED, canonicalKeyName, fifthsOf,
+  keyDemand, openStringTonic, CelloSongScore, DifficultyTier, toPitchClass,
+} from '@domain';
 import { Event, buildScore } from './build';
 import { LIBRARY_KEY_CENSUS } from './keyCensus';
 
@@ -521,10 +516,17 @@ interface DrillInput {
   bars: Event[][];
 }
 
+/** "F#4" → "F#": the pitch name without its octave number. */
+function withoutOctave(pitchName: string): string {
+  let end = pitchName.length;
+  while (end > 0 && pitchName[end - 1]! >= '0' && pitchName[end - 1]! <= '9') end--;
+  return pitchName.slice(0, end);
+}
+
 function makeDrill(input: DrillInput): CelloSongScore {
   const key = canonicalKeyName({ tonic: input.tonic, mode: input.mode });
   const id = `scale-${slug(key)}-${input.step}`;
-  const tonicLetter = noteName(input.tonic + 60, input.preferFlats).replace(/\d+$/, '');
+  const tonicLetter = withoutOctave(noteName(input.tonic + 60, input.preferFlats));
 
   SCALE_DRILL_KEYS[id] = { tonic: input.tonic, mode: input.mode, key, step: input.step };
 
@@ -584,13 +586,15 @@ function drillOne(entry: KeyEntry): CelloSongScore {
     octaveUp(ranges.octaveFrom, steps).filter((m) => handLoad(m) !== 0),
     preferFlats,
   );
+  const wholeOctaveWords = entry.steps > 1
+    ? 'The whole octave is the next drill.'
+    : `The whole octave from ${octaveBottom} to ${octaveTop} is not a closed-hand scale: ${shortfall}`;
+  const handMovesWords = ranges.closedOctaveFrom === null
+    ? ` There is no octave of ${key} the closed hand can play in first position, so this is written with the hand moves it needs rather than pretending otherwise.`
+    : '';
   const rangeWords = useFifth
-    ? `The first five notes only, ${low} up to ${high} and back. ABRSM’s Initial Grade asks for A minor exactly this way — "a 5th", not an octave — so a part-scale is a published requirement here, not a shortcut. ${entry.steps > 1
-      ? `The whole octave is the next drill.`
-      : `The whole octave from ${octaveBottom} to ${octaveTop} is not a closed-hand scale: ${shortfall}`}`
-    : `One octave up and down, ${low} to ${high}, even crotchets with the tonic held at each end — the rhythm ABRSM specifies for every graded scale.${ranges.closedOctaveFrom === null
-      ? ` There is no octave of ${key} the closed hand can play in first position, so this is written with the hand moves it needs rather than pretending otherwise.`
-      : ''}`;
+    ? `The first five notes only, ${low} up to ${high} and back. ABRSM’s Initial Grade asks for A minor exactly this way — "a 5th", not an octave — so a part-scale is a published requirement here, not a shortcut. ${wholeOctaveWords}`
+    : `One octave up and down, ${low} to ${high}, even crotchets with the tonic held at each end — the rhythm ABRSM specifies for every graded scale.${handMovesWords}`;
   const tonicWords = openString
     ? ` The tonic is the open ${openString} string: sound it, then find it again with your finger and listen for the two to agree.`
     : '';
@@ -644,11 +648,10 @@ function drillTwo(entry: KeyEntry): CelloSongScore {
   const arpeggioOctaves: 1 | 2 = twoOctaves ? 2 : 1;
   const arpeggioNotes = arpeggio(from, mode, arpeggioOctaves);
   // Quavers, with the last note filling out its bar.
-  const arpeggioEvents = arpeggioNotes.map((midi, i) => at(
-    midi,
-    i === arpeggioNotes.length - 1 ? (arpeggioOctaves === 2 ? 2 : 1) : 0.5,
-    i === arpeggioNotes.length - 1 ? { art: 'tenuto' } : {},
-  ));
+  const arpeggioEvents = arpeggioNotes.map((midi, i) => {
+    const last = i === arpeggioNotes.length - 1;
+    return last ? at(midi, arpeggioOctaves, { art: 'tenuto' }) : at(midi, 0.5, {});
+  });
 
   const all = [...run, ...arpeggioNotes];
   const low = noteName(ascending[0] as number, preferFlats);
@@ -831,7 +834,7 @@ function droneFor(score: CelloSongScore): BackingTrack {
   // Otherwise the lowest sounding of the tonic below open D, so the drone sits
   // under the drill rather than inside it.
   const openString = openStringTonic(tonic);
-  const root = openString ? OPEN_STRING_MIDI[openString] : 36 + ((tonic % 12) + 12) % 12;
+  const root = openString ? OPEN_STRING_MIDI[openString] : 36 + toPitchClass(tonic);
 
   const part: BackingPart = {
     id: `${score.id}-drone`,
@@ -902,16 +905,23 @@ export function firstPositionVerdict(
   const drawBacks = halfPositionsIn(octave);
   const range = `${noteName(from, preferFlats)}–${noteName(from + 12, preferFlats)}`;
 
-  const note = reaches.length === 0 && drawBacks.length === 0
-    ? `The octave ${range} needs no hand move at all — four fingers, four tapes.`
-    : ranges.closedFifthFrom !== null
-      ? `No closed-hand octave down here, but the first five notes from ${noteName(ranges.closedFifthFrom, preferFlats)} need no hand move.`
-      : `No closed-hand octave and no closed-hand fifth in first position: ${
-        [
-          reaches.length > 0 ? `${reaches.length} note${reaches.length === 1 ? '' : 's'} of the octave ${range} need the fourth finger to reach forward` : '',
-          drawBacks.length > 0 ? `${drawBacks.length} need the first finger drawn back` : '',
-        ].filter(Boolean).join(' and ')
-      }.`;
+  const note = handMoveNote({ range, reaches: reaches.length, drawBacks: drawBacks.length, closedFifthFrom: ranges.closedFifthFrom, preferFlats });
 
   return { range, reaches: reaches.length, drawBacks: drawBacks.length, tier: frameTier(octave), note };
+}
+
+type HandMoveFacts = { range: string; reaches: number; drawBacks: number; closedFifthFrom: number | null; preferFlats: boolean };
+
+/** What the hand has to do for a key's octave, in words. */
+function handMoveNote({ range, reaches, drawBacks, closedFifthFrom, preferFlats }: HandMoveFacts): string {
+  if (reaches === 0 && drawBacks === 0) return `The octave ${range} needs no hand move at all — four fingers, four tapes.`;
+  if (closedFifthFrom !== null) {
+    return `No closed-hand octave down here, but the first five notes from ${noteName(closedFifthFrom, preferFlats)} need no hand move.`;
+  }
+  const noteWord = reaches === 1 ? 'note' : 'notes';
+  const moves = [
+    reaches > 0 ? `${reaches} ${noteWord} of the octave ${range} need the fourth finger to reach forward` : '',
+    drawBacks > 0 ? `${drawBacks} need the first finger drawn back` : '',
+  ].filter(Boolean).join(' and ');
+  return `No closed-hand octave and no closed-hand fifth in first position: ${moves}.`;
 }

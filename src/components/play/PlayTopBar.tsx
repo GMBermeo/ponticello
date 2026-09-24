@@ -1,9 +1,8 @@
 import { memo } from 'react';
 import { View } from 'react-native';
 
-import { Button } from '@/components/ui/controls';
-import { Label, Row, Title } from '@/components/ui/primitives';
-import { useTheme } from '@/theme/ThemeProvider';
+import { Button, Label, Row, Title } from '../ui';
+import { useTheme } from '@theme';
 import { Playhead, usePlayheadPosition } from './usePlayhead';
 
 const TOP_BAR_HEIGHT = 56;
@@ -43,6 +42,7 @@ export const PlayTopBar = memo(function PlayTopBar({
   onTogglePlay,
 }: PlayTopBarProps) {
   const theme = useTheme();
+  const transportLabel = playRequested ? 'Pause' : 'Play';
 
   return (
     <Row
@@ -69,8 +69,8 @@ export const PlayTopBar = memo(function PlayTopBar({
         style={{ minWidth: theme.tap, paddingHorizontal: 0, alignItems: 'center' }}
       />
       <Button
-        label={starting ? 'Loading…' : playRequested ? 'Pause' : 'Play'}
-        accessibilityLabel={starting ? 'Preparing the music' : playRequested ? 'Pause' : 'Play'}
+        label={starting ? 'Loading…' : transportLabel}
+        accessibilityLabel={starting ? 'Preparing the music' : transportLabel}
         onPress={onTogglePlay}
         disabled={starting}
         tone="accent"

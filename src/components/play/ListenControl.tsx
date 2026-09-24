@@ -1,12 +1,11 @@
 import { View } from 'react-native';
 
+import { LISTEN_BLURB, LISTEN_LABEL } from '@audio';
 import {
-  ACCOMPANIMENT_BLURB, ACCOMPANIMENT_LABEL, AccompanimentStyle, BackingPart,
-} from '@/domain/backing';
-import { LISTEN_BLURB, LISTEN_LABEL, ListenMode } from '@/audio/backing/types';
-import { useTheme } from '@/theme/ThemeProvider';
-import { Segmented, Stepper } from '../ui/controls';
-import { Body, Grow, Label, Num, Row, Rule, Stack } from '../ui/primitives';
+  ACCOMPANIMENT_BLURB, ACCOMPANIMENT_LABEL, type AccompanimentStyle, type BackingPart, type ListenMode,
+} from '@domain';
+import { useTheme } from '@theme';
+import { Segmented, Stepper, Body, Grow, Label, Num, Row, Rule, Stack } from '../ui';
 
 const LISTEN_SEGMENTS: { value: ListenMode; label: string; hint: string }[] =
   (['off', 'backing', 'solo', 'both'] as const).map((value) => ({

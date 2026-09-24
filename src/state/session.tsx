@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useMemo, useState } from 'react';
 
-import { ArrangementLevel } from '@/domain/arrangement';
+import { ArrangementLevel } from '@domain';
 
 /**
  * Practice setup for the current piece.

@@ -1,17 +1,28 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { FlatList, ScrollView, TextInput, View } from 'react-native';
-import { CelloChordDiagram } from '@/components/CelloChordDiagram';
-import { Button, PressableRow, Segmented, Toggle } from '@/components/ui/controls';
-import { useMeasuredSize } from '@/components/useMeasuredSize';
-import { Body, Label, Row, Stack, Title } from '@/components/ui/primitives';
-import { Screen, ScreenHeader } from '@/components/ui/Screen';
-import { CELLO_CHORD_ROOTS, getCelloChordByType } from '@/domain/celloChords';
-import { CHORD_SCALES, chordsInScale, scaleNotes, type ChordFamily, type ChordScaleId, type ScaleChord } from '@/domain/chordScales';
-import { useTheme } from '@/theme/ThemeProvider';
-import { FONT } from '@/theme/tokens';
+import {
+  CelloChordDiagram, Button, PressableRow, Segmented, Toggle, useMeasuredSize, Body, Label, Row,
+  Stack, Title, Screen, ScreenHeader,
+  type Segment,
+} from '@components';
+import {
+  CELLO_CHORD_ROOTS, getCelloChordByType, CHORD_SCALES, chordsInScale, scaleNotes,
+  type ChordFamily, type ChordScaleId, type ScaleChord,
+} from '@domain';
+import { useTheme, FONT } from '@theme';
 
-const FAMILIES = [{ value: 'all', label: 'All' }, { value: 'triads', label: 'Triads' }, { value: 'sevenths', label: 'Sevenths' }, { value: 'extensions', label: 'Extensions' }] as const;
-const SORTS = [{ value: 'basic', label: 'Major & basics first' }, { value: 'degree', label: 'Scale degree' }] as const;
+const FAMILIES: readonly Segment<ChordFamily>[] = [
+  { value: 'all', label: 'All' },
+  { value: 'triads', label: 'Triads' },
+  { value: 'sevenths', label: 'Sevenths' },
+  { value: 'extensions', label: 'Extensions' },
+];
+type ChordSort = 'basic' | 'degree';
+
+const SORTS: readonly Segment<ChordSort>[] = [
+  { value: 'basic', label: 'Major & basics first' },
+  { value: 'degree', label: 'Scale degree' },
+];
 
 export default function ChordLibraryScreen() {
   const theme = useTheme();
@@ -87,8 +98,9 @@ function ChordTile({ entry, selected, tapeColors, onSelect }: { entry: ScaleChor
   const [size, onLayout, ref] = useMeasuredSize();
   const study = useMemo(() => getCelloChordByType(entry.root, entry.type.id), [entry.root, entry.type.id]);
   const omitted = study.voicings[0]?.omittedTones ?? [];
+  const degreeSuffix = entry.romanDegree ? `, degree ${entry.romanDegree}` : '';
   return <View style={{ flex: 1, maxWidth: theme.scale.compact ? '50%' : '25%', paddingHorizontal: theme.s(4), marginTop: theme.s(16) }}>
-    <PressableRow accessibilityLabel={`Explore ${study.symbol}${entry.romanDegree ? `, degree ${entry.romanDegree}` : ''}`} selected={selected} onPress={() => onSelect(entry.id)}
+    <PressableRow accessibilityLabel={`Explore ${study.symbol}${degreeSuffix}`} selected={selected} onPress={() => onSelect(entry.id)}
       style={{
         alignItems: 'center', borderRadius: theme.s(10), paddingVertical: theme.s(8), gap: theme.s(4),
         borderWidth: theme.rule(1),

@@ -153,6 +153,37 @@ const VIBRATO_MIN_HOLD_SEC = 0.3;
 const UNISON_MIN_HOLD_SEC = 0.2;
 const BOW_NOISE_MIN_HOLD_SEC = 0.12;
 
+/** An ADSR envelope in seconds, for a note already `elapsed` seconds in. */
+interface EnvelopeTiming {
+  peak: number;
+  attack: number;
+  decay: number;
+  sustain: number;
+  hold: number;
+  release: number;
+  elapsed: number;
+}
+
+/**
+ * Expresses the same stateless ADSR used by native PCM as Web Audio ramps.
+ * For a resumed long note, it begins at envelope(elapsed) and schedules only
+ * the remaining phase endpoints, so a drone does not disappear until wrap.
+ */
+function scheduleEnvelope(gain: AudioParam, envelope: EnvelopeTiming, at: number): void {
+  const { peak, attack, decay, sustain, hold, release, elapsed } = envelope;
+  gain.setValueAtTime(peak * envelopeAt(elapsed, attack, decay, sustain, hold, release), at);
+  if (elapsed >= hold) {
+    gain.linearRampToValueAtTime(0, at + hold + release - elapsed);
+    return;
+  }
+  if (elapsed < attack && attack < hold) gain.linearRampToValueAtTime(peak, at + attack - elapsed);
+  const decayEnd = attack + decay;
+  if (elapsed < decayEnd && decayEnd < hold) gain.linearRampToValueAtTime(peak * sustain, at + decayEnd - elapsed);
+  const holdEnd = at + hold - elapsed;
+  gain.linearRampToValueAtTime(peak * envelopeHeldLevel(hold, attack, decay, sustain), holdEnd);
+  gain.linearRampToValueAtTime(0, holdEnd + release);
+}
+
 export function useBackingPlayer(enabled: boolean): BackingPlayer {
   const contextRef = useRef<AudioContext | null>(null);
   const masterRef = useRef<GainNode | null>(null);
@@ -282,28 +313,7 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
     const gain = audio.createGain();
     gain.connect(master);
 
-    // Express the same stateless ADSR used by native PCM as Web Audio ramps.
-    // For a resumed long note, begin at envelope(elapsed) and schedule only the
-    // remaining phase endpoints, so a drone does not disappear until wrap.
-    const g = gain.gain;
-    const heldLevel = envelopeHeldLevel(hold, attack, decay, spec.sustain);
-    const currentLevel = envelopeAt(elapsed, attack, decay, spec.sustain, hold, release);
-    g.setValueAtTime(peak * currentLevel, at);
-
-    if (elapsed < hold) {
-      if (elapsed < attack && attack < hold) {
-        g.linearRampToValueAtTime(peak, at + attack - elapsed);
-      }
-      const decayEnd = attack + decay;
-      if (elapsed < decayEnd && decayEnd < hold) {
-        g.linearRampToValueAtTime(peak * spec.sustain, at + decayEnd - elapsed);
-      }
-      const holdEnd = at + hold - elapsed;
-      g.linearRampToValueAtTime(peak * heldLevel, holdEnd);
-      g.linearRampToValueAtTime(0, holdEnd + release);
-    } else {
-      g.linearRampToValueAtTime(0, at + hold + release - elapsed);
-    }
+    scheduleEnvelope(gain.gain, { peak, attack, decay, sustain: spec.sustain, hold, release, elapsed }, at);
 
     const remaining = hold + release - elapsed;
     const extras: (OscillatorNode | AudioBufferSourceNode)[] = [];
@@ -435,7 +445,7 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
     if (!audio || !program || program.durationSec <= 0 || timerRef.current === null) return null;
     // What is reaching the speaker now was scheduled `outputLatency` ago.
     const heard = audio.currentTime - (audio.outputLatency || audio.baseLatency || 0);
-    if (!(heard >= startsAtRef.current)) return null;
+    if (Number.isNaN(heard) || heard < startsAtRef.current) return null;
     const duration = program.durationSec;
     // The scheduler advances the cycle origin up to a lookahead early, so the
     // raw difference can be negative near the loop point; the modulo folds it.

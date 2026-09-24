@@ -1,9 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
-import { CANVAS, FOLD5_PX, ViewportContext } from '@/theme/scale';
-import { FONT, PAPER } from '@/theme/tokens';
-import { useTheme } from '@/theme/ThemeProvider';
+import { CANVAS, FOLD5_PX, ViewportContext, FONT, PAPER, useTheme } from '@theme';
 
 export type WebPreviewMode = 'fullscreen' | 'fold5';
 

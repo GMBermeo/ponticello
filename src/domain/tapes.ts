@@ -11,6 +11,8 @@ import {
   CelloFinger, CelloString, STRING_ORDER, midiAt, midiToPitchName, stopDistanceMm,
 } from './cello';
 
+const TAPE_GAP_WORDS: Readonly<Record<number, string>> = { 1: 'a semitone above', 2: 'a whole step above' };
+
 export type TapeColor = 'blue' | 'yellow' | 'green' | 'red' | 'orange' | 'white';
 
 export interface Tape {
@@ -172,7 +174,7 @@ export function tapeHint(
   const near = nearestTapeBelow(sets, semitones);
   if (!near) return `${semitones} semitones above the nut — below every tape`;
   const gap = near.semitonesAbove;
-  const distance = gap === 1 ? 'a semitone above' : gap === 2 ? 'a whole step above' : `${gap} semitones above`;
+  const distance = TAPE_GAP_WORDS[gap] ?? `${gap} semitones above`;
   const finger_ = finger === 'T' ? 'thumb' : `${finger} finger`;
   return `${finger_}, ${distance} ${ordinalOf(near.tape)}`;
 }

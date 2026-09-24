@@ -9,8 +9,7 @@
  * uses it shows a `SIMULATED` chip.
  */
 
-import { midiToFrequency } from '@/domain/cello';
-import { CelloSongScore } from '@/domain/schema';
+import { midiToFrequency, CelloSongScore } from '@domain';
 
 export interface SimulatedOptions {
   /** Typical intonation error, in cents. A beginner sits around 20. */

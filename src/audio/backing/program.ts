@@ -19,8 +19,8 @@
 
 import {
   AudiblePartsQuery, AudiblePartsResult, BackingPart, InstrumentName, resolveAudibleParts,
-} from '@/domain/backing';
-import { PracticeLoop } from '@/domain/loop';
+  PracticeLoop,
+} from '@domain';
 import { VOICES } from '../voices';
 
 /** One note, resolved into real time and final amplitude. */
@@ -305,7 +305,7 @@ export function buildProgram({ id, parts, loop }: ProgramOptions): BackingProgra
   return { key, notes: voiced, durationSec };
 }
 
-export interface AudibleProgramQuery extends AudiblePartsQuery {}
+export type AudibleProgramQuery = AudiblePartsQuery;
 
 export interface AudibleProgramResult extends AudiblePartsResult {
   program: BackingProgram;

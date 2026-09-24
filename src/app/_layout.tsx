@@ -8,12 +8,12 @@ import { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { DeviceCanvas } from '@/components/DeviceCanvas';
-import { ImportedLibraryProvider } from '@/state/library';
-import { PracticeProvider } from '@/state/practice';
-import { SessionProvider } from '@/state/session';
-import { SettingsProvider, useSettingsSelector } from '@/state/settings';
-import { ThemeProvider, useTheme } from '@/theme/ThemeProvider';
+import { DeviceCanvas } from '@components';
+import {
+  ImportedLibraryProvider, PracticeProvider, SessionProvider, SettingsProvider,
+  useSettingsSelector,
+} from '@state';
+import { ThemeProvider, useTheme } from '@theme';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 

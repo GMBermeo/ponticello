@@ -12,9 +12,9 @@ export interface LibraryEdition {
 }
 
 export const LIBRARY_EDITION: LibraryEdition = {
-  "id": "full",
-  "label": "Full library",
-  "detail": "333 bundled pieces, including 315 arranged songs for personal practice",
-  "bundledCount": 333,
-  "songCount": 315
+  "id": "free",
+  "label": "Free library",
+  "detail": "18 bundled public-domain pieces and original etudes — free to share",
+  "bundledCount": 18,
+  "songCount": 0
 };

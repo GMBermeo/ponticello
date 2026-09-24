@@ -15,17 +15,10 @@
  */
 
 import {
-  CelloFinger,
-  CelloPosition,
-  CelloString,
-  OPEN_STRING_MIDI,
-  POSITION_BASE_SEMITONES,
-  POSITION_ORDER,
-  STRING_ORDER,
-  midiToPitchName,
-} from "../../src/domain/cello";
-import { candidateStates, CelloState, handSemitones, RawNoteEvent } from "../../src/domain/fingering";
-import type { DifficultyTier } from "../../src/domain/schema";
+  CelloFinger, CelloPosition, CelloString, OPEN_STRING_MIDI, POSITION_BASE_SEMITONES,
+  POSITION_ORDER, STRING_ORDER, midiToPitchName, candidateStates, CelloState, handSemitones,
+  RawNoteEvent, type DifficultyTier,
+} from "@domain";
 
 // ─── Models ──────────────────────────────────────────────────────────────────
 
@@ -183,9 +176,11 @@ function optionCode(string: CelloString, fret: number, finger: CelloFinger): str
   return `${string}${fret}-${finger}`;
 }
 
+const EXTENSION_PENALTY: Record<CelloState["extension"], number> = { none: 0, forward: 100, backward: 200 };
+
 /** Plain states beat extensions, and the lower position wins a tie. */
 function preference(state: CelloState): number {
-  const extension = state.extension === "none" ? 0 : state.extension === "forward" ? 100 : 200;
+  const extension = EXTENSION_PENALTY[state.extension];
   return extension + POSITION_ORDER[state.position] * 10 + (state.baseSemitones ?? 0) / 100;
 }
 
@@ -331,6 +326,22 @@ export const FINGERING_RESPONSE_SCHEMA = {
 
 // ─── Reading answers ─────────────────────────────────────────────────────────
 
+/** Index of the brace closing the object opened at `start`, skipping braces inside strings; −1 if it never closes. */
+function balancedObjectEnd(text: string, start: number): number {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (escaped) escaped = false;
+    else if (inString && ch === "\\") escaped = true;
+    else if (ch === '"') inString = !inString;
+    else if (!inString && ch === "{") depth++;
+    else if (!inString && ch === "}" && --depth === 0) return i;
+  }
+  return -1;
+}
+
 /**
  * The first JSON object in a model's reply.
  *
@@ -344,25 +355,9 @@ export function extractJson(raw: string): unknown {
   const start = text.indexOf("{");
   if (start < 0) throw new Error("no JSON object in the response");
 
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let i = start; i < text.length; i++) {
-    const ch = text[i];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (ch === "\\") escaped = true;
-      else if (ch === '"') inString = false;
-      continue;
-    }
-    if (ch === '"') inString = true;
-    else if (ch === "{") depth++;
-    else if (ch === "}") {
-      depth--;
-      if (depth === 0) return JSON.parse(text.slice(start, i + 1));
-    }
-  }
-  throw new Error("unterminated JSON object in the response");
+  const end = balancedObjectEnd(text, start);
+  if (end < 0) throw new Error("unterminated JSON object in the response");
+  return JSON.parse(text.slice(start, end + 1));
 }
 
 export interface FingeringAnswer {
@@ -478,22 +473,26 @@ export function fingeringStats(
     stats.positions[label] = (stats.positions[label] ?? 0) + 1;
 
     if (previous && previous.string !== state.string) stats.stringCrossings++;
+    previous = state;
     if (open) {
       stats.openStrings++;
-    } else {
-      const here = handSemitones(state);
-      if (anchor !== null && here !== anchor) stats.shifts++;
-      anchor = here;
-      if (state.position === "Thumb") stats.thumbPosition++;
-      if (state.position !== "Half" && state.position !== "1st") stats.abovefirstPosition++;
-      if (STRING_ORDER.some((string) => OPEN_STRING_MIDI[string] === note.midiNumber)) {
-        stats.stoppedWhereOpenExisted++;
-      }
+      return;
     }
-    previous = state;
+    const here = handSemitones(state);
+    if (anchor !== null && here !== anchor) stats.shifts++;
+    anchor = here;
+    countStoppedNote(stats, state, note.midiNumber);
   });
 
   return stats;
+}
+
+type StoppedStats = { thumbPosition: number; abovefirstPosition: number; stoppedWhereOpenExisted: number };
+
+function countStoppedNote(stats: StoppedStats, state: CelloState, midiNumber: number): void {
+  if (state.position === "Thumb") stats.thumbPosition++;
+  if (state.position !== "Half" && state.position !== "1st") stats.abovefirstPosition++;
+  if (STRING_ORDER.some((string) => OPEN_STRING_MIDI[string] === midiNumber)) stats.stoppedWhereOpenExisted++;
 }
 
 // ─── Records and the summary ─────────────────────────────────────────────────

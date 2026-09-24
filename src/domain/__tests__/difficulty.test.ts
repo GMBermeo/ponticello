@@ -6,8 +6,7 @@ import {
 import {
   ARRANGEMENT_WEIGHTS, CelloState, RawNoteEvent, solveFingering,
 } from '../fingering';
-import { COMPACT_SCORES } from '@/scores/bundledSongs';
-import { LIBRARY_EDITION } from '@/scores/libraryEdition';
+import { COMPACT_SCORES, LIBRARY_EDITION } from '@scores';
 
 /** Size thresholds describe the full library; the free edition ships a dozen pieces. */
 const FULL_LIBRARY = LIBRARY_EDITION.id === 'full';

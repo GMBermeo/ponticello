@@ -16,10 +16,8 @@
  * dropped frames.
  */
 
-import { ListenMode } from '@/domain/backing';
+import type { ListenMode } from '@domain';
 import { BackingProgram } from './program';
-
-export type { ListenMode };
 
 export const LISTEN_LABEL: Record<ListenMode, string> = {
   off: 'Off',

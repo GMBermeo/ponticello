@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { soloPartFromScore } from '../backing';
-import { arrangeMidi } from '../arrangement';
+import { arrangeMidi } from '../arranger';
 import { importScore, suggestSoloTrack } from '../importScore';
 import { MidiNote, MidiTrack, ParsedMidi } from '../midi';
 

@@ -14,7 +14,7 @@
  * Pure: no React, no React Native, no Web Audio. See AGENTS.md.
  */
 
-import { InstrumentName } from '@/domain/backing';
+import { InstrumentName } from '@domain';
 
 export interface VoiceSpec {
   /** Relative amplitude of harmonic n, index 0 being the fundamental, at {@link REFERENCE_VELOCITY}. */

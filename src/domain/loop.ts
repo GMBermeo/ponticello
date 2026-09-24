@@ -16,8 +16,8 @@
  * Pure: no React, no React Native. See AGENTS.md.
  */
 
-import { BackingPart } from './backing';
-import { CelloSongScore } from './schema';
+import type { BackingPart } from './backing';
+import type { CelloSongScore } from './schema';
 
 export interface PracticeLoop {
   /** 1-based, inclusive, clamped to the score. */

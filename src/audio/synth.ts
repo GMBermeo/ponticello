@@ -14,9 +14,8 @@
  * a re-render finish inside a frame or two.
  */
 
-import { midiToFrequency } from '@/domain/cello';
-import { BackingNote, BackingPart, InstrumentName } from '@/domain/backing';
-import { BackingProgram } from './backing/program';
+import { midiToFrequency, BackingNote, BackingPart, InstrumentName } from '@domain';
+import { BackingProgram } from './backing';
 import {
   bowNoiseAt, brightnessTier, centsToRatio, envelopeAt, noteSeed, NoteVariation,
   noteVariation, spectrumForTier, vibratoCents, VoiceSpec, VOICES,
@@ -136,51 +135,132 @@ function makeNoise(seed: number): () => number {
  * by `sin` gives a frequency deviation proportional to `cos` — the same wobble,
  * a quarter-cycle over, and closed-form in `i`.
  */
-function renderVoice(
-  out: Float32Array,
+/** Everything one voice needs to render: the note, its sound, and which samples of it to write. */
+interface VoiceJob {
   /** Output index at which note-relative sample 0 sits. May be negative. */
-  originIndex: number,
-  firstI: number,
-  lastI: number,
-  spec: VoiceSpec,
-  table: Float32Array,
-  baseIncrement: number,
-  amplitude: number,
-  attack: number,
-  decay: number,
-  heldSamples: number,
-  releaseSamples: number,
-  sampleRate: number,
-  variation: NoteVariation,
-  seed: number,
-): void {
-  const increment = baseIncrement * centsToRatio(variation.detuneCents);
+  originIndex: number;
+  firstI: number;
+  lastI: number;
+  spec: VoiceSpec;
+  table: Float32Array;
+  baseIncrement: number;
+  amplitude: number;
+  envelope: Envelope;
+  sampleRate: number;
+  variation: NoteVariation;
+  seed: number;
+}
 
-  // A section, not a soloist: two copies a few cents apart, half level each.
-  // Not worth it on a note too short for the beating to be heard.
-  const unison = (spec.unisonCents ?? 0) > 0 && heldSamples > sampleRate * 0.08
-    ? spec.unisonCents! / 2
-    : 0;
-  const incrementA = unison ? increment * centsToRatio(unison) : increment;
-  const incrementB = unison ? increment * centsToRatio(-unison) : 0;
-  const voiceGain = unison ? amplitude * 0.5 : amplitude;
+/** Envelope timings, in samples. */
+interface Envelope {
+  attack: number;
+  decay: number;
+  sustain: number;
+  heldSamples: number;
+  releaseSamples: number;
+}
 
-  const rateHz = spec.vibrato?.rateHz ?? 0;
-  const vibratoScale = rateHz > 0
-    ? (CENTS_SLOPE * increment * sampleRate) / (2 * Math.PI * rateHz)
-    : 0;
+function envelopeGain(i: number, envelope: Envelope): number {
+  return envelopeAt(i, envelope.attack, envelope.decay, envelope.sustain, envelope.heldSamples, envelope.releaseSamples);
+}
 
-  // Bow noise runs on its own short envelope from the note's own zero, so it
-  // has to be wound forward when a slice starts partway in.
-  const noiseAmount = spec.bowNoise ?? 0;
-  const noiseSpan = noiseAmount > 0
-    ? Math.ceil(Math.max(0.02, (spec.attackMs / 1000) * 1.8) * sampleRate)
-    : 0;
-  let noise: (() => number) | null = null;
-  if (noiseSpan > 0 && firstI < noiseSpan) {
-    noise = makeNoise(seed ^ 0x5bf03635);
-    for (let i = 0; i < firstI; i++) noise();
+/**
+ * Half the unison spread in cents, or 0 for a single voice.
+ *
+ * A section, not a soloist: two copies a few cents apart, half level each.
+ * Not worth it on a note too short for the beating to be heard.
+ */
+function unisonHalfSpread(spec: VoiceSpec, heldSamples: number, sampleRate: number): number {
+  const cents = spec.unisonCents ?? 0;
+  return cents > 0 && heldSamples > sampleRate * 0.08 ? cents / 2 : 0;
+}
+
+/** Phase steps for the two unison copies; the second is silent (0) for a single voice. */
+function unisonIncrements(increment: number, halfSpread: number): { incrementA: number; incrementB: number; unison: boolean } {
+  if (!halfSpread) return { incrementA: increment, incrementB: 0, unison: false };
+  return { incrementA: increment * centsToRatio(halfSpread), incrementB: increment * centsToRatio(-halfSpread), unison: true };
+}
+
+/**
+ * Bow noise runs on its own short envelope from the note's own zero, so it
+ * has to be wound forward when a slice starts partway in. Null when the
+ * voice has none, or the slice starts after it has died away.
+ */
+function bowNoiseSource(job: VoiceJob): { next: () => number; span: number } | null {
+  const { spec, sampleRate, firstI, seed } = job;
+  if ((spec.bowNoise ?? 0) <= 0) return null;
+  const span = Math.ceil(Math.max(0.02, (spec.attackMs / 1000) * 1.8) * sampleRate);
+  if (firstI >= span) return null;
+  const next = makeNoise(seed ^ 0x5bf03635);
+  for (let i = 0; i < firstI; i++) next();
+  return { next, span };
+}
+
+/**
+ * Vibrato phase offset, interpolated across fixed blocks so the costly
+ * `vibratoCents` runs once per block rather than once per sample.
+ */
+class VibratoCursor {
+  private block = -1;
+  private from = 0;
+  private to = 0;
+
+  constructor(
+    private readonly spec: VoiceSpec,
+    private readonly variation: NoteVariation,
+    private readonly sampleRate: number,
+    private readonly scale: number,
+  ) {}
+
+  offsetAt(i: number): number {
+    const b = (i / VIBRATO_BLOCK) | 0;
+    if (b !== this.block) {
+      this.block = b;
+      this.from = this.centsAtBlock(b);
+      this.to = this.centsAtBlock(b + 1);
+    }
+    const within = (i - b * VIBRATO_BLOCK) / VIBRATO_BLOCK;
+    return this.from + (this.to - this.from) * within;
   }
+
+  private centsAtBlock(block: number): number {
+    return vibratoCents(this.spec, this.variation, (block * VIBRATO_BLOCK) / this.sampleRate) * this.scale;
+  }
+}
+
+function vibratoFor(job: VoiceJob, increment: number): VibratoCursor | null {
+  const rateHz = job.spec.vibrato?.rateHz ?? 0;
+  if (rateHz <= 0) return null;
+  const scale = (CENTS_SLOPE * increment * job.sampleRate) / (2 * Math.PI * rateHz);
+  return new VibratoCursor(job.spec, job.variation, job.sampleRate, scale);
+}
+
+/**
+ * Adds one sounding voice into `out`.
+ *
+ * Shared by the whole-buffer renderer and the slice renderer, which is what
+ * keeps them sounding identical. Everything here is a pure function of the
+ * note-relative sample index `i` — phase included — so a note rendered in two
+ * slices produces exactly the same samples as one rendered in a single pass.
+ * That is not a nicety: the native player builds an eleven-minute song in
+ * two-second pieces, and a note straddling a boundary that disagreed with
+ * itself would click.
+ *
+ * Vibrato is applied as a *phase* offset rather than by stepping the
+ * increment. Stepping would make the phase an accumulation, and an
+ * accumulation cannot be resumed from the middle of a note. Modulating phase
+ * by `sin` gives a frequency deviation proportional to `cos` — the same wobble,
+ * a quarter-cycle over, and closed-form in `i`.
+ */
+function renderVoice(out: Float32Array, job: VoiceJob): void {
+  const { originIndex, firstI, lastI, spec, table, envelope, sampleRate } = job;
+  const increment = job.baseIncrement * centsToRatio(job.variation.detuneCents);
+  const { incrementA, incrementB, unison } = unisonIncrements(increment, unisonHalfSpread(spec, envelope.heldSamples, sampleRate));
+  const voiceGain = unison ? job.amplitude * 0.5 : job.amplitude;
+  const vibrato = vibratoFor(job, increment);
+  const noise = bowNoiseSource(job);
+  const readVoice = (phase: number, offset: number) =>
+    (vibrato ? readTable(table, phase + offset) : readAt(table, phase));
 
   // Phase is accumulated within the slice but *seeded* from a closed form, so
   // a slice starting mid-note lands on the same phase a single pass would have
@@ -188,44 +268,17 @@ function renderVoice(
   // rather than a multiply and a modulo.
   let phaseA = wrapPhase(incrementA * firstI);
   let phaseB = unison ? wrapPhase(incrementB * firstI) : 0;
+  const lastIndex = Math.min(lastI, out.length - originIndex);
 
-  let block = -1;
-  let vibratoFrom = 0;
-  let vibratoTo = 0;
-
-  for (let i = firstI; i < lastI; i++) {
+  for (let i = firstI; i < lastIndex; i++) {
     const index = originIndex + i;
-    if (index >= out.length) break;
-    if (index < 0) {
-      phaseA = advance(phaseA, incrementA);
-      if (unison) phaseB = advance(phaseB, incrementB);
-      continue;
+    if (index >= 0) {
+      const offset = vibrato?.offsetAt(i) ?? 0;
+      let sample = readVoice(phaseA, offset);
+      if (unison) sample += readVoice(phaseB, offset);
+      if (noise && i < noise.span) sample += noise.next() * bowNoiseAt(spec, i / sampleRate);
+      out[index] += sample * voiceGain * envelopeGain(i, envelope);
     }
-
-    let sample: number;
-    if (vibratoScale !== 0) {
-      const b = (i / VIBRATO_BLOCK) | 0;
-      if (b !== block) {
-        block = b;
-        vibratoFrom = vibratoCents(spec, variation, (b * VIBRATO_BLOCK) / sampleRate) * vibratoScale;
-        vibratoTo = vibratoCents(spec, variation, ((b + 1) * VIBRATO_BLOCK) / sampleRate) * vibratoScale;
-      }
-      const within = (i - block * VIBRATO_BLOCK) / VIBRATO_BLOCK;
-      const offset = vibratoFrom + (vibratoTo - vibratoFrom) * within;
-      sample = readTable(table, phaseA + offset);
-      if (unison) sample += readTable(table, phaseB + offset);
-    } else {
-      sample = readAt(table, phaseA);
-      if (unison) sample += readAt(table, phaseB);
-    }
-
-    if (noise && i < noiseSpan) {
-      sample += noise() * bowNoiseAt(spec, i / sampleRate);
-    }
-
-    out[index] += sample * voiceGain
-      * envelopeAt(i, attack, decay, spec.sustain, heldSamples, releaseSamples);
-
     phaseA = advance(phaseA, incrementA);
     if (unison) phaseB = advance(phaseB, incrementB);
   }
@@ -292,10 +345,10 @@ function renderNote(
   const table = tablesFor(instrument, sampleRate, brightnessTier(velocity))[bandFor(note.midiNumber)]!;
   const increment = (midiToFrequency(note.midiNumber) / sampleRate) * TABLE_SIZE;
 
-  renderVoice(
-    out, startSample, 0, totalSamples, spec, table, increment, amplitude,
-    attack, decay, heldSamples, releaseSamples, sampleRate, variation, seed,
-  );
+  renderVoice(out, {
+    originIndex: startSample, firstI: 0, lastI: totalSamples, spec, table, baseIncrement: increment, amplitude,
+    envelope: { attack, decay, sustain: spec.sustain, heldSamples, releaseSamples }, sampleRate, variation, seed,
+  });
 }
 
 /** Renders a set of parts into one mono buffer. */
@@ -423,13 +476,12 @@ export function renderProgramInto(
     const table = tablesFor(note.instrument, sampleRate, tier)[bandFor(note.midiNumber)]!;
     const increment = (midiToFrequency(note.midiNumber) / sampleRate) * TABLE_SIZE;
 
-    renderVoice(
-      out, startSample - fromSample, firstI, lastI, spec, table, increment, amplitude,
-      attack, decay, heldSamples, releaseSamples, sampleRate, variation, seed,
-    );
+    renderVoice(out, {
+      originIndex: startSample - fromSample, firstI, lastI, spec, table, baseIncrement: increment, amplitude,
+      envelope: { attack, decay, sustain: spec.sustain, heldSamples, releaseSamples }, sampleRate, variation, seed,
+    });
   }
 
   limit(out);
 }
 
-export { VOICES };

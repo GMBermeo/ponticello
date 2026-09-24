@@ -1,14 +1,12 @@
 import { ScrollView, View } from 'react-native';
 
-import { Fingerboard, FingerboardScaleNote, FingerboardStringLabels } from '@/components/Fingerboard';
-import { Button, PressableRow, Stepper } from '@/components/ui/controls';
-import { Body, Label, Num, Row, Rule, Stack, Title } from '@/components/ui/primitives';
-import { Screen, ScreenHeader } from '@/components/ui/Screen';
-import { midiToPitchName, stopDistanceMm, midiAt, STRING_ORDER } from '@/domain/cello';
-import { TapeColor, TapeSet } from '@/domain/tapes';
-import { useSettings } from '@/state/settings';
-import { useTheme } from '@/theme/ThemeProvider';
-import { TAPE_COLOR_LABEL } from '@/theme/tokens';
+import {
+  Fingerboard, FingerboardScaleNote, FingerboardStringLabels, Button, PressableRow, Stepper, Body,
+  Label, Num, Row, Rule, Stack, Title, Screen, ScreenHeader,
+} from '@components';
+import { midiToPitchName, stopDistanceMm, midiAt, STRING_ORDER, TapeColor, TapeSet } from '@domain';
+import { useTapeSettings } from '@state';
+import { useTheme, TAPE_COLOR_LABEL } from '@theme';
 
 const COLORS: TapeColor[] = ['blue', 'yellow', 'green', 'red', 'orange', 'white'];
 
@@ -22,7 +20,7 @@ const COLORS: TapeColor[] = ['blue', 'yellow', 'green', 'red', 'orange', 'white'
  */
 export default function TapesScreen() {
   const theme = useTheme();
-  const { settings, replaceTapeSet, resetTapes } = useSettings();
+  const { tapeSets, replaceTapeSet, resetTapes } = useTapeSettings();
   const wide = !theme.scale.compact;
 
   return (
@@ -42,7 +40,7 @@ export default function TapesScreen() {
             </Stack>
             <Rule weight={1} />
 
-            {settings.tapeSets.map((set) => (
+            {tapeSets.map((set) => (
               <TapeSetEditor key={set.id} set={set} onChange={replaceTapeSet} />
             ))}
 
@@ -63,7 +61,7 @@ export default function TapesScreen() {
             <Stack padX={22} padY={16} gap={12}>
               <Label size={11}>TO SCALE</Label>
               <Row gap={12} style={{ alignItems: 'flex-start' }}>
-                <Fingerboard height={theme.s(430)} maxMm={460} tapeSets={settings.tapeSets} gutter={50} />
+                <Fingerboard height={theme.s(430)} maxMm={460} tapeSets={tapeSets} gutter={50} />
                 <View style={{ flex: 1 }}>
                   <Body size={12} color={theme.chrome.dim}>
                     Measure from the edge of the nut nearest the fingerboard, along the D string.

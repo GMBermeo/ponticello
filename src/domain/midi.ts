@@ -96,10 +96,20 @@ interface RawEvent {
   timeSignature: [number, number];
 }
 
-export function parseMidi(bytes: Uint8Array): ParsedMidi {
-  const r: Reader = { data: bytes, offset: 0 };
+type EventInput = Partial<RawEvent> & { tick: number; track: number; type: RawEventType };
+type EventSink = (event: EventInput) => void;
 
-  if (bytes.length < 14 || readChunkId(r) !== 'MThd') {
+const META_EVENT = 0xff;
+const SYSEX_START = 0xf0;
+const SYSEX_ESCAPE = 0xf7;
+const META_TEMPO = 0x51;
+const META_TIME_SIGNATURE = 0x58;
+const META_TEXT_TYPES = new Set([0x03, 0x04]);
+/** Bytes of data after each channel status that this parser skips. */
+const SKIPPED_DATA_BYTES: Readonly<Record<number, number>> = { 0xa0: 2, 0xb0: 2, 0xd0: 1, 0xe0: 2 };
+
+function readHeader(r: Reader): { trackCount: number; ticksPerQuarter: number } {
+  if (r.data.length < 14 || readChunkId(r) !== 'MThd') {
     throw new Error('not a MIDI file: missing MThd header');
   }
   const headerLength = u32(r);
@@ -108,154 +118,170 @@ export function parseMidi(bytes: Uint8Array): ParsedMidi {
   const trackCount = u16(r);
   const division = u16(r);
   r.offset = headerEnd;
-
   if (division & 0x8000) {
     throw new Error('SMPTE time division is not supported; re-export with metrical timing');
   }
-  const ticksPerQuarter = division;
+  return { trackCount, ticksPerQuarter: division };
+}
 
-  const events: RawEvent[] = [];
-  const push = (e: Partial<RawEvent> & { tick: number; track: number; type: RawEventType }) => {
-    events.push({
-      channel: 0, note: 0, velocity: 0, value: 0, text: '', timeSignature: [4, 4], ...e,
-    });
-  };
+function readMetaEvent(r: Reader, at: { tick: number; track: number }, emit: EventSink): void {
+  const metaType = u8(r);
+  const metaLength = readVarInt(r);
+  const next = r.offset + metaLength;
+  if (metaType === META_TEMPO && metaLength === 3) {
+    emit({ ...at, type: 'tempo', value: (u8(r) << 16) | (u8(r) << 8) | u8(r) });
+  } else if (metaType === META_TIME_SIGNATURE && metaLength >= 2) {
+    const numerator = u8(r);
+    const denominator = 2 ** u8(r);
+    emit({ ...at, type: 'timeSignature', timeSignature: [numerator, denominator] });
+  } else if (META_TEXT_TYPES.has(metaType)) {
+    emit({ ...at, type: 'trackName', text: readText(r, metaLength) });
+  }
+  r.offset = next;
+}
 
-  for (let track = 0; track < trackCount; track++) {
-    if (r.offset >= bytes.length) break;
-    if (readChunkId(r) !== 'MTrk') throw new Error(`expected MTrk at byte ${r.offset - 4}`);
-    const length = u32(r);
-    const end = Math.min(r.offset + length, bytes.length);
+/** Reads one channel message. Returns false when the status is unknown and the stream is out of sync. */
+function readChannelEvent(r: Reader, status: number, at: { tick: number; track: number }, emit: EventSink): boolean {
+  const command = status & 0xf0;
+  const channel = status & 0x0f;
+  if (command === 0x90 || command === 0x80) {
+    const note = u8(r);
+    const velocity = u8(r);
+    // A note-on with zero velocity is a note-off. Very common.
+    const type = command === 0x90 && velocity > 0 ? 'noteOn' : 'noteOff';
+    emit({ ...at, channel, note, velocity, type });
+    return true;
+  }
+  if (command === 0xc0) {
+    emit({ ...at, channel, type: 'program', value: u8(r) });
+    return true;
+  }
+  const skip = SKIPPED_DATA_BYTES[command];
+  if (skip === undefined) return false;
+  r.offset += skip;
+  return true;
+}
 
-    let tick = 0;
-    let runningStatus = 0;
+function readTrack(r: Reader, track: number, emit: EventSink): void {
+  if (readChunkId(r) !== 'MTrk') throw new Error(`expected MTrk at byte ${r.offset - 4}`);
+  const length = u32(r);
+  const end = Math.min(r.offset + length, r.data.length);
+  let tick = 0;
+  let runningStatus = 0;
 
-    while (r.offset < end) {
-      tick += readVarInt(r);
-      let status = u8(r);
-
-      // Running status: a data byte here means "same status as last time".
-      if (status < 0x80) {
-        r.offset--;
-        status = runningStatus;
-      } else if (status < 0xf0) {
-        runningStatus = status;
-      }
-
-      const command = status & 0xf0;
-      const channel = status & 0x0f;
-
-      if (status === 0xff) {
-        const metaType = u8(r);
-        const metaLength = readVarInt(r);
-        const next = r.offset + metaLength;
-        if (metaType === 0x51 && metaLength === 3) {
-          push({ tick, track, type: 'tempo', value: (u8(r) << 16) | (u8(r) << 8) | u8(r) });
-        } else if (metaType === 0x58 && metaLength >= 2) {
-          const numerator = u8(r);
-          const denominator = 2 ** u8(r);
-          push({ tick, track, type: 'timeSignature', timeSignature: [numerator, denominator] });
-        } else if (metaType === 0x03 || metaType === 0x04) {
-          push({ tick, track, type: 'trackName', text: readText(r, metaLength) });
-        }
-        r.offset = next;
-        continue;
-      }
-
-      if (status === 0xf0 || status === 0xf7) {
-        r.offset += readVarInt(r);
-        continue;
-      }
-
-      switch (command) {
-        case 0x90: {
-          const note = u8(r);
-          const velocity = u8(r);
-          // A note-on with zero velocity is a note-off. Very common.
-          push({ tick, track, channel, note, velocity, type: velocity === 0 ? 'noteOff' : 'noteOn' });
-          break;
-        }
-        case 0x80: {
-          const note = u8(r);
-          const velocity = u8(r);
-          push({ tick, track, channel, note, velocity, type: 'noteOff' });
-          break;
-        }
-        case 0xc0:
-          push({ tick, track, channel, type: 'program', value: u8(r) });
-          break;
-        case 0xd0:
-          r.offset += 1;
-          break;
-        case 0xa0: case 0xb0: case 0xe0:
-          r.offset += 2;
-          break;
-        default:
-          // An unknown status means the stream is out of sync; the rest of this
-          // track cannot be trusted, so skip to the next one rather than
-          // emitting garbage notes.
-          r.offset = end;
-          break;
-      }
+  while (r.offset < end) {
+    tick += readVarInt(r);
+    let status = u8(r);
+    // Running status: a data byte here means "same status as last time".
+    if (status < 0x80) {
+      r.offset--;
+      status = runningStatus;
+    } else if (status < SYSEX_START) {
+      runningStatus = status;
     }
 
-    r.offset = end;
+    if (status === META_EVENT) readMetaEvent(r, { tick, track }, emit);
+    else if (status === SYSEX_START || status === SYSEX_ESCAPE) r.offset += readVarInt(r);
+    // An unknown status means the stream is out of sync; the rest of this
+    // track cannot be trusted, so skip to the next one rather than emitting
+    // garbage notes.
+    else if (!readChannelEvent(r, status, { tick, track }, emit)) r.offset = end;
   }
+  r.offset = end;
+}
 
+export function parseMidi(bytes: Uint8Array): ParsedMidi {
+  const r: Reader = { data: bytes, offset: 0 };
+  const { trackCount, ticksPerQuarter } = readHeader(r);
+
+  const events: RawEvent[] = [];
+  const emit: EventSink = (event) => {
+    events.push({ channel: 0, note: 0, velocity: 0, value: 0, text: '', timeSignature: [4, 4], ...event });
+  };
+  for (let track = 0; track < trackCount && r.offset < bytes.length; track++) {
+    readTrack(r, track, emit);
+  }
   return assemble(events, ticksPerQuarter, trackCount);
 }
 
+/** What the meta events say about the file, gathered while notes are paired. */
+interface FileFacts {
+  names: Map<number, string>;
+  programs: Map<number, number>;
+  channels: Map<number, Set<number>>;
+  microsecondsPerQuarter: number;
+  firstTempo: number | null;
+  timeSignature: [number, number];
+}
+
+/** Records a meta event. Returns false for note events, which the caller pairs. */
+function recordMeta(facts: FileFacts, event: RawEvent): boolean {
+  switch (event.type) {
+    case 'tempo':
+      facts.microsecondsPerQuarter = event.value;
+      facts.firstTempo ??= event.value;
+      return true;
+    case 'timeSignature':
+      if (event.tick === 0) facts.timeSignature = event.timeSignature;
+      return true;
+    case 'trackName':
+      if (!facts.names.has(event.track)) facts.names.set(event.track, event.text);
+      return true;
+    case 'program':
+      if (!facts.programs.has(event.track)) facts.programs.set(event.track, event.value);
+      return true;
+    default:
+      return false;
+  }
+}
+
+function summarizeTrack(index: number, notes: readonly MidiNote[], facts: FileFacts): MidiTrack {
+  const trackNotes = notes.filter((n) => n.track === index);
+  const pitches = trackNotes.map((n) => n.midiNumber);
+  return {
+    index,
+    name: facts.names.get(index) ?? null,
+    program: facts.programs.get(index) ?? null,
+    channels: [...(facts.channels.get(index) ?? [])].sort((a, b) => a - b),
+    noteCount: trackNotes.length,
+    lowestMidi: pitches.length ? Math.min(...pitches) : 0,
+    highestMidi: pitches.length ? Math.max(...pitches) : 0,
+    isPercussion: trackNotes.length > 0 && trackNotes.every((n) => n.channel === 9),
+  };
+}
+
+const MIDI_DEFAULT_TEMPO_US = 500000; // 120 bpm
+const EVENT_ORDER: Record<RawEventType, number> = {
+  tempo: 0, timeSignature: 0, trackName: 0, program: 0, noteOff: 1, noteOn: 2,
+};
+
 /** Turns tick-stamped events into millisecond-stamped notes and track summaries. */
 function assemble(events: RawEvent[], ticksPerQuarter: number, trackCount: number): ParsedMidi {
-  const order: Record<RawEventType, number> = {
-    tempo: 0, timeSignature: 0, trackName: 0, program: 0, noteOff: 1, noteOn: 2,
-  };
-  events.sort((a, b) => (a.tick - b.tick) || (order[a.type] - order[b.type]));
+  events.sort((a, b) => (a.tick - b.tick) || (EVENT_ORDER[a.type] - EVENT_ORDER[b.type]));
 
   const notes: MidiNote[] = [];
   const open = new Map<string, { startMs: number; velocity: number }>();
-
-  const names = new Map<number, string>();
-  const programs = new Map<number, number>();
-  const channels = new Map<number, Set<number>>();
-
-  let microsecondsPerQuarter = 500000; // 120 bpm, the MIDI default
-  let firstTempo: number | null = null;
-  let timeSignature: [number, number] = [4, 4];
+  const facts: FileFacts = {
+    names: new Map(), programs: new Map(), channels: new Map(),
+    microsecondsPerQuarter: MIDI_DEFAULT_TEMPO_US, firstTempo: null, timeSignature: [4, 4],
+  };
   let lastTick = 0;
   let elapsedMs = 0;
 
   for (const event of events) {
-    elapsedMs += ((event.tick - lastTick) / ticksPerQuarter) * (microsecondsPerQuarter / 1000);
+    elapsedMs += ((event.tick - lastTick) / ticksPerQuarter) * (facts.microsecondsPerQuarter / 1000);
     lastTick = event.tick;
+    if (recordMeta(facts, event)) continue;
 
-    switch (event.type) {
-      case 'tempo':
-        microsecondsPerQuarter = event.value;
-        if (firstTempo === null) firstTempo = event.value;
-        continue;
-      case 'timeSignature':
-        if (event.tick === 0) timeSignature = event.timeSignature;
-        continue;
-      case 'trackName':
-        if (!names.has(event.track)) names.set(event.track, event.text);
-        continue;
-      case 'program':
-        if (!programs.has(event.track)) programs.set(event.track, event.value);
-        continue;
-      default:
-        break;
-    }
-
-    if (!channels.has(event.track)) channels.set(event.track, new Set());
-    channels.get(event.track)!.add(event.channel);
+    const channels = facts.channels.get(event.track) ?? new Set<number>();
+    channels.add(event.channel);
+    facts.channels.set(event.track, channels);
 
     const key = `${event.track}:${event.channel}:${event.note}`;
     if (event.type === 'noteOn') {
       open.set(key, { startMs: elapsedMs, velocity: event.velocity });
       continue;
     }
-
     const started = open.get(key);
     if (!started) continue;
     open.delete(key);
@@ -271,27 +297,11 @@ function assemble(events: RawEvent[], ticksPerQuarter: number, trackCount: numbe
 
   notes.sort((a, b) => a.startTimeMs - b.startTimeMs || a.midiNumber - b.midiNumber);
 
-  const tracks: MidiTrack[] = [];
-  for (let index = 0; index < trackCount; index++) {
-    const trackNotes = notes.filter((n) => n.track === index);
-    const used = [...(channels.get(index) ?? [])].sort((a, b) => a - b);
-    tracks.push({
-      index,
-      name: names.get(index) ?? null,
-      program: programs.get(index) ?? null,
-      channels: used,
-      noteCount: trackNotes.length,
-      lowestMidi: trackNotes.length ? Math.min(...trackNotes.map((n) => n.midiNumber)) : 0,
-      highestMidi: trackNotes.length ? Math.max(...trackNotes.map((n) => n.midiNumber)) : 0,
-      isPercussion: trackNotes.length > 0 && trackNotes.every((n) => n.channel === 9),
-    });
-  }
-
   return {
     notes,
-    tracks,
-    bpm: firstTempo === null ? 120 : Math.round(60000000 / firstTempo),
-    timeSignature,
+    tracks: Array.from({ length: trackCount }, (_, index) => summarizeTrack(index, notes, facts)),
+    bpm: facts.firstTempo === null ? 120 : Math.round(60000000 / facts.firstTempo),
+    timeSignature: facts.timeSignature,
     durationMs: notes.reduce((max, n) => Math.max(max, n.startTimeMs + n.durationMs), 0),
   };
 }

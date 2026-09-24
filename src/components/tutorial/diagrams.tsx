@@ -2,12 +2,10 @@ import React from 'react';
 import { View } from 'react-native';
 
 import {
-  CelloString, midiAt, midiToPitchName, STRING_NUMERAL, STRING_ORDER,
-} from '@/domain/cello';
-import { Tape, TapeSet } from '@/domain/tapes';
-import { useTheme } from '@/theme/ThemeProvider';
-import { alpha, TAPE_COLOR_LABEL } from '@/theme/tokens';
-import { Body, Label, Num, Row, Rule, Stack, Title } from '../ui/primitives';
+  CelloString, midiAt, midiToPitchName, STRING_NUMERAL, STRING_ORDER, Tape, TapeSet,
+} from '@domain';
+import { useTheme, alpha, TAPE_COLOR_LABEL } from '@theme';
+import { Body, Label, Num, Row, Rule, Stack, Title } from '../ui';
 
 /**
  * Still diagrams for the tutorial.
@@ -103,13 +101,16 @@ function spell(midi: number): { primary: string; alternate: string | null } {
   return { primary: sharp, alternate: sharp === flat ? null : flat };
 }
 
+const ORDINALS: readonly string[] = ['First', 'Second', 'Third', 'Fourth'];
+
 /** "Blue", or "First yellow" when the set has more than one of that colour. */
 function ordinalLabel(set: TapeSet, tape: Tape): string {
   const sameColor = set.tapes.filter((t) => t.color === tape.color);
   const name = TAPE_COLOR_LABEL[tape.color];
   if (sameColor.length < 2) return name;
   const nth = sameColor.findIndex((t) => t.id === tape.id);
-  return `${['First', 'Second', 'Third', 'Fourth'][nth] ?? `${nth + 1}th`} ${name.toLowerCase()}`;
+  const ordinal = ORDINALS[nth] ?? `${nth + 1}th`;
+  return `${ordinal} ${name.toLowerCase()}`;
 }
 
 // ─── Finger key ──────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 {
   "name": "ponticello",
   "main": "expo-router/entry",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",
     "@expo/ui": "~57.0.12",
@@ -43,6 +43,7 @@
     "cheerio": "1.2.0",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~57.0.1",
+    "eslint-plugin-sonarjs": "^4.2.1",
     "typescript": "~6.0.3",
     "vitest": "^3.2.7"
   },
@@ -60,9 +61,9 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.strict.json",
     "build:library": "vite-node --config vitest.config.ts tools/build-library.ts -- --edition=full",
     "audit:arrangements": "vite-node --config vitest.config.ts tools/audit-arrangements.ts",
-    "arrange:ollama": "vite-node tools/ollama-arranger.ts --",
+    "arrange:ollama": "vite-node --config vitest.config.ts tools/ollama-arranger.ts --",
     "ollama:benchmark": "vite-node --config vitest.config.ts tools/ollama-benchmark.ts --",
-    "convert": "vite-node tools/convert-score.ts --",
+    "convert": "vite-node --config vitest.config.ts tools/convert-score.ts --",
     "apk": "bash tools/build-apk.sh",
     "proxy": "node tools/dev-proxy.mjs",
     "typecheck:strict": "tsc --noEmit -p tsconfig.strict.json",

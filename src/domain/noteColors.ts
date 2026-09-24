@@ -23,7 +23,7 @@
  * Pure: no React, no React Native. See AGENTS.md.
  */
 
-import { CelloString } from './cello';
+import { CelloString, toPitchClass } from './cello';
 
 export type NoteLetter = 'C' | 'D' | 'E' | 'F' | 'G' | 'A' | 'B';
 
@@ -82,7 +82,7 @@ const PITCH_CLASS_LETTERS: Record<number, readonly NoteLetter[]> = {
 };
 
 export function lettersForPitchClass(pitchClass: number): readonly NoteLetter[] {
-  return PITCH_CLASS_LETTERS[((pitchClass % 12) + 12) % 12] ?? ['C'];
+  return PITCH_CLASS_LETTERS[toPitchClass(pitchClass)] ?? ['C'];
 }
 
 /**

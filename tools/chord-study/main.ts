@@ -1,6 +1,7 @@
-import { CELLO_CHORD_LIBRARY, CELLO_CHORD_ROOTS, CELLO_CHORD_TYPES, getCelloChord, getCelloChordByType } from '../../src/domain/celloChords';
-import { celloChordSvg, escapeChordXml } from '../../src/domain/chords/diagram';
-import type { ChordDiagramOptions } from '../../src/domain/chords/diagram';
+import {
+  CELLO_CHORD_LIBRARY, CELLO_CHORD_ROOTS, CELLO_CHORD_TYPES, getCelloChord, getCelloChordByType,
+  celloChordSvg, escapeChordXml, type CelloChordStudy, type ChordDiagramOptions,
+} from '@domain';
 
 const el = <T extends HTMLElement>(id: string) => {
   const element = document.getElementById(id);
@@ -59,13 +60,11 @@ function render(reset = false) {
   el('formula').textContent = chord.tones.map((t) => t.interval).join('  ·  ');
   el('tones').innerHTML = chord.tones.map((t) => `<span class="${t.isRoot ? 'root-tone' : ''}">${escapeChordXml(t.name)}<small>${escapeChordXml(t.interval)}</small></span>`).join('');
   el('diagram').innerHTML = celloChordSvg(chord, options);
-  el('diagram-caption').textContent = arpeggio ? 'Sequential notes. Do not hold this as one grip.'
-    : `${shape.notes.length} strings · ${shape.notes.find((n) => n.semitones > 0)?.frame ?? 'open'} frame · bass ${shape.bass.name}`;
-  el('technique').textContent = arpeggio ? (chord.voicings.length ? 'Arpeggio: play one note at a time.' : 'No grip found in this model. Study the full arpeggio.')
-    : shape.technique === 'double-stop' ? 'Bow both adjacent strings together.' : 'Roll the chord across adjacent strings; do not sustain all strings together.';
-  el('omissions').textContent = arpeggio ? 'All chord tones included.' : shape.omittedTones.length
-    ? `Reduced shape. Omitted: ${shape.omittedTones.map((t) => `${t.name} (${t.interval})`).join(', ')}.` : 'Complete shape. All chord tones included.';
-  el('sequence').innerHTML = chord.arpeggio.map((note) => `<li><strong class="${note.tone.isRoot ? 'root-text' : ''}">${escapeChordXml(note.tone.name)}${note.tone.isRoot ? ' ▪' : ''}</strong><span>${note.string} string · ${note.semitones === 0 ? 'open' : `finger ${note.finger}`}</span><small>${note.semitones === 0 ? '0' : `+${note.semitones}`} st</small></li>`).join('');
+  const grip = arpeggio ? undefined : shape;
+  el('diagram-caption').textContent = captionFor(grip);
+  el('technique').textContent = techniqueFor(grip, chord.voicings.length > 0);
+  el('omissions').textContent = omissionsFor(grip);
+  el('sequence').innerHTML = chord.arpeggio.map(sequenceItem).join('');
   el('roots').replaceChildren(...CELLO_CHORD_ROOTS.map((root) => {
     const button = document.createElement('button');
     button.textContent = root;
@@ -115,3 +114,35 @@ lyrics.forEach((line) => {
   el('lyric-chords').append(row);
 });
 render(true);
+
+type Grip = CelloChordStudy['voicings'][number];
+type ArpeggioNote = CelloChordStudy['arpeggio'][number];
+
+function captionFor(grip: Grip | undefined): string {
+  if (!grip) return 'Sequential notes. Do not hold this as one grip.';
+  const frame = grip.notes.find((n) => n.semitones > 0)?.frame ?? 'open';
+  return `${grip.notes.length} strings · ${frame} frame · bass ${grip.bass.name}`;
+}
+
+function techniqueFor(grip: Grip | undefined, hasGrips: boolean): string {
+  if (!grip) return hasGrips ? 'Arpeggio: play one note at a time.' : 'No grip found in this model. Study the full arpeggio.';
+  return grip.technique === 'double-stop'
+    ? 'Bow both adjacent strings together.'
+    : 'Roll the chord across adjacent strings; do not sustain all strings together.';
+}
+
+function omissionsFor(grip: Grip | undefined): string {
+  if (!grip) return 'All chord tones included.';
+  if (!grip.omittedTones.length) return 'Complete shape. All chord tones included.';
+  const omitted = grip.omittedTones.map((t) => `${t.name} (${t.interval})`).join(', ');
+  return `Reduced shape. Omitted: ${omitted}.`;
+}
+
+function sequenceItem(note: ArpeggioNote): string {
+  const rootClass = note.tone.isRoot ? 'root-text' : '';
+  const rootMark = note.tone.isRoot ? ' ▪' : '';
+  const open = note.semitones === 0;
+  const where = open ? 'open' : `finger ${note.finger}`;
+  const offset = open ? '0' : `+${note.semitones}`;
+  return `<li><strong class="${rootClass}">${escapeChordXml(note.tone.name)}${rootMark}</strong><span>${note.string} string · ${where}</span><small>${offset} st</small></li>`;
+}

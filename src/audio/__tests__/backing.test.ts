@@ -1,15 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  arrangementBackingParts, backingFromMidi, generateAccompaniment, inferChord, instrumentForProgram, isMinorKey,
-  soloPartFromScore, tonicPitchClass, trackDurationMs,
-} from '@/domain/backing';
-import { MidiTrack } from '@/domain/midi';
+  arrangementBackingParts, backingFromMidi, generateAccompaniment, inferChord,
+  instrumentForProgram, isMinorKey, soloPartFromScore, tonicPitchClass, trackDurationMs,
+  MidiTrack, fromBase64, toBase64,
+} from '@domain';
 import { fadeEdges, limit, mixBuffers, renderParts } from '../synth';
 import { encodeWav } from '../wav';
-import { fromBase64, toBase64 } from '@/domain/base64';
-import { BWV1007_PRELUDE } from '@/scores/bach';
-import { D_MAJOR_TWO_STRINGS, OPEN_STRINGS } from '@/scores/studies';
+import { BWV1007_PRELUDE, D_MAJOR_TWO_STRINGS, OPEN_STRINGS } from '@scores';
 
 const SR = 22050;
 
@@ -190,7 +188,7 @@ describe('rendering', () => {
     const parts = generateAccompaniment(OPEN_STRINGS, { style: 'drone', fromBar: 1, toBar: 1 });
     const buffer = renderParts(parts, { sampleRate: SR, durationMs: 1000 });
 
-    expect(buffer.length).toBe(SR);
+    expect(buffer).toHaveLength(SR);
     const peak = buffer.reduce((m, x) => Math.max(m, Math.abs(x)), 0);
     expect(peak).toBeGreaterThan(0.05);
     expect(peak).toBeLessThanOrEqual(1.5);
@@ -256,7 +254,7 @@ describe('wav encoding', () => {
     expect(text(0, 4)).toBe('RIFF');
     expect(text(8, 4)).toBe('WAVE');
     expect(text(36, 4)).toBe('data');
-    expect(wav.length).toBe(44 + 3 * 2);
+    expect(wav).toHaveLength(44 + 3 * 2);
 
     const view = new DataView(wav.buffer);
     expect(view.getUint16(22, true)).toBe(1);       // mono

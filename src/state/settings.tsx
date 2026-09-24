@@ -3,11 +3,12 @@ import React, {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useSyncExternalStore,
 } from 'react';
 
-import { AccompanimentStyle } from '@/domain/backing';
-import { DEFAULT_TAPE_SETS, isCurrentTapeLayout, TAPE_LAYOUT_VERSION, TapeSet } from '@/domain/tapes';
-import { DEFAULT_TRACK_CHOICE, TrackChoice } from '@/domain/trackPicker';
-import { ListenMode } from '@/audio/backing/types';
-import { ChromeName } from '@/theme/tokens';
+import {
+  AccompanimentStyle, DEFAULT_TAPE_SETS, isCurrentTapeLayout, TAPE_LAYOUT_VERSION, TapeSet,
+  DEFAULT_TRACK_CHOICE, TrackChoice,
+  type ListenMode,
+} from '@domain';
+import { ChromeName } from '@theme';
 
 export type VisionName = 'tab' | 'score' | 'highway';
 export type CueDensity = 'full' | 'essentials';
@@ -136,8 +137,9 @@ const DEFAULTS: Settings = {
 
 const STORAGE_KEY = 'ponticello:settings:v1';
 
-export interface SettingsContextValue {
-  settings: Settings;
+interface SettingsStore {
+  getSnapshot: () => Settings;
+  subscribe: (listener: () => void) => () => void;
   update: (patch: Partial<Settings>) => void;
   replaceTapeSet: (set: TapeSet) => void;
   resetTapes: () => void;
@@ -148,18 +150,6 @@ export interface SettingsContextValue {
    * so never sees the write — which is why picking a part used to do nothing.
    */
   setTrackChoice: (songId: string, choice: TrackChoice) => void;
-  /** False until the stored values have been read, so nothing flashes defaults. */
-  ready: boolean;
-}
-
-interface SettingsStore {
-  getSnapshot: () => Settings;
-  subscribe: (listener: () => void) => () => void;
-  update: (patch: Partial<Settings>) => void;
-  replaceTapeSet: (set: TapeSet) => void;
-  resetTapes: () => void;
-  setTrackChoice: (songId: string, choice: TrackChoice) => void;
-  isReady: () => boolean;
 }
 
 const SettingsStoreContext = createContext<SettingsStore | null>(null);
@@ -180,7 +170,6 @@ export function shallowEqual<T>(a: T, b: T): boolean {
 
 export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const settingsRef = useRef<Settings>(DEFAULTS);
-  const readyRef = useRef(false);
   const listenersRef = useRef<Set<() => void>>(new Set());
   const hydrated = useRef(false);
 
@@ -191,7 +180,6 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const getSnapshot = useCallback(() => settingsRef.current, []);
-  const isReady = useCallback(() => readyRef.current, []);
 
   const subscribe = useCallback((listener: () => void) => {
     listenersRef.current.add(listener);
@@ -267,7 +255,6 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       .finally(() => {
         if (!cancelled) {
           hydrated.current = true;
-          readyRef.current = true;
           notify();
         }
       });
@@ -281,8 +268,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     replaceTapeSet,
     resetTapes,
     setTrackChoice,
-    isReady,
-  }), [getSnapshot, subscribe, update, replaceTapeSet, resetTapes, setTrackChoice, isReady]);
+  }), [getSnapshot, subscribe, update, replaceTapeSet, resetTapes, setTrackChoice]);
 
   return <SettingsStoreContext.Provider value={store}>{children}</SettingsStoreContext.Provider>;
 }
@@ -374,21 +360,6 @@ export function useTrackChoice(songId: string | undefined): TrackChoice {
     (s) => (songId ? s.trackChoices[songId] : undefined) ?? DEFAULT_TRACK_CHOICE,
     shallowEqual,
   );
-}
-
-export function useSettings(): SettingsContextValue {
-  const settings = useSettingsSelector((s) => s);
-  const store = useSettingsStore();
-  const ready = useSyncExternalStore(store.subscribe, store.isReady);
-
-  return useMemo(() => ({
-    settings,
-    update: store.update,
-    replaceTapeSet: store.replaceTapeSet,
-    resetTapes: store.resetTapes,
-    setTrackChoice: store.setTrackChoice,
-    ready,
-  }), [settings, store, ready]);
 }
 
 /** Theme preference and toggle helper. */

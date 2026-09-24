@@ -1,15 +1,14 @@
 import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
 
-import { PracticeHeatmap } from '@/components/practice/PracticeHeatmap';
-import { Button } from '@/components/ui/controls';
-import { Body, Label, Num, Row, Rule, Stack, Title } from '@/components/ui/primitives';
-import { Screen, ScreenHeader } from '@/components/ui/Screen';
+import {
+  PracticeHeatmap, Button, Body, Label, Num, Row, Rule, Stack, Title, Screen, ScreenHeader,
+} from '@components';
 import {
   dayKey, daysPractised, formatDuration, PracticeLog, shiftDays, streaks, totalMs,
-} from '@/domain/practice';
-import { usePracticeActions, usePracticeLog, usePracticeReady } from '@/state/practice';
-import { useTheme } from '@/theme/ThemeProvider';
+} from '@domain';
+import { usePracticeActions, usePracticeLog, usePracticeReady } from '@state';
+import { useTheme } from '@theme';
 
 /**
  * Your practice.

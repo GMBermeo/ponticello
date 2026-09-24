@@ -2,9 +2,10 @@ import { all } from '@tonaljs/chord-type';
 import { semitones } from '@tonaljs/interval';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { OPEN_STRING_MIDI, STRING_ORDER } from '../src/domain/cello';
-import { findCelloChordShapes, MAX_CHORD_ANCHOR } from '../src/domain/chords/shapeSearch';
-import type { CelloChordCatalog, CelloChordType, FourStrings } from '../src/domain/chords/types';
+import {
+  OPEN_STRING_MIDI, STRING_ORDER, findCelloChordShapes, MAX_CHORD_ANCHOR, type CelloChordCatalog,
+  type CelloChordType, type FourStrings,
+} from '@domain';
 
 const roots = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
 // Tonal's default 11/13 definitions omit common voicing tones. Store complete
@@ -15,10 +16,13 @@ const completeExtensions: Record<string, readonly string[]> = {
   maj13: ['1P', '3M', '5P', '7M', '9M', '11P', '13M'],
   m13: ['1P', '3m', '5P', '7m', '9M', '11P', '13M'],
 };
+/** Aliases to prefer when a type has them: the bare major triad, and the unambiguous 7b9sus4. */
+const PREFERRED_ALIASES = ['', '7b9sus4'];
+
 const types: CelloChordType[] = all().map((type) => {
   // A type starting with b is ambiguous when concatenated with a root: Cb9sus
   // means C-flat 9sus, not C with a flat ninth. Prefer an unambiguous alias.
-  const id = type.aliases.includes('') ? '' : type.aliases.includes('7b9sus4') ? '7b9sus4' : type.aliases[0]!;
+  const id = PREFERRED_ALIASES.find((alias) => type.aliases.includes(alias)) ?? type.aliases[0]!;
   const intervals = completeExtensions[id] ?? type.intervals;
   const steps = intervals.map((interval) => {
     const n = semitones(interval);

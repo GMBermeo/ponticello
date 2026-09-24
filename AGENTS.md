@@ -34,6 +34,12 @@ compiler memoises the call on the getter's identity, so the value never updates
 — this is why picking a track part once did nothing. Subscribe instead
 (`useSettingsSelector`, `useTrackChoice`, `usePlayheadPosition`).
 
+Settings are read only through narrow selector hooks — `useVisionPreferences`,
+`useAudioPreferences`, `useTapeSettings`, `useThemePreference`,
+`useTrackChoice`, or `useSettingsSelector` for anything else — and written
+through `useSettingsActions`. There is deliberately no whole-object hook: a
+component re-renders only when a setting it draws changes.
+
 ## The play screen's clock
 
 Score time is anchored, not accumulated (`src/domain/transportClock.ts`), and
@@ -50,11 +56,47 @@ only) regenerate `bundledSongs.json`, `catalogIndex.ts` and
 into `releases/`. Tests that assert library *size* gate on
 `LIBRARY_EDITION.id`; correctness checks run for both.
 
+## Folders and imports
+
+Routes in `src/app` are composition only; a screen's pieces live in a feature
+folder under `src/components/` (`library/`, `practice-setup/`, `play/`,
+`chords/`, `progression/`, `tuner/`). Pure logic a component needs goes in a
+plain `.ts` file beside it (e.g. `library/libraryFilters.ts`) or in
+`src/domain`, and gets a test.
+
+Every top-level folder has an `index.ts` barrel: `@audio`, `@components`,
+`@domain`, `@scores`, `@state`, `@theme` (see `tsconfig.json` `paths` and
+`tools/pathAliases.ts`, which must stay in step). Use the alias across
+folders; inside a folder use relative imports — importing your own barrel
+creates a cycle. A new file must be added to its folder's `index.ts`.
+
+Shared logic lives in one deep module rather than being re-derived:
+`domain/harmony` for anything about which chord or root is sounding (the
+accompaniment, the harmonic guide, the Ollama features and the audit all use
+it, each passing its own documented policy), `toPitchClass` in `domain/cello`
+for pitch-class arithmetic, and `audio/pitchTracker` for what the player sees
+of their pitch — `usePitch` only adapts it to shared values and listeners.
+
+The barrels are not split per screen for startup speed, on purpose: all of
+`src/components` is about 0.5 MB of source against 43 MB of bundled song and
+chord JSON, and Expo Router loads every route module at startup on native
+anyway. Revisit only with a measured cold-start profile.
+
+Static types: option lists are `readonly Segment<T>[]`, lookups are
+`Record<Union, …>`; no `as const` object arrays, no `any` in `src`.
+
+## Lint
+
+`npx eslint .` runs Expo's config plus SonarJS (`eslint-plugin-sonarjs`) and
+must report nothing. A justified exception gets an
+`eslint-disable-next-line <rule> -- reason` comment, never a blanket disable.
+
 ## Before you commit
 
 ```
 npm run typecheck
 npm test
+npx eslint .
 ```
 
 Tests are pure TypeScript and must stay that way — nothing in `src/domain`,

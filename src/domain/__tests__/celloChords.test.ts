@@ -188,8 +188,8 @@ describe('cello chord diagrams', () => {
       const model = chordDiagramModel(chord);
       const svg = celloChordSvg(chord);
       const roots = model.markers.filter((m) => m.note.tone.isRoot).length;
-      expect((svg.match(/<rect /g) ?? []).length).toBe(roots);
-      expect((svg.match(/<circle /g) ?? []).length).toBe(model.markers.length - roots);
+      expect(svg.match(/<rect /g) ?? []).toHaveLength(roots);
+      expect(svg.match(/<circle /g) ?? []).toHaveLength(model.markers.length - roots);
       expect(svg).not.toMatch(/NaN|undefined/);
       expect(svg).toContain('aria-label=');
     }

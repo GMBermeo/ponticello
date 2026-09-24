@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { AccompanimentStyle, BackingPart, BackingTrack } from '@/domain/backing';
-import { loopBudget, loopOffsetSeconds, PracticeLoop } from '@/domain/loop';
-import { CelloSongScore } from '@/domain/schema';
-import { resolveAudibleProgram } from './backing/program';
-import { backingTransportDecision } from './backing/transport';
-import { ListenMode } from './backing/types';
-import { useBackingPlayer } from './backing/useBackingPlayer';
+import {
+  AccompanimentStyle, BackingPart, BackingTrack, loopBudget, loopOffsetSeconds, PracticeLoop,
+  CelloSongScore, type ListenMode,
+} from '@domain';
+import { resolveAudibleProgram, backingTransportDecision, useBackingPlayer } from './backing';
 
 /**
  * Backing accompaniment, resolved and played in step with the practice loop.

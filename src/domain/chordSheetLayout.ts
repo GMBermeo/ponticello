@@ -39,6 +39,7 @@ export class ChordSheetLayout {
   }
 
   offsets(): number[] {
-    return this.cachedOffsets ??= Array.from({ length: this.count }, (_, index) => this.offset(index));
+    this.cachedOffsets ??= Array.from({ length: this.count }, (_, index) => this.offset(index));
+    return this.cachedOffsets;
   }
 }

@@ -18,8 +18,6 @@
 
 const HEADER_BYTES = 44;
 
-export { toBase64 } from '@/domain/base64';
-
 /** Bytes a mono 16-bit WAV of `sampleCount` samples occupies, header included. */
 export function wavByteLength(sampleCount: number): number {
   return HEADER_BYTES + sampleCount * 2;

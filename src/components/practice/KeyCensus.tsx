@@ -1,9 +1,9 @@
 import { View } from 'react-native';
 
-import { Body, Label, Num, Row, Stack, StringSwatch, Title } from '@/components/ui/primitives';
-import { KEY_DEMAND_LABEL } from '@/domain/keyCensus';
-import { KeyPracticeRow } from '@/scores';
-import { useTheme } from '@/theme/ThemeProvider';
+import { Body, Label, Num, Row, Stack, StringSwatch, Title } from '../ui';
+import { KEY_DEMAND_LABEL } from '@domain';
+import { KeyPracticeRow } from '@scores';
+import { useTheme } from '@theme';
 
 /**
  * How a key earns its place on the practice screen.
@@ -62,7 +62,7 @@ export function KeyDemandBar({
       <Row gap={8}>
         <Label size={10} color={theme.chrome.dim}>{KEY_DEMAND_LABEL[row.demand]}</Label>
         <Label size={10} color={theme.chrome.dim} style={{ marginLeft: 'auto' }}>
-          {row.drills.length === 0 ? 'No drill' : `${row.drills.length} drill${row.drills.length === 1 ? '' : 's'}`}
+          {drillCountLabel(row.drills.length)}
         </Label>
       </Row>
     </Stack>
@@ -116,4 +116,9 @@ function ordinal(rank: number | null): string {
   const teens = rank % 100;
   if (teens >= 11 && teens <= 13) return `${rank}th`;
   return `${rank}${['th', 'st', 'nd', 'rd'][rank % 10] ?? 'th'}`;
+}
+
+function drillCountLabel(count: number): string {
+  if (count === 0) return 'No drill';
+  return count === 1 ? '1 drill' : `${count} drills`;
 }

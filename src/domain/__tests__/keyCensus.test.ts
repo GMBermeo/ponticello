@@ -5,8 +5,7 @@ import {
   keyDemand, openStringTonic, parseKeyName,
 } from '../keyCensus';
 import { keyName } from '../key';
-import { COMPACT_SCORES } from '@/scores/bundledSongs';
-import { LIBRARY_KEY_CENSUS } from '@/scores';
+import { COMPACT_SCORES, LIBRARY_KEY_CENSUS } from '@scores';
 
 describe('parseKeyName', () => {
   it('reads the spellings the library and the importers produce', () => {
@@ -153,7 +152,7 @@ describe('the library census', () => {
     for (const entry of LIBRARY_KEY_CENSUS.entries) {
       expect(entry.songs).toBe(counted.get(entry.key));
     }
-    expect(LIBRARY_KEY_CENSUS.entries.length).toBe(counted.size);
+    expect(LIBRARY_KEY_CENSUS.entries).toHaveLength(counted.size);
   });
 
   it('is ranked, and the shares add up', () => {

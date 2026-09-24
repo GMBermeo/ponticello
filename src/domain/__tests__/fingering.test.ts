@@ -6,8 +6,7 @@ import {
   emissionCost, firstPositionFingering, handMoves, handSemitones, RawNoteEvent, seatLine,
   solveFingering, transitionCost,
 } from '../fingering';
-import { COMPACT_SCORES } from '@/scores/bundledSongs';
-import { LIBRARY_EDITION } from '@/scores/libraryEdition';
+import { COMPACT_SCORES, LIBRARY_EDITION } from '@scores';
 
 const at = (midiNumber: number, startTimeMs: number, durationMs = 400): RawNoteEvent =>
   ({ midiNumber, startTimeMs, durationMs });

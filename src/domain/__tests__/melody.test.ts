@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   bestOctaveShift, bestOctaveShiftToRange, chooseMelodyTrack, melodyMetrics, melodyTrackScore,
-} from '@/domain/melody';
-import { MidiNote, MidiTrack } from '@/domain/midi';
+} from '../melody';
+import { MidiNote, MidiTrack } from '../midi';
 
 /** A track descriptor with sensible defaults. */
 function track(patch: Partial<MidiTrack> & { index: number }): MidiTrack {

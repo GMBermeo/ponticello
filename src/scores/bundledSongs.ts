@@ -7,11 +7,14 @@
  * Songs store one low, first-position cello line; easier levels are derived at runtime.
  */
 
-import { CelloSongScore, CelloNote, CelloMeasure, DifficultyTier, measureDurationMs } from '@/domain/schema';
-import { BackingTrack, BackingPart, InstrumentName, PartRole } from '@/domain/backing';
-import { midiToPitchName, midiToFrequency } from '@/domain/cello';
-import { seatLine } from '@/domain/fingering';
+import {
+  CelloSongScore, CelloNote, CelloMeasure, DifficultyTier, measureDurationMs, BackingTrack,
+  BackingPart, InstrumentName, PartRole, midiToPitchName, midiToFrequency, seatLine,
+} from '@domain';
 import rawData from './bundledSongs.json';
+
+const STUDY_REDUCTION_RIGHTS = 'Study reduction — personal practice, analysis and research';
+const RIGHTS_BY_CATEGORY: Readonly<Record<string, string>> = { classical: 'Public domain', study: 'Original study' };
 
 
 export interface CompactScoreDef {
@@ -96,7 +99,7 @@ export function inflateScore(raw: CompactScoreDef): CelloSongScore {
       tonic: raw.key.split(' ')[0] ?? 'C',
       preferFlats: raw.preferFlats,
       teaches: 'Low first-position cello. Beginner plays held bass anchors; Intermediate follows the bass; Advanced and Full carry the melody.',
-      rights: raw.category === 'classical' ? 'Public domain' : raw.category === 'study' ? 'Original study' : 'Study reduction — personal practice, analysis and research',
+      rights: RIGHTS_BY_CATEGORY[raw.category] ?? STUDY_REDUCTION_RIGHTS,
     },
     measures,
     notes,

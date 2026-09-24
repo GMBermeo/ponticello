@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { arrangeScoreForLevel } from '@/domain/arrangement';
-import { arrangementBackingParts, BackingPart, generateAccompaniment, soloPartFromScore } from '@/domain/backing';
-import { clipToLoop, loopBudget, practiceLoop } from '@/domain/loop';
-import { getBassLine, getGuideLine } from '@/scores';
-import { COMPACT_SCORES, inflateBacking, inflateScore } from '@/scores/bundledSongs';
+import {
+  arrangeScoreForLevel, arrangementBackingParts, BackingPart, generateAccompaniment,
+  soloPartFromScore, clipToLoop, loopBudget, practiceLoop,
+} from '@domain';
+import {
+  getBassLine, getGuideLine, COMPACT_SCORES, inflateBacking, inflateScore, LIBRARY_EDITION,
+} from '@scores';
 import { buildProgram, estimatePeak } from '../backing/program';
 import { renderProgramInto } from '../synth';
-import { LIBRARY_EDITION } from '@/scores/libraryEdition';
 
 /** Size thresholds describe the full library; the free edition ships a dozen pieces. */
 const FULL_LIBRARY = LIBRARY_EDITION.id === 'full';
@@ -108,7 +109,7 @@ describe('every bundled song plays its backing', () => {
     // rebuilds `bundledSongs.json` from `_MIDIS/` and the total moves whenever
     // the user adds or deletes a file, so pinning a number here fails the suite
     // for a reason that has nothing to do with playback.
-    expect(outcomes.length).toBe(COMPACT_SCORES.length);
+    expect(outcomes).toHaveLength(COMPACT_SCORES.length);
     expect(outcomes.length).toBeGreaterThan(FULL_LIBRARY ? 200 : 0);
   });
 

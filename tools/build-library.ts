@@ -1,116 +1,93 @@
 import { readdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
-import { parseMidi } from '../src/domain/midi';
-import { arrangeMidi, bassLine, harmonicGuide, rebaseLine } from '../src/domain/arrangement';
-import { instrumentForProgram } from '../src/domain/backing';
-import { CelloState, seatLine } from '../src/domain/fingering';
-import { DIFFICULTY_TIERS, difficultyOf } from '../src/domain/difficulty';
-import { detectKey, keyName } from '../src/domain/key';
-import { midiToPitchName } from '../src/domain/cello';
-import { CelloSongScore, DifficultyTier, measureDurationMs } from '../src/domain/schema';
-import type { LibraryRow } from '../src/scores/index';
-import type { CompactVariantDef, VariantLibraryData } from '../src/scores/benchmarkVariants';
+import {
+  parseMidi, arrangeMidi, bassLine, harmonicGuide, rebaseLine, instrumentForProgram, CelloState,
+  seatLine, DIFFICULTY_TIERS, difficultyOf, detectKey, keyName, midiToPitchName, CelloSongScore,
+  DifficultyTier, measureDurationMs,
+} from '@domain';
+import type { LibraryRow, CompactVariantDef, VariantLibraryData } from '@scores';
 import { BenchmarkRecord, parseVariantFolder } from './ollama/benchmarkCore';
 
 
-function parseSongInfo(filename: string, category: 'study' | 'classical' | 'song') {
-  const stem = filename.replace(/\.midi?$/i, '').replace(/[—–]/g, '-');
-  const id = stem.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+type SongCategory = 'study' | 'classical' | 'song';
 
-  if (category === 'classical') {
-    if (stem.includes('clair_de_lune') || stem.includes('clair-de-lune')) {
-      return {
-        id: 'debussy-clair-de-lune',
-        title: 'Clair de Lune',
-        composer: 'Claude Debussy',
-        origin: 'PUBLIC DOMAIN · CELLO ARRANGEMENT',
-        category: 'classical' as const,
-      };
-    }
+interface SongInfo {
+  id: string;
+  title: string;
+  composer: string;
+  origin: string;
+  category: SongCategory;
+}
 
-    if (stem.includes('gymnopedie')) {
-      return {
-        id: 'gymnopedie-no-1',
-        title: 'Gymnopédie No. 1',
-        composer: 'Erik Satie',
-        origin: 'PUBLIC DOMAIN · CELLO ARRANGEMENT',
-        category: 'classical' as const,
-      };
-    }
+const PUBLIC_DOMAIN_ORIGIN = 'PUBLIC DOMAIN · CELLO ARRANGEMENT';
 
-    if (stem.includes('scheherazade')) {
-      let movement = 'Scheherazade';
-      let mvtId = 'scheherazade';
-      if (stem.includes('1st')) {
-        movement = 'Scheherazade - 1st Movement';
-        mvtId = 'scheherazade-1st-movement';
-      } else if (stem.includes('2nd')) {
-        movement = 'Scheherazade - 2nd Movement (Part 1)';
-        mvtId = 'scheherazade-2nd-movement-part-1';
-      } else if (stem.includes('3rd')) {
-        movement = 'Scheherazade - 3rd Movement';
-        mvtId = 'scheherazade-3rd-movement';
-      }
-      return {
-        id: mvtId,
-        title: movement,
-        composer: 'Nikolai Rimsky-Korsakov',
-        origin: 'PUBLIC DOMAIN · CELLO ARRANGEMENT',
-        category: 'classical' as const,
-      };
-    }
+type NamedWork = { id: string; title: string; composer: string };
 
-    const title = stem.replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-    let composer = 'Classical';
-    if (stem.startsWith('bach')) composer = 'J.S. Bach';
-    else if (stem.startsWith('pachelbel')) composer = 'Johann Pachelbel';
-    else if (stem.startsWith('moonlight') || stem.startsWith('fur-elise') || stem.startsWith('ode')) composer = 'L. van Beethoven';
-    else if (stem.startsWith('dies-irae')) composer = 'Traditional 13th C.';
-    else if (stem.startsWith('debussy')) composer = 'Claude Debussy';
-    else if (stem.includes('satie')) composer = 'Erik Satie';
-    else if (stem.includes('rimsky')) composer = 'Nikolai Rimsky-Korsakov';
-    return {
-      id,
-      title,
-      composer,
-      origin: 'PUBLIC DOMAIN · CELLO ARRANGEMENT',
-      category: 'classical' as const,
-    };
-  }
+/** Classical files whose names do not say what the piece is called. */
+const NAMED_WORKS: readonly { matches: (stem: string) => boolean; work: NamedWork }[] = [
+  {
+    matches: (stem) => stem.includes('clair_de_lune') || stem.includes('clair-de-lune'),
+    work: { id: 'debussy-clair-de-lune', title: 'Clair de Lune', composer: 'Claude Debussy' },
+  },
+  { matches: (stem) => stem.includes('gymnopedie'), work: { id: 'gymnopedie-no-1', title: 'Gymnopédie No. 1', composer: 'Erik Satie' } },
+];
 
-  if (category === 'study') {
-    const title = stem.replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-    return {
-      id,
-      title,
-      composer: 'Ponticello Etude',
-      origin: 'ORIGINAL ETUDE · CELLO',
-      category: 'study' as const,
-    };
-  }
+const SCHEHERAZADE_MOVEMENTS: readonly { marker: string; id: string; title: string }[] = [
+  { marker: '1st', id: 'scheherazade-1st-movement', title: 'Scheherazade - 1st Movement' },
+  { marker: '2nd', id: 'scheherazade-2nd-movement-part-1', title: 'Scheherazade - 2nd Movement (Part 1)' },
+  { marker: '3rd', id: 'scheherazade-3rd-movement', title: 'Scheherazade - 3rd Movement' },
+];
 
-  if (stem.includes('-')) {
-    const parts = stem.split('-');
-    const artistRaw = parts[0].replace(/_/g, ' ').trim();
-    const titleRaw = parts.slice(1).join(' - ').replace(/_/g, ' ').trim();
-    return {
-      id,
-      title: titleRaw,
-      composer: artistRaw,
-      origin: `${artistRaw.toUpperCase()} · CELLO ARRANGEMENT`,
-      category: 'song' as const,
-    };
-  }
+/** Composer by the file name's opening word, first match wins. */
+const COMPOSER_BY_PREFIX: readonly { matches: (stem: string) => boolean; composer: string }[] = [
+  { matches: (stem) => stem.startsWith('bach'), composer: 'J.S. Bach' },
+  { matches: (stem) => stem.startsWith('pachelbel'), composer: 'Johann Pachelbel' },
+  { matches: (stem) => ['moonlight', 'fur-elise', 'ode'].some((prefix) => stem.startsWith(prefix)), composer: 'L. van Beethoven' },
+  { matches: (stem) => stem.startsWith('dies-irae'), composer: 'Traditional 13th C.' },
+  { matches: (stem) => stem.startsWith('debussy'), composer: 'Claude Debussy' },
+  { matches: (stem) => stem.includes('satie'), composer: 'Erik Satie' },
+  { matches: (stem) => stem.includes('rimsky'), composer: 'Nikolai Rimsky-Korsakov' },
+];
 
-  const title = stem.replace(/_/g, ' ').trim();
+const titleCase = (stem: string) => stem.replaceAll(/[-_]+/g, ' ').replaceAll(/\b\w/g, (c) => c.toUpperCase());
+
+function scheherazade(stem: string): NamedWork {
+  const movement = SCHEHERAZADE_MOVEMENTS.find(({ marker }) => stem.includes(marker));
   return {
-    id,
-    title,
-    composer: 'Song',
-    origin: 'SONG · CELLO ARRANGEMENT',
-    category: 'song' as const,
+    id: movement?.id ?? 'scheherazade',
+    title: movement?.title ?? 'Scheherazade',
+    composer: 'Nikolai Rimsky-Korsakov',
   };
+}
+
+function classicalWork(stem: string, id: string): NamedWork {
+  const named = NAMED_WORKS.find(({ matches }) => matches(stem))?.work;
+  if (named) return named;
+  if (stem.includes('scheherazade')) return scheherazade(stem);
+  const composer = COMPOSER_BY_PREFIX.find(({ matches }) => matches(stem))?.composer ?? 'Classical';
+  return { id, title: titleCase(stem), composer };
+}
+
+/** "Artist-Title" when the file name has a dash; otherwise the whole name is the title. */
+function songInfo(stem: string, id: string): SongInfo {
+  if (!stem.includes('-')) {
+    return { id, title: stem.replaceAll('_', ' ').trim(), composer: 'Song', origin: 'SONG · CELLO ARRANGEMENT', category: 'song' };
+  }
+  const [artistPart = '', ...titleParts] = stem.split('-');
+  const artist = artistPart.replaceAll('_', ' ').trim();
+  const title = titleParts.join(' - ').replaceAll('_', ' ').trim();
+  return { id, title, composer: artist, origin: `${artist.toUpperCase()} · CELLO ARRANGEMENT`, category: 'song' };
+}
+
+function parseSongInfo(filename: string, category: SongCategory): SongInfo {
+  const stem = filename.replace(/\.midi?$/i, '').replaceAll(/[—–]/g, '-');
+  const id = stem.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-').replaceAll(/^-|-$/g, '');
+  if (category === 'classical') return { ...classicalWork(stem, id), origin: PUBLIC_DOMAIN_ORIGIN, category };
+  if (category === 'study') {
+    return { id, title: titleCase(stem), composer: 'Ponticello Etude', origin: 'ORIGINAL ETUDE · CELLO', category };
+  }
+  return songInfo(stem, id);
 }
 
 interface CompactScoreData {
@@ -561,9 +538,9 @@ console.log(`Chord sheets (${edition}): ${bundledChordSheets.length} charts writ
 // The library screen lists rows from `catalogIndex.ts` so it never inflates
 // tens of megabytes of songs to draw a list. It has to be written by the same
 // run as the JSON, or the list and the songs behind it disagree.
-const { toCompactRow } = await import('../src/scores/index');
+const { toCompactRow } = await import('@scores');
 const rows = [...compactList.map((entry) => toCompactRow(entry)), ...variantRows];
-writeFileSync('src/scores/catalogIndex.ts', `import type { LibraryRow } from './index';
+writeFileSync('src/scores/catalogIndex.ts', `import type { LibraryRow } from './library';
 
 /**
  * Precomputed catalog index for the bundled songs. Generated by
@@ -610,7 +587,8 @@ for (const tier of ['Beginner', 'Intermediate', 'Advanced', 'Expert']) {
   console.log(`  ${tier.padEnd(13)} ${String(n).padStart(3)}  ${Math.round((100 * n) / total)}%`);
 }
 const hardest = [...difficulties].sort((a, b) => b.score - a.score).slice(0, 6);
-console.log(`  hardest: ${hardest.map(d => `${d.id}:${d.score.toFixed(0)}`).join(' ')}`);
+const hardestList = hardest.map((d) => `${d.id}:${d.score.toFixed(0)}`).join(' ');
+console.log(`  hardest: ${hardestList}`);
 
 const dull = quality.filter(q => q.distinct < 7 || q.movement < 25);
 const mangled = quality.filter(q => q.foldedPct > 15);

@@ -2,17 +2,13 @@ import { memo } from 'react';
 import { View } from 'react-native';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 
-import { LivePitch, usePitchReading } from '@/audio/usePitch';
-import { CENTS_PERFECT } from '@/domain/cello';
-import { useTheme } from '@/theme/ThemeProvider';
-import { alpha, intonationColor } from '@/theme/tokens';
-import { Button } from '../ui/controls';
-import { Label, Num, Title } from '../ui/primitives';
+import { LivePitch, usePitchReading } from '@audio';
+import { CENTS_PERFECT, formatCents } from '@domain';
+import { useTheme, alpha, intonationColor } from '@theme';
+import { dialPercent, TUNER_SPAN_CENTS } from '../tuner';
+import { Button, Label, Num, Title } from '../ui';
 import { useMeasuredSize } from '../useMeasuredSize';
 import { LevelMeter } from './Meters';
-
-/** Cents either side of centre the bar shows. */
-const SPAN = 50;
 
 export interface TunerStripProps {
   pitch: LivePitch;
@@ -50,14 +46,15 @@ export const TunerStrip = memo(function TunerStrip({
   const width = bar.width;
 
   const needle = useAnimatedStyle(() => {
-    const clamped = Math.max(-SPAN, Math.min(SPAN, pitch.cents.get()));
-    return { transform: [{ translateX: ((clamped / SPAN) * 0.5 + 0.5) * width }] };
+    const clamped = Math.max(-TUNER_SPAN_CENTS, Math.min(TUNER_SPAN_CENTS, pitch.cents.get()));
+    return { transform: [{ translateX: (dialPercent(clamped) / 100) * width }] };
   });
 
-  const centsText = voiced
-    ? `${reading.cents > 0 ? '+' : reading.cents < 0 ? '−' : ''}${Math.abs(Math.round(reading.cents))}¢`
-    : '—';
-  const zone = (CENTS_PERFECT / SPAN) * 50;
+  const centsText = voiced ? formatCents(reading.cents) : '—';
+  const inTuneInset = `${dialPercent(-CENTS_PERFECT)}%` as const;
+  let status = 'Starting microphone';
+  if (voiced) status = `${reading.frequency.toFixed(1)} Hz`;
+  else if (live) status = 'Listening';
 
   return (
     <View
@@ -92,7 +89,7 @@ export const TunerStrip = memo(function TunerStrip({
             >
               <View style={{ position: 'absolute', left: 0, right: 0, height: theme.rule(2), backgroundColor: chrome.lineSoft, borderRadius: theme.s(1) }} />
               <View style={{
-                position: 'absolute', left: `${50 - zone}%`, right: `${50 - zone}%`,
+                position: 'absolute', left: inTuneInset, right: inTuneInset,
                 top: 0, bottom: 0, borderRadius: theme.s(4), backgroundColor: alpha(chrome.accent, 0.16),
               }} />
               <View style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: theme.rule(1), backgroundColor: chrome.line }} />
@@ -107,7 +104,7 @@ export const TunerStrip = memo(function TunerStrip({
             </View>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
               <Label size={9}>Flat</Label>
-              <Label size={9}>{live ? (voiced ? `${reading.frequency.toFixed(1)} Hz` : 'Listening') : 'Starting microphone'}</Label>
+              <Label size={9}>{status}</Label>
               <Label size={9}>Sharp</Label>
             </View>
           </View>
