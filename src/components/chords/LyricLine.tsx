@@ -26,6 +26,7 @@ export type LyricLineProps = {
   mode: ChartView;
   studies: ChordStudies;
   scaleKey?: string;
+  allPositions?: boolean;
   onChord: (lineIndex: number, changeIndex: number) => void;
 };
 
@@ -36,10 +37,11 @@ type ChordButtonProps = {
   accessibilityLabel: string;
   studies: ChordStudies;
   scaleKey?: string;
+  allPositions?: boolean;
   onPress: () => void;
 };
 
-function ChordButton({ symbol, selected, shapes, accessibilityLabel, studies, scaleKey, onPress }: ChordButtonProps) {
+function ChordButton({ symbol, selected, shapes, accessibilityLabel, studies, scaleKey, allPositions, onPress }: ChordButtonProps) {
   const { s, font, chrome, tap } = useTheme();
   return (
     <Pressable
@@ -61,7 +63,7 @@ function ChordButton({ symbol, selected, shapes, accessibilityLabel, studies, sc
     >
       {shapes ? (
         <View style={{ width: s(112) }}>
-          <ChordSongShape symbol={symbol} study={studies.get(symbol)} scaleKey={scaleKey} width={108} />
+          <ChordSongShape symbol={symbol} study={studies.get(symbol)} scaleKey={scaleKey} allPositions={allPositions} width={108} />
         </View>
       ) : (
         <Text style={{ fontFamily: MONOSPACE, fontWeight: '700', fontSize: font(16), color: chordSymbolColor(selected, chrome) }}>
@@ -73,7 +75,7 @@ function ChordButton({ symbol, selected, shapes, accessibilityLabel, studies, sc
 }
 
 /** One line of the chart: chord changes over their lyric syllables, or a section heading. */
-export function LyricLine({ line, lineIndex, activeChange, omitted, mode, studies, scaleKey, onChord }: LyricLineProps) {
+export function LyricLine({ line, lineIndex, activeChange, omitted, mode, studies, scaleKey, allPositions, onChord }: LyricLineProps) {
   const { s, font, chrome, tap } = useTheme();
   if (line.kind === 'section') {
     return <Label size={12} style={{ marginTop: s(18), marginBottom: s(8) }}>{line.text}</Label>;
@@ -105,6 +107,7 @@ export function LyricLine({ line, lineIndex, activeChange, omitted, mode, studie
               accessibilityLabel={`${chord.symbol}${shapeSuffix}, ${line.id}, change ${changeIndex + 1}`}
               studies={studies}
               scaleKey={scaleKey}
+              allPositions={allPositions}
               onPress={() => onChord(lineIndex, changeIndex)}
             />
           );

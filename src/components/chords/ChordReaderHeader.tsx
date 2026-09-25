@@ -29,6 +29,8 @@ export type ChordReaderHeaderProps = {
   onShowTransitionChange: (show: boolean) => void;
   showKeyScale: boolean;
   onShowKeyScaleChange: (show: boolean) => void;
+  showAllPositions: boolean;
+  onShowAllPositionsChange: (show: boolean) => void;
   /** Called before leaving the app for a link, so the scroll stops. */
   onLeave: () => void;
 };
@@ -64,8 +66,16 @@ export function ChordReaderHeader(props: ChordReaderHeaderProps) {
       {props.showPreviewToggles ? (
         <>
           <Toggle
+            label="All positions"
+            hint="Mark every place each chord's notes fall, up to the octave — a map for improvising, not just a shape to hold."
+            value={props.showAllPositions}
+            onChange={props.onShowAllPositionsChange}
+          />
+          <Toggle
             label="Preview next fingering"
-            hint="Show next chord notes in grey on the current diagram."
+            hint={props.showAllPositions
+              ? 'Show every position of the next chord in grey; rings mark notes the two chords share.'
+              : 'Show next chord notes in grey on the current diagram.'}
             value={props.showTransition}
             onChange={props.onShowTransitionChange}
           />

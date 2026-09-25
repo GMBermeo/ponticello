@@ -83,6 +83,7 @@ function ChordReader({ sheet }: { sheet: ChordSheet }) {
   const [chartView, setChartView] = useState<ChartView>('names');
   const [showTransition, setShowTransition] = useState(false);
   const [showKeyScale, setShowKeyScale] = useState(false);
+  const [showAllPositions, setShowAllPositions] = useState(false);
   const [viewportHeight, setViewportHeight] = useState(0);
   const [previewHeight, setPreviewHeight] = useState(0);
   const [bodySize, onBodyLayout, bodyRef] = useMeasuredSize();
@@ -132,6 +133,7 @@ function ChordReader({ sheet }: { sheet: ChordSheet }) {
       compact={compact}
       showTransition={showTransition}
       scaleKey={scaleKey}
+      allPositions={showAllPositions}
       maxDiagramHeight={maxDiagramHeight}
       onHeightChange={compact ? (height) => setPreviewHeight((previous) => keepIfClose(previous, height)) : undefined}
     />
@@ -179,6 +181,8 @@ function ChordReader({ sheet }: { sheet: ChordSheet }) {
                 onShowTransitionChange={setShowTransition}
                 showKeyScale={showKeyScale}
                 onShowKeyScaleChange={setShowKeyScale}
+                showAllPositions={showAllPositions}
+                onShowAllPositionsChange={setShowAllPositions}
                 onLeave={pause}
               />
             }
@@ -194,6 +198,7 @@ function ChordReader({ sheet }: { sheet: ChordSheet }) {
                     mode={chartView}
                     studies={studies}
                     scaleKey={scaleKey}
+                    allPositions={showAllPositions}
                     onChord={selectChord}
                   />
                 </View>

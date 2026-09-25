@@ -1,15 +1,28 @@
 {
   "fill": {
-    "automatic-gradient": "extended-srgb:0.03922,0.51765,1.00000,1.00000"
+    "linear-gradient": [
+      "extended-srgb:0.47843,0.42353,1.00000,1.00000",
+      "extended-srgb:0.16471,0.10980,0.61961,1.00000"
+    ],
+    "orientation": {
+      "start": {
+        "x": 0.5,
+        "y": 0
+      },
+      "stop": {
+        "x": 0.5,
+        "y": 1
+      }
+    }
   },
   "groups": [
     {
       "layers": [
         {
-          "image-name": "ponticello-mark.svg",
-          "name": "ponticello-mark",
+          "image-name": "ponticello-bridge.svg",
+          "name": "bridge",
           "position": {
-            "scale": 0.8,
+            "scale": 1.0,
             "translation-in-points": [
               0,
               0
@@ -23,7 +36,30 @@
       },
       "translucency": {
         "enabled": true,
-        "value": 0.3
+        "value": 0.12
+      }
+    },
+    {
+      "layers": [
+        {
+          "image-name": "ponticello-strings.svg",
+          "name": "strings",
+          "position": {
+            "scale": 1.0,
+            "translation-in-points": [
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "shadow": {
+        "kind": "layer-color",
+        "opacity": 0.45
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0
       }
     }
   ],

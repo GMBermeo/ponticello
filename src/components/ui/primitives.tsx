@@ -1,13 +1,14 @@
-import { useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { StyleProp, Text, TextProps, TextStyle, View, ViewProps, ViewStyle } from 'react-native';
 
 import {
-  bodyStyle, labelStyle, labelTracking, numberStyle, titleStyle, useTheme, FONT,
+  bodyStyle, labelStyle, labelTracking, numberStyle, titleStyle, useTheme, FACE, RADIUS,
 } from '@theme';
 
 /**
- * Shared text, spacing, and musical cues for the matte practice interface. Every size arrives in design units and is converted through the
- * theme, so a component never needs to know what device it is on.
+ * Shared text, spacing, surfaces and musical cues. Every size arrives in
+ * design units and is converted through the theme, so a component never needs
+ * to know what device it is on.
  */
 
 // ─── Text ────────────────────────────────────────────────────────────────────
@@ -53,7 +54,7 @@ export function Kicker({ size = 11, color, style, children, ...rest }: TypeProps
   const base = useMemo<TextStyle>(() => {
     const fontSize = theme.font(size);
     return {
-      fontFamily: FONT.semibold,
+      ...FACE.semibold,
       fontSize,
       letterSpacing: labelTracking(fontSize),
       textTransform: 'uppercase',
@@ -128,6 +129,39 @@ export function Grow() {
 
 const GROW: ViewStyle = { flex: 1 };
 
+// ─── Surfaces ────────────────────────────────────────────────────────────────
+
+/**
+ * A grouped card: the unit of content on every screen since 1.8, in place of
+ * the rules that used to divide regions. Rows inside it separate with an
+ * inset `Rule`, as an iOS inset-grouped list does.
+ */
+export function Card({ gap = 0, pad = 16, padX, padY, style, children, ...rest }: StackProps) {
+  const theme = useTheme();
+  const base = useMemo<ViewStyle>(() => ({
+    backgroundColor: theme.chrome.surface,
+    ...theme.corners(RADIUS.lg),
+    gap: theme.s(gap),
+    padding: theme.s(pad),
+    paddingHorizontal: padX === undefined ? undefined : theme.s(padX),
+    paddingVertical: padY === undefined ? undefined : theme.s(padY),
+    borderWidth: theme.chrome.dark ? theme.rule(1) : 0,
+    borderColor: theme.chrome.lineSoft,
+  }), [theme, gap, pad, padX, padY]);
+  return <View {...rest} style={[base, style]}>{children}</View>;
+}
+
+/** The small heading above a card, set in from the card's edge as iOS does. */
+export function SectionHeader({ title, trailing }: { title: string; trailing?: React.ReactNode }) {
+  const theme = useTheme();
+  return (
+    <Row gap={8} style={{ paddingHorizontal: theme.s(16), paddingTop: theme.s(10), paddingBottom: theme.s(6) }}>
+      <Label accessibilityRole="header" size={12} style={{ flex: 1 }}>{title}</Label>
+      {trailing}
+    </Row>
+  );
+}
+
 // ─── Badges ──────────────────────────────────────────────────────────────────
 
 /** A refined tag — difficulty, string name, position bracket. */
@@ -136,9 +170,9 @@ export function Badge({
 }: { label: string; background?: string; color?: string; style?: StyleProp<ViewStyle> }) {
   const theme = useTheme();
   const box = useMemo<ViewStyle>(() => ({
-    paddingHorizontal: theme.s(7),
+    paddingHorizontal: theme.s(8),
     paddingVertical: theme.s(3),
-    borderRadius: theme.s(4),
+    ...theme.corners(RADIUS.pill),
     backgroundColor: background ?? theme.chrome.ink,
   }), [theme, background]);
   return (
@@ -174,7 +208,7 @@ export function TapeChip({
         width: theme.s(width),
         height: theme.s(height),
         backgroundColor: color,
-        borderRadius: theme.s(3),
+        ...theme.corners(Math.min(height / 2, RADIUS.xs)),
         borderWidth: theme.rule(1),
         borderColor: theme.chrome.dark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.12)',
       }} />

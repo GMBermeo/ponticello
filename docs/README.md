@@ -18,9 +18,21 @@ npx serve docs
 
 ## Refreshing the screenshots
 
-The images in `assets/screenshots/` are headless-Chrome captures of the web
-build (desktop 1280×820 and phone 412×870), taken with public-domain and
-original content only. Run `npm run web`, capture the routes listed in
-`assets/screenshots/`, and save them as WebP at 1600 px (desktop) or 620 px
-(phone) wide. The brand files in `assets/brand/` come from
-`python3 tools/make-icons.py` — edit that script, not the images.
+Since 1.8 every image in `assets/screenshots/` is a capture of the **iPhone
+Duo simulator** (iOS 27, inner display 1398 × 2034 px) running a Release
+build of the free edition — public-domain works and original etudes only.
+
+1. `npx expo run:ios --device "iPhone Duo" --configuration Release`
+2. Capture with `xcrun simctl io booted screenshot <name>.png`; drive the app
+   with deep links (`xcrun simctl openurl booted ponticello://song/bwv1007-prelude`)
+   and, for taps, [AXe](https://github.com/cameroncooke/AXe)
+   (`axe tap --label "Start practice" --udid <udid>`).
+3. Save as WebP at 720 × 1048. The page frames them in a CSS iPhone Duo
+   (`.device` in `styles.css`), so capture the bare screen, not a mock-up.
+
+`assets/video/tour.mp4` is `xcrun simctl io booted recordVideo`, re-encoded
+with `ffmpeg -vf scale=720:-2 -c:v libx264 -crf 26 -an -movflags +faststart`.
+
+The brand files in `assets/brand/` come from `python3 tools/make-icons.py` —
+edit that script, not the images. `og-image.png` is composed from the
+screenshots and the icon.

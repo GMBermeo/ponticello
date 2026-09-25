@@ -1,11 +1,12 @@
 import { memo } from 'react';
 import { View } from 'react-native';
 
-import type { ChordSheet, DifficultyTier } from '@domain';
+import { NOTE_COLOR, type ChordSheet, type DifficultyTier } from '@domain';
 import { getChordSheet, type LibraryRow } from '@scores';
-import { useTheme, type Chrome } from '@theme';
+import { alpha, RADIUS, useTheme, type Chrome } from '@theme';
 
-import { Badge, Body, PressableRow, Row, Rule, Title } from '../ui';
+import { Badge, Body, Icon, PressableRow, Row, Title, type IconName } from '../ui';
+import { keyTile } from './keyTile';
 import { CUSTOM_PROGRESSION_ID } from './libraryFilters';
 
 type RowKind = 'builder' | 'chart' | 'score';
@@ -68,26 +69,54 @@ export const SongRow = memo(function SongRow({ row, onSelect }: SongRowProps) {
   return (
     <PressableRow
       onPress={() => onSelect(row.id)}
-      accessibilityLabel={`${row.title} by ${row.composer}. ${description}. Open piece`}
+      accessibilityLabel={`${row.title} by ${row.composer}, ${row.keySignature}. ${description}. Open piece`}
+      style={{ backgroundColor: theme.chrome.surface, ...theme.corners(RADIUS.lg) }}
     >
-      <Row padX={24} padY={16} gap={14}>
-        <View style={{ flex: 1, minWidth: 0, gap: theme.s(5) }}>
+      <Row padX={12} padY={12} gap={12}>
+        <KeyTileView keySignature={row.keySignature} kind={kind} />
+        <View style={{ flex: 1, minWidth: 0, gap: theme.s(4) }}>
           <Title size={17} numberOfLines={2}>{row.title}</Title>
           <Body size={13} color={theme.chrome.dim} numberOfLines={1}>
-            {row.composer} · {row.keySignature}
+            {`${row.composer} · ${rowDetail(kind, row, chart)}`}
           </Body>
+          <Row gap={6}>
+            <Badge label={badge.label} background={badge.background} color={badge.color} />
+          </Row>
         </View>
-        <View style={{ alignItems: 'flex-end', gap: theme.s(6) }}>
-          <Badge label={badge.label} background={badge.background} color={badge.color} />
-          <Body size={11} color={theme.chrome.dim}>{rowDetail(kind, row, chart)}</Body>
-        </View>
-        <Title size={20} color={theme.chrome.dim}>›</Title>
+        <Icon name="forward" size={14} color={theme.chrome.dim} />
       </Row>
     </PressableRow>
   );
 });
 
+const TILE_ICON: Record<RowKind, IconName> = { builder: 'plus', chart: 'chords', score: 'note' };
+
+/**
+ * The row's leading tile: the piece's tonic on a wash of that note's colour,
+ * so the list can be scanned by key the way the fingerboard chart is read.
+ * Charts, the builder and keyless studies get a symbol instead.
+ */
+function KeyTileView({ keySignature, kind }: { keySignature: string; kind: RowKind }) {
+  const theme = useTheme();
+  const { chrome } = theme;
+  const tile = kind === 'score' ? keyTile(keySignature) : null;
+  const colour = tile ? chrome.notes[NOTE_COLOR[tile.letter]] : chrome.accent;
+  return (
+    <View
+      style={{
+        width: theme.s(48), height: theme.s(48), ...theme.corners(RADIUS.md),
+        backgroundColor: alpha(colour, chrome.dark ? 0.2 : 0.14),
+        alignItems: 'center', justifyContent: 'center',
+      }}
+    >
+      {tile
+        ? <Title size={tile.label.length > 1 ? 18 : 22} color={colour}>{tile.label}</Title>
+        : <Icon name={TILE_ICON[kind]} size={20} color={colour} />}
+    </View>
+  );
+}
+
 export function LibraryRowSeparator() {
   const theme = useTheme();
-  return <Rule style={{ marginHorizontal: theme.s(24) }} />;
+  return <View style={{ height: theme.s(8) }} />;
 }

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
 
 import {
-  PracticeHeatmap, Button, Body, Label, Num, Row, Rule, Stack, Title, Screen, ScreenHeader,
+  PracticeHeatmap, Button, Body, Card, Label, Num, Row, Screen, TabHeader,
 } from '@components';
 import {
   dayKey, daysPractised, formatDuration, PracticeLog, shiftDays, streaks, totalMs,
@@ -38,44 +38,31 @@ export default function ProfileScreen() {
 
   return (
     <Screen scroll={false} padded={false}>
-      <ScreenHeader backLabel="Library" meta="Your practice" />
+      <TabHeader
+        title="Practice"
+        subtitle="Counted while the music is actually running. Everything here lives on this phone and goes nowhere."
+      />
 
-      <ScrollView contentContainerStyle={{ paddingBottom: theme.s(30) }}>
-        <Stack padX={22} padY={16} gap={8}>
-          <Title accessibilityRole="header" size={30}>Your practice</Title>
-          <Body size={14} color={chrome.dim}>
-            Counted while the music is actually running. Everything here lives on this phone
-            and goes nowhere.
-          </Body>
-        </Stack>
-        <Rule weight={1} />
-
-        <View style={{ flexDirection: wide ? 'row' : 'column' }}>
-          <View style={{ flex: wide ? 1 : undefined, minWidth: 0 }}>
-            <Stack padX={22} padY={18} gap={16}>
-              <Row gap={20} style={{ flexWrap: 'wrap' }}>
-                <Stat label="Total" value={formatDuration(total)} />
-                <Stat label="This week" value={formatDuration(week)} />
-                <Stat label="Last 30 days" value={formatDuration(month)} />
-              </Row>
-              <Row gap={20} style={{ flexWrap: 'wrap' }}>
-                <Stat label="Current streak" value={`${run.current} ${run.current === 1 ? 'day' : 'days'}`} />
-                <Stat label="Longest streak" value={`${run.longest} ${run.longest === 1 ? 'day' : 'days'}`} />
-                <Stat label="Days practised" value={`${days}`} />
-              </Row>
-              {best ? (
-                <Body size={13} color={chrome.dim}>
-                  {`Your longest day so far was ${formatDuration(best.ms)} on ${best.key}.`}
-                </Body>
-              ) : null}
-            </Stack>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: theme.s(16), paddingBottom: theme.s(30), gap: theme.s(14) }}>
+        <View style={{ flexDirection: wide ? 'row' : 'column', gap: theme.s(14) }}>
+          <View style={{ flex: wide ? 1 : undefined, minWidth: 0, gap: theme.s(10) }}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.s(10) }}>
+              <Stat label="Total" value={formatDuration(total)} highlight />
+              <Stat label="This week" value={formatDuration(week)} />
+              <Stat label="Last 30 days" value={formatDuration(month)} />
+              <Stat label="Current streak" value={`${run.current} ${run.current === 1 ? 'day' : 'days'}`} />
+              <Stat label="Longest streak" value={`${run.longest} ${run.longest === 1 ? 'day' : 'days'}`} />
+              <Stat label="Days practised" value={`${days}`} />
+            </View>
+            {best ? (
+              <Body size={13} color={chrome.dim} style={{ paddingHorizontal: theme.s(4) }}>
+                {`Your longest day so far was ${formatDuration(best.ms)} on ${best.key}.`}
+              </Body>
+            ) : null}
           </View>
 
-          {wide ? <Rule weight={1} vertical /> : null}
-
-          <View style={{ flex: wide ? 1.3 : undefined, minWidth: 0 }}>
-            <Stack padX={22} padY={18} gap={12}>
-              <Label size={11}>The last six months</Label>
+          <Card gap={12} style={{ flex: wide ? 1.3 : undefined, minWidth: 0 }}>
+            <Label size={11}>The last six months</Label>
               {ready ? <PracticeHeatmap log={log} today={today} /> : (
                 <Body size={13} color={chrome.dim}>Reading your practice record…</Body>
               )}
@@ -84,12 +71,10 @@ export default function ProfileScreen() {
                   Nothing here yet. Open a piece, press play, and the first square fills in.
                 </Body>
               ) : null}
-            </Stack>
-          </View>
+          </Card>
         </View>
 
-        <Rule />
-        <Stack padX={22} padY={18} gap={10}>
+        <Card gap={10}>
           <Label size={11}>Start again</Label>
           <Body size={13} color={chrome.dim}>
             Clearing the record cannot be undone — there is no copy anywhere else.
@@ -104,19 +89,28 @@ export default function ProfileScreen() {
               <Button label="Clear my practice record" onPress={() => setConfirmingClear(true)} />
             </View>
           )}
-        </Stack>
+        </Card>
       </ScrollView>
     </Screen>
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+/** One figure on its own tile, three to a row on the Duo's inner display. */
+function Stat({ label, value, highlight = false }: { label: string; value: string; highlight?: boolean }) {
   const theme = useTheme();
+  const { chrome } = theme;
   return (
-    <Stack gap={4} style={{ minWidth: theme.s(104) }}>
-      <Label size={10}>{label}</Label>
-      <Num size={26}>{value}</Num>
-    </Stack>
+    <Card
+      pad={14}
+      gap={6}
+      style={{
+        flexGrow: 1, flexBasis: theme.s(128), minWidth: theme.s(120),
+        backgroundColor: highlight ? chrome.accent : chrome.surface,
+      }}
+    >
+      <Label size={10} color={highlight ? chrome.onAccent : chrome.dim}>{label}</Label>
+      <Num size={24} color={highlight ? chrome.onAccent : chrome.ink}>{value}</Num>
+    </Card>
   );
 }
 

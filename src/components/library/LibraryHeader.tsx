@@ -2,16 +2,18 @@ import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, TextInput, View } from 'react-native';
 
-import { FONT, useTheme } from '@theme';
+import { FACE, RADIUS, useTheme } from '@theme';
 
-import { Body, Button, Row, Rule, Segmented, Stack, Title, useControlFeedback } from '../ui';
+import { Body, Button, Icon, Row, Segmented, Stack, Title, useControlFeedback } from '../ui';
+import { LibraryShortcuts } from './LibraryChrome';
 import {
   CATEGORY_SEGMENTS, LEVEL_SEGMENTS, type CategoryFilter, type DifficultyFilter,
 } from './libraryFilters';
 
 export type LibraryHeaderProps = {
-  totalCount: number;
   shownCount: number;
+  /** Narrow screens have no practice rail, so its reference pages come here. */
+  showShortcuts: boolean;
   search: string;
   onSearchChange: (next: string) => void;
   category: CategoryFilter;
@@ -20,21 +22,15 @@ export type LibraryHeaderProps = {
   onDifficultyChange: (next: DifficultyFilter) => void;
 };
 
-/** Title, search, category tabs and the level filter above the library list. */
+/** Search, category tabs, shortcuts and the level filter above the library list. */
 export function LibraryHeader(props: LibraryHeaderProps) {
-  const { totalCount, shownCount, search, category } = props;
+  const { shownCount, search, category } = props;
   const theme = useTheme();
   const [filtersOpen, setFiltersOpen] = useState(false);
   const pieceWord = shownCount === 1 ? 'piece' : 'pieces';
   return (
     <>
-      <Stack padX={24} padY={16} gap={10}>
-        <Row gap={8} style={{ alignItems: 'baseline' }}>
-          <Title accessibilityRole="header" size={30}>Your music</Title>
-          <Body size={13} color={theme.chrome.dim} style={{ marginLeft: 'auto' }}>
-            {totalCount} pieces
-          </Body>
-        </Row>
+      <Stack padX={4} padY={6} gap={12}>
         <SearchField value={search} onChange={props.onSearchChange} />
         <Segmented
           accessibilityLabel="Music category"
@@ -44,7 +40,8 @@ export function LibraryHeader(props: LibraryHeaderProps) {
           grow
           compact
         />
-        <Row>
+        {props.showShortcuts ? <LibraryShortcuts /> : null}
+        <Row style={{ paddingLeft: theme.s(4) }}>
           <Body size={12} color={theme.chrome.dim} accessibilityLiveRegion="polite">
             {shownCount} {pieceWord}
             {search ? ' found' : ' to explore'}
@@ -62,7 +59,7 @@ export function LibraryHeader(props: LibraryHeaderProps) {
         {filtersOpen ? <LevelFilter value={props.difficulty} onChange={props.onDifficultyChange} /> : null}
         {category === 'chords' ? <CreateProgressionCard /> : null}
       </Stack>
-      <Rule />
+      <View style={{ height: theme.s(8) }} />
     </>
   );
 }
@@ -75,15 +72,15 @@ function SearchField({ value, onChange }: { value: string; onChange: (next: stri
       gap={8}
       style={[
         {
-          borderWidth: theme.rule(1),
-          borderColor: theme.chrome.line,
-          borderRadius: theme.s(8),
+          backgroundColor: theme.chrome.fill,
+          ...theme.corners(RADIUS.pill),
           paddingLeft: theme.s(14),
           minHeight: theme.tap,
         },
         feedback.focusStyle,
       ]}
     >
+      <Icon name="search" size={16} color={theme.chrome.dim} />
       <TextInput
         {...feedback.events}
         value={value}
@@ -95,9 +92,9 @@ function SearchField({ value, onChange }: { value: string; onChange: (next: stri
           flex: 1,
           minWidth: 0,
           minHeight: theme.tap,
-          fontFamily: FONT.regular,
+          ...FACE.regular,
           color: theme.chrome.ink,
-          fontSize: theme.font(12),
+          fontSize: theme.font(16),
           padding: 0,
           outlineWidth: 0,
           outlineStyle: 'solid',
@@ -107,7 +104,7 @@ function SearchField({ value, onChange }: { value: string; onChange: (next: stri
         autoCorrect={false}
         returnKeyType="search"
       />
-      {value ? <Button label="×" accessibilityLabel="Clear search" tone="ghost" onPress={() => onChange('')} /> : null}
+      {value ? <Button label="" icon="close" accessibilityLabel="Clear search" tone="ghost" onPress={() => onChange('')} /> : null}
     </Row>
   );
 }
@@ -142,11 +139,9 @@ function CreateProgressionCard() {
       accessibilityLabel="Create your own chord progression"
       onPress={() => router.push('/chord-progression')}
       style={({ pressed }) => ({
-        padding: theme.s(12),
-        borderRadius: theme.s(10),
+        padding: theme.s(14),
+        ...theme.corners(RADIUS.lg),
         backgroundColor: pressed ? theme.chrome.accentWash : theme.chrome.surface,
-        borderWidth: theme.rule(1),
-        borderColor: theme.chrome.accent,
         flexDirection: 'row',
         alignItems: 'center',
         gap: theme.s(12),
@@ -156,13 +151,13 @@ function CreateProgressionCard() {
         style={{
           width: theme.s(36),
           height: theme.s(36),
-          borderRadius: theme.s(8),
+          ...theme.corners(RADIUS.sm),
           backgroundColor: theme.chrome.accent,
           justifyContent: 'center',
           alignItems: 'center',
         }}
       >
-        <Title size={20} color="#ffffff">+</Title>
+        <Icon name="plus" size={18} color={theme.chrome.onAccent} />
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
         <Title size={15}>Create chord progression</Title>
@@ -170,7 +165,7 @@ function CreateProgressionCard() {
           Pick a key, arrange chord shapes in rows, and practice transitions
         </Body>
       </View>
-      <Title size={20} color={theme.chrome.dim}>›</Title>
+      <Icon name="forward" size={15} color={theme.chrome.dim} />
     </Pressable>
   );
 }

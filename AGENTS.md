@@ -22,7 +22,9 @@ timeMs.set(timeMs.get() + delta);
 ## Sizes are design units, not pixels
 
 Everything visual is written against an 829 × 690 canvas (the Fold 5 inner
-display at its native density) and converted through `useTheme().s()`. See
+display at its native density) and converted through `useTheme().s()`, which
+never goes below 1.0 — smaller screens, the iPhone Duo included, reflow to the
+compact layout rather than shrink. See
 `src/theme/scale.ts`. Drawing components that need to fill a box take **device
 pixels** and get them from `useMeasuredSize()` — do not compute a column's
 height by subtracting constants from the canvas, because safe-area insets and
@@ -39,6 +41,30 @@ Settings are read only through narrow selector hooks — `useVisionPreferences`,
 `useTrackChoice`, or `useSettingsSelector` for anything else — and written
 through `useSettingsActions`. There is deliberately no whole-object hook: a
 component re-renders only when a setting it draws changes.
+
+## The design system (since 1.8)
+
+The interface is designed for the iPhone Duo (466 × 678 pt inner display,
+iOS 27) and must still work on Android and the web. Reach for the shared
+pieces instead of hand-styling:
+
+- **Surfaces:** `Card` for grouped content; `Glass` / `GlassIconButton` only
+  for chrome that floats over content (Liquid Glass on iOS 26+, an opaque card
+  elsewhere). No hairline rules between regions — cards and gaps do that.
+- **Shape:** `RADIUS` and `theme.corners(units)` (continuous corners on iOS).
+  Controls are capsules. Shadows use `boxShadow`; the `shadow*` props are
+  deprecated in RN 0.86.
+- **Type:** spread a face from `FACE` (`...FACE.heavy`) — SF Pro / SF Pro
+  Rounded on iOS, Archivo elsewhere. There is no `FONT` any more.
+- **Colour:** chrome tokens only (`bg`, `surface`, `fill`, `accent`,
+  `onAccent`, `dim`…). The accent is indigo; blue, green, red and yellow are
+  note and string colours and never chrome.
+- **Icons:** `Icon` by meaning (`back`, `play`, `tuner`…), an SF Symbol on iOS.
+- **Tabs:** Library, Practice, Tuner and Chords live in `src/app/(tabs)`.
+  Tabs are mounted before they are shown, so anything with a side effect (the
+  microphone) must follow `useIsFocused()`, not mount.
+- A `Screen` nested in another does not re-apply safe-area insets — nest
+  freely, but never pad with `useSafeAreaInsets()` a second time by hand.
 
 ## The play screen's clock
 

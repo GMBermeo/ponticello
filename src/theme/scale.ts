@@ -38,8 +38,17 @@ export const CANVAS = {
 
 export const CANVAS_ASPECT = CANVAS.width / CANVAS.height; // ~1.20
 
-/** Below this, shrink no further and reflow instead. */
-export const MIN_SCALE = 0.85;
+/**
+ * Below this, shrink no further and reflow instead.
+ *
+ * 1.0 since 1.8: a design unit is never smaller than a point. The iPhone Duo's
+ * inner display is 466 pt wide, so at the old 0.85 floor body text set at 16
+ * units came out at 13.6 pt against the system's 17 — legible, but visibly
+ * smaller than every other app on the phone. At 1.0 the Duo reflows to the
+ * compact layout at native iOS sizes, and the Fold 5 inner display, which fits
+ * the canvas at exactly 1.0, is unchanged.
+ */
+export const MIN_SCALE = 1;
 /** Above this, a very large screen stops magnifying and shows more instead. */
 export const MAX_SCALE = 1.6;
 

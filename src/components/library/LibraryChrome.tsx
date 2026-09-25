@@ -1,78 +1,78 @@
+import { Image } from 'expo-image';
 import { useRouter, type Href } from 'expo-router';
-import { View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ScrollView } from 'react-native';
 
 import { useThemePreference } from '@state';
-import { APP_NAME, useTheme, type ChromeName } from '@theme';
+import { APP_NAME, APP_TAGLINE, useTheme, type ChromeName } from '@theme';
 
-import { Body, Button, Row, Stack, Title } from '../ui';
+import {
+  Body, Button, GlassIconButton, Label, Row, Stack, TabHeader, Title, type IconName,
+} from '../ui';
 
-const CHROME_LABEL: Record<ChromeName, string> = { paper: '☀ Light', quiet: '☾ Dark', neon: '✦ Neon' };
+const MARK = require('../../../assets/logo/ponticello-icon-512.png');
+
+const CHROME_ICON: Record<ChromeName, IconName> = { paper: 'sun', quiet: 'moon', neon: 'sparkles' };
+const CHROME_LABEL: Record<ChromeName, string> = { paper: 'Light', quiet: 'Dark', neon: 'Neon' };
 const NEXT_CHROME: Record<ChromeName, ChromeName> = { paper: 'quiet', quiet: 'neon', neon: 'paper' };
 
-type NavLink = { label: string; href: Href; tone?: 'ghost' };
-
-const TOP_BAR_LINKS: readonly NavLink[] = [
-  { label: 'Practice', href: '/profile', tone: 'ghost' },
-  { label: 'Tuner', href: '/tuner', tone: 'ghost' },
-  { label: 'Chords', href: '/chords', tone: 'ghost' },
-  { label: 'Import', href: '/settings/import' },
-];
-
-/** App name, the main destinations and the theme switch. */
-export function LibraryTopBar({ wide }: { wide: boolean }) {
-  const theme = useTheme();
+/**
+ * The library's title: the mark and the name as a small brand line over a
+ * large "Library", with Import and the theme as glass buttons beside it.
+ * Practice, the tuner and chords moved to the tab bar in 1.8.
+ */
+export function LibraryTopBar({ totalCount }: { totalCount: number }) {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const { chrome, setChrome } = useThemePreference();
   return (
-    <Row
-      padX={24}
-      gap={12}
-      style={{
-        paddingTop: insets.top + theme.s(8),
-        paddingBottom: theme.s(8),
-        flexWrap: 'wrap',
-        minHeight: theme.s(76) + insets.top,
-        borderBottomWidth: theme.rule(1),
-        borderColor: theme.chrome.lineSoft,
-      }}
+    <TabHeader
+      eyebrow={<BrandLine />}
+      title="Library"
+      subtitle={`${totalCount} pieces · ${APP_TAGLINE.toLowerCase()}`}
     >
-      <View style={{ flex: 1, ...(wide ? {} : { flexBasis: '100%' }) }}>
-        <Title size={22}>{APP_NAME}</Title>
-      </View>
-      {TOP_BAR_LINKS.map((link) => (
-        <Button key={link.label} label={link.label} tone={link.tone} onPress={() => router.push(link.href)} />
-      ))}
-      <Button
-        label={CHROME_LABEL[chrome]}
-        accessibilityLabel={`Theme: ${chrome}. Tap to switch theme.`}
-        tone="ghost"
+      <GlassIconButton
+        icon={CHROME_ICON[chrome]}
+        accessibilityLabel={`Theme: ${CHROME_LABEL[chrome]}. Switch to ${CHROME_LABEL[NEXT_CHROME[chrome]]}.`}
         onPress={() => setChrome(NEXT_CHROME[chrome])}
       />
+      <GlassIconButton icon="plus" prominent accessibilityLabel="Import music" onPress={() => router.push('/settings/import')} />
+    </TabHeader>
+  );
+}
+
+/** The app icon and the name, small, above the large title. */
+function BrandLine() {
+  const theme = useTheme();
+  return (
+    <Row gap={7}>
+      <Image
+        source={MARK}
+        accessibilityIgnoresInvertColors
+        style={{ width: theme.s(20), height: theme.s(20), borderRadius: theme.s(5) }}
+      />
+      <Label size={11} color={theme.chrome.ink}>{APP_NAME}</Label>
     </Row>
   );
 }
 
-const BOTTOM_BAR_LINKS: readonly NavLink[] = [
-  { label: 'Reading guide', href: '/tutorial' },
-  { label: 'Chart', href: '/chart' },
-  { label: 'Scales', href: '/scales' },
+type NavLink = { label: string; href: Href; icon: IconName };
+
+const SHORTCUTS: readonly NavLink[] = [
+  { label: 'Reading guide', href: '/tutorial', icon: 'guide' },
+  { label: 'Fingerboard', href: '/chart', icon: 'chart' },
+  { label: 'Scales', href: '/scales', icon: 'scales' },
+  { label: 'My tapes', href: '/settings/tapes', icon: 'tapes' },
 ];
 
-/** Narrow screens have no practice rail; its reference links move here. */
-export function LibraryBottomBar() {
+/** The reference pages, as a row of chips. Wide screens show the practice rail instead. */
+export function LibraryShortcuts() {
   const theme = useTheme();
   const router = useRouter();
   return (
-    <Row padX={16} style={{ borderTopWidth: theme.rule(1), borderColor: theme.chrome.lineSoft }}>
-      {BOTTOM_BAR_LINKS.map((link) => (
-        <Button key={link.label} label={link.label} tone="ghost" onPress={() => router.push(link.href)} />
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: theme.s(8) }}>
+      {SHORTCUTS.map((link) => (
+        <Button key={link.label} label={link.label} icon={link.icon} onPress={() => router.push(link.href)} />
       ))}
-      <View style={{ marginLeft: 'auto' }}>
-        <Button label="My tapes" tone="ghost" onPress={() => router.push('/settings/tapes')} />
-      </View>
-    </Row>
+    </ScrollView>
   );
 }
 
@@ -98,7 +98,7 @@ export function LibraryEmptyState({ noImportsYet, onClearFilters }: LibraryEmpty
   const copy = noImportsYet ? EMPTY_IMPORTS : NO_MATCHES;
   const onAction = noImportsYet ? () => router.push('/settings/import') : onClearFilters;
   return (
-    <Stack pad={24} gap={12}>
+    <Stack padX={20} padY={24} gap={12}>
       <Title size={22}>{copy.title}</Title>
       <Body size={14} color={theme.chrome.dim}>{copy.body}</Body>
       <Button label={copy.action} onPress={onAction} />

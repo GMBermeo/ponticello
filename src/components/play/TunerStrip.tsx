@@ -4,9 +4,9 @@ import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 
 import { LivePitch, usePitchReading } from '@audio';
 import { CENTS_PERFECT, formatCents } from '@domain';
-import { useTheme, alpha, intonationColor } from '@theme';
+import { useTheme, alpha, intonationColor, RADIUS } from '@theme';
 import { dialPercent, TUNER_SPAN_CENTS } from '../tuner';
-import { Button, Label, Num, Title } from '../ui';
+import { Button, Glass, Label, Num, Title } from '../ui';
 import { useMeasuredSize } from '../useMeasuredSize';
 import { LevelMeter } from './Meters';
 
@@ -57,26 +57,23 @@ export const TunerStrip = memo(function TunerStrip({
   else if (live) status = 'Listening';
 
   return (
-    <View
-      accessibilityRole="summary"
-      accessibilityLabel={voiced ? `Tuner: ${reading.heard}, ${centsText}` : 'Tuner'}
+    <View accessibilityRole="summary" accessibilityLabel={voiced ? `Tuner: ${reading.heard}, ${centsText}` : 'Tuner'}>
+    <Glass
       style={{
         flexDirection: 'row',
         alignItems: 'center',
         gap: theme.s(14),
-        paddingHorizontal: theme.s(14),
+        paddingHorizontal: theme.s(16),
         paddingVertical: theme.s(8),
-        borderRadius: theme.s(12),
-        backgroundColor: alpha(chrome.surface, 0.94),
-        borderWidth: theme.rule(1),
-        borderColor: chrome.lineSoft,
+        ...theme.corners(RADIUS.lg),
       }}
     >
-      <View style={{ minWidth: theme.s(58) }}>
+      <View style={{ minWidth: theme.s(72) }}>
         <Label size={9}>Tuner</Label>
         <Title size={24} color={voiced ? chrome.ink : chrome.dim} numberOfLines={1}>
           {voiced ? reading.heard : '—'}
         </Title>
+        {micEnabled ? <Label size={9} numberOfLines={1} style={{ textTransform: 'none', letterSpacing: 0 }}>{status}</Label> : null}
       </View>
 
       {micEnabled ? (
@@ -104,7 +101,6 @@ export const TunerStrip = memo(function TunerStrip({
             </View>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
               <Label size={9}>Flat</Label>
-              <Label size={9}>{status}</Label>
               <Label size={9}>Sharp</Label>
             </View>
           </View>
@@ -119,6 +115,7 @@ export const TunerStrip = memo(function TunerStrip({
           <Button label="Enable microphone" tone="accent" onPress={onEnableMic} />
         </View>
       )}
+    </Glass>
     </View>
   );
 });

@@ -9,7 +9,7 @@ export type CategoryFilter = 'ALL' | 'study' | 'song' | 'chords' | 'imported';
 export type DifficultyFilter = 'ALL' | DifficultyTier;
 
 export const CATEGORY_SEGMENTS: readonly Segment<CategoryFilter>[] = [
-  { value: 'ALL', label: 'All pieces' },
+  { value: 'ALL', label: 'All' },
   { value: 'study', label: 'Studies' },
   { value: 'song', label: 'Songs' },
   { value: 'chords', label: 'Chords' },
@@ -72,11 +72,19 @@ function matchesDifficulty(row: LibraryRow, difficulty: DifficultyFilter): boole
 function matchesQuery(row: LibraryRow, query: string): boolean {
   if (!query) return true;
   return [row.title, row.composer, row.origin, row.keySignature]
-    .some((text) => text.toLowerCase().includes(query));
+    .some((text) => foldForSearch(text).includes(query));
+}
+
+/**
+ * Lower case with the accents taken off, so "prelude" finds "Prélude" and
+ * "dvorak" finds "Dvořák" — nobody types the diacritics into a search box.
+ */
+function foldForSearch(text: string): string {
+  return text.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
 }
 
 export function normalizeQuery(search: string): string {
-  return search.trim().toLowerCase();
+  return foldForSearch(search.trim());
 }
 
 /** Rows shown for a filter, with the progression builder leading the Chords tab. */

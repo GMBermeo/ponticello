@@ -1,7 +1,7 @@
 import { Platform, Pressable, View } from 'react-native';
 
 import type { ProgressionFlattenedChord, ProgressionRowItem } from '@domain';
-import { useTheme, type Chrome } from '@theme';
+import { RADIUS, useTheme, type Chrome } from '@theme';
 
 import { CelloChordDiagram } from '../CelloChordDiagram';
 import { Body, Button, Label, Row, Title } from '../ui';
@@ -30,6 +30,8 @@ export type ChordCardState = {
   dropTarget: GridCell | null;
   showTransition: boolean;
   scaleKey: string | undefined;
+  /** Every position of each chord's notes — see `ChordDiagramOptions.allPositions`. */
+  allPositions: boolean;
   rowCount: number;
 };
 
@@ -79,10 +81,10 @@ function ChordCard({ cell, symbol, degree, rowLength, state, actions }: ChordCar
       onLayout={(event) => { if (flat) actions.recordPosition(flat.globalIndex, event.nativeEvent.layout.y); }}
       {...webDragProps(cell, actions)}
       style={{
-        width: s(130), backgroundColor: playing ? chrome.accentWash : chrome.bg, borderRadius: s(8),
+        width: s(130), backgroundColor: playing ? chrome.accentWash : chrome.bg, borderRadius: s(RADIUS.md),
         borderWidth: playing ? 2 : theme.rule(1), borderColor: cardBorderColor(playing, dropTarget, chrome),
         opacity: dragged ? 0.4 : 1, padding: s(8), alignItems: 'center', gap: s(4),
-        shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, elevation: 1,
+        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
       }}
     >
       <Row style={{ width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -103,6 +105,7 @@ function ChordCard({ cell, symbol, degree, rowLength, state, actions }: ChordCar
             tapeColors
             nextChord={state.showTransition ? (flat.nextChord ?? undefined) : undefined}
             scaleKey={state.scaleKey}
+            allPositions={state.allPositions}
           />
         ) : (
           <View style={{ height: s(140), justifyContent: 'center', alignItems: 'center' }}>
@@ -145,7 +148,7 @@ export function ProgressionRowCard({ row, rowIndex, isTarget, onTarget, onDelete
   const { s, chrome } = theme;
   const chordWord = row.chords.length === 1 ? 'chord' : 'chords';
   return (
-    <View style={{ backgroundColor: chrome.surface, borderRadius: s(10), borderWidth: theme.rule(1), borderColor: isTarget ? chrome.accent : chrome.lineSoft, padding: s(12), gap: s(12) }}>
+    <View style={{ backgroundColor: chrome.surface, borderRadius: s(RADIUS.lg), borderCurve: 'continuous', borderWidth: theme.rule(2), borderColor: isTarget ? chrome.accent : 'transparent', padding: s(12), gap: s(12) }}>
       <Row style={{ alignItems: 'center', justifyContent: 'space-between' }}>
         <Row gap={8} style={{ alignItems: 'center' }}>
           <Pressable onPress={onTarget} style={{ paddingHorizontal: s(8), paddingVertical: s(4), borderRadius: s(4), backgroundColor: isTarget ? chrome.accent : chrome.surfaceElevated }}>

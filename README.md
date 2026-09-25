@@ -18,8 +18,10 @@ through the device microphone, shows what you are supposed to play three
 different ways, and tells you how far off the note you are — in cents, in real
 time. No accounts, no scores, no streaks, no network.
 
-Laid out for the **Galaxy Z Fold 5 inner display (2176 × 1812)**, and scales
-from there to the cover screen, a phone, or a browser window.
+Designed for the **iPhone Duo** — Liquid Glass, SF type and the system tab
+bar since 1.8 — and laid out on the **Galaxy Z Fold 5 inner display
+(2176 × 1812)** canvas, from which it reflows to any phone, tablet or browser
+window.
 
 ```bash
 npm install
@@ -31,13 +33,10 @@ npm run typecheck
 ```
 
 <p align="center">
-  <img src="docs/assets/screenshots/play-tab.webp" alt="The play screen: Bach's Prélude as tab, with the fingerboard panel on the left" width="820">
-</p>
-
-<p align="center">
-  <img src="docs/assets/screenshots/chords-grid.webp" alt="Chord atlas: cello chord shapes" width="270">
-  <img src="docs/assets/screenshots/tuner.webp" alt="The tuner" width="270">
-  <img src="docs/assets/screenshots/chord-chart.webp" alt="A scrolling chord chart" width="270">
+  <img src="docs/assets/screenshots/library.webp" alt="The library on the iPhone Duo: grouped cards with key tiles, and the glass tab rail" width="200">
+  <img src="docs/assets/screenshots/play-highway.webp" alt="The highway view of Bach's Prélude, with the fingerboard panel" width="200">
+  <img src="docs/assets/screenshots/tuner.webp" alt="The tuner tab" width="200">
+  <img src="docs/assets/screenshots/library-dark.webp" alt="The library in the Dark theme" width="200">
 </p>
 
 ---
@@ -95,8 +94,11 @@ src/theme/scale.ts    CANVAS = FOLD5_PX / FOLD5_DENSITY
 ```
 
 On the unfolded inner display that scale is exactly 1.0 and the layout lands
-pixel-exact. Everywhere else the same canvas scales to fit, so there is only
-ever one layout to reason about. `useTheme()` exposes `s(units)` for sizes,
+pixel-exact. A larger screen scales up to a ceiling; a smaller one never
+scales below 1.0 — a design unit is at least a point — and reflows to the
+compact layout instead. That is what the iPhone Duo's 466 × 678 pt inner
+display gets: native iOS type sizes, one column, and the system tab bar in its
+right-hand rail. `useTheme()` exposes `s(units)` for sizes,
 `font(units)` with a legibility floor, and `rule(units)` clamped to the device
 hairline. Tap targets never scale below 44 dp.
 
@@ -429,6 +431,22 @@ None of this is required by the app. If `java` regains network access, drop the
 infrastructure and hands back a download link, which avoids the toolchain
 entirely. It needs an Expo account (`eas login`) and `eas.json`.
 
+### iOS and the iPhone Duo
+
+```
+npx expo run:ios --device "iPhone Duo"
+```
+
+needs a full Xcode (27 or later) and CocoaPods (`brew install cocoapods`); if
+`xcode-select -p` points at the Command Line Tools, prefix the command with
+`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`. iOS 27 refuses to
+launch an app that has not adopted the UIScene life cycle, and Expo's prebuild
+template does not declare it yet — `plugins/withSceneLifecycle.js` adds the
+scene manifest and hands window creation to Expo's `ExpoAppSceneDelegate`, so
+`expo prebuild --clean` stays reproducible. The app icon is an Icon Composer
+document (`assets/expo.icon`) whose bridge and strings are separate glass
+layers; regenerate it with `python3 tools/make-icons.py`.
+
 ---
 
 ## Backing tracks
@@ -522,7 +540,7 @@ src/
     chords/             cello chord shapes and diagrams
   scores/       @scores authored scores, bundled library, piece resolver
   state/        @state  persisted settings, session setup, practice log
-  theme/        @theme  tokens, the Fold 5 scale model, ThemeProvider, brand
+  theme/        @theme  tokens, faces, the scale model, ThemeProvider, brand
 tools/                  library builder, converters, importers, audits, Ollama benchmarks
 ```
 
@@ -576,8 +594,9 @@ App development by **Guilherme Yuri Bermeo** — [gm.bermeo.dev](https://gm.berm
 
 Built with [Expo](https://expo.dev) and React Native. The pitch detector uses
 the McLeod Pitch Method; the chord catalogue is generated with
-[tonal](https://github.com/tonaljs/tonal). Fonts are
-[Archivo](https://fonts.google.com/specimen/Archivo) by Omnibus-Type.
+[tonal](https://github.com/tonaljs/tonal). On iOS the interface is set in the
+system face (SF Pro and SF Pro Rounded); on Android, the web and in the brand
+it is [Archivo](https://fonts.google.com/specimen/Archivo) by Omnibus-Type.
 Licensed under the MIT License — see [`LICENSE`](LICENSE).
 
 The product site in [`docs/`](docs/) is a static page ready to deploy on

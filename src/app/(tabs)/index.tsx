@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import { FlatList, View } from 'react-native';
 
 import {
-  AppCredits, filterLibraryRows, LibraryBottomBar, LibraryEmptyState, LibraryHeader, LibraryTopBar,
+  AppCredits, filterLibraryRows, LibraryEmptyState, LibraryHeader, LibraryTopBar,
   LibraryRowSeparator, PracticeRail, routeForRow, Screen, SongRow,
   type CategoryFilter, type DifficultyFilter,
 } from '@components';
@@ -41,14 +41,14 @@ export default function LibraryScreen() {
 
   return (
     <Screen scroll={false} padded={false}>
-      <LibraryTopBar wide={wide} />
+      <LibraryTopBar totalCount={allRows.length} />
       <View style={{ flex: 1, flexDirection: 'row', minHeight: 0 }}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <FlatList
             ListHeaderComponent={
               <LibraryHeader
-                totalCount={allRows.length}
                 shownCount={rows.length}
+                showShortcuts={!wide}
                 search={search}
                 onSearchChange={setSearch}
                 category={category}
@@ -60,7 +60,7 @@ export default function LibraryScreen() {
             data={rows}
             keyExtractor={keyExtractor}
             keyboardShouldPersistTaps="handled"
-            contentContainerStyle={{ paddingBottom: theme.s(20) }}
+            contentContainerStyle={{ paddingHorizontal: theme.s(16), paddingBottom: theme.s(20) }}
             initialNumToRender={12}
             maxToRenderPerBatch={12}
             windowSize={5}
@@ -72,7 +72,6 @@ export default function LibraryScreen() {
               <LibraryEmptyState noImportsYet={category === 'imported' && !search} onClearFilters={clearFilters} />
             }
           />
-          {wide ? null : <LibraryBottomBar />}
         </View>
         {wide ? <PracticeRail /> : null}
       </View>

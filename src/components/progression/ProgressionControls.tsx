@@ -1,15 +1,14 @@
 import { useState } from 'react';
-import { Platform, TextInput, View } from 'react-native';
+import { TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { parseProgressionBpm } from '@domain';
-import { useTheme } from '@theme';
+import { FACE, RADIUS, useTheme } from '@theme';
 
-import { Body, Button, Label, Row, Segmented } from '../ui';
+import { Button, Card, Glass, Label, Num, Row, Segmented } from '../ui';
 import {
   BEATS_SEGMENTS, MAX_PROGRESSION_SPEED, MIN_PROGRESSION_SPEED, stepProgressionSpeed,
 } from './progressionOptions';
-
-const MONOSPACE = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
 
 export type ProgressionControlsProps = {
   bpm: number;
@@ -26,10 +25,47 @@ export type ProgressionControlsProps = {
 /**
  * Tempo, beats per chord, speed and transport.
  *
- * Give it `key={bpm}`: the typed text is only a draft, and a new tempo from
- * anywhere else should replace it.
+ * On a wide screen all of it floats in one glass bar under the rows. On a
+ * compact one — the iPhone Duo held upright — that bar would wrap to four
+ * lines and cover a third of the page, so only the transport floats and the
+ * tempo settings sit in the page as a card (`ProgressionTempoCard`).
  */
 export function ProgressionControls(props: ProgressionControlsProps) {
+  const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  const { s } = theme;
+  const compact = theme.scale.compact;
+  return (
+    <View testID="custom-progression-controls" style={{ position: 'absolute', left: compact ? undefined : s(12), right: s(12), bottom: insets.bottom + s(8) }}>
+      <Glass
+        style={{ flexDirection: 'row', alignItems: 'center', gap: s(10), padding: s(compact ? 6 : 12), ...theme.corners(RADIUS.xl), flexWrap: 'wrap' }}
+      >
+        {compact ? null : <ProgressionTempoControls {...props} />}
+        <Row gap={8} style={{ marginLeft: 'auto', alignItems: 'center' }}>
+          <Button label="Restart" icon="restart" tone="default" onPress={props.onRestart} />
+          <Button label={props.playing ? 'Pause' : 'Play'} icon={props.playing ? 'pause' : 'play'} tone="accent" onPress={props.onTogglePlaying} />
+        </Row>
+      </Glass>
+    </View>
+  );
+}
+
+/** The tempo settings as a card in the page, for compact screens. */
+export function ProgressionTempoCard(props: ProgressionControlsProps) {
+  const theme = useTheme();
+  if (!theme.scale.compact) return null;
+  return (
+    <Card gap={12}>
+      <ProgressionTempoControls {...props} />
+    </Card>
+  );
+}
+
+/**
+ * BPM, beats per chord and speed. Give it `key={bpm}`: the typed text is only
+ * a draft, and a new tempo from anywhere else should replace it.
+ */
+function ProgressionTempoControls(props: ProgressionControlsProps) {
   const { bpm, speed } = props;
   const theme = useTheme();
   const { s, chrome, font } = theme;
@@ -40,10 +76,7 @@ export function ProgressionControls(props: ProgressionControlsProps) {
     else props.onBpmChange(parsed);
   };
   return (
-    <View
-      testID="custom-progression-controls"
-      style={{ flexDirection: 'row', alignItems: 'center', gap: s(10), padding: s(10), borderTopWidth: theme.rule(1), borderColor: chrome.lineSoft, backgroundColor: chrome.surfaceElevated, flexWrap: 'wrap' }}
-    >
+    <>
       <Row gap={4} style={{ alignItems: 'center' }}>
         <Label size={11}>BPM</Label>
         <TextInput
@@ -55,8 +88,8 @@ export function ProgressionControls(props: ProgressionControlsProps) {
           keyboardType="numeric"
           maxLength={3}
           style={{
-            width: s(46), height: s(34), borderWidth: theme.rule(1), borderColor: chrome.line, borderRadius: s(4),
-            textAlign: 'center', fontFamily: MONOSPACE, fontSize: font(14), fontWeight: '700', color: chrome.ink, backgroundColor: chrome.bg,
+            width: s(56), height: s(36), borderRadius: s(18),
+            textAlign: 'center', ...FACE.rounded, fontSize: font(15), color: chrome.ink, backgroundColor: chrome.fill,
           }}
         />
       </Row>
@@ -72,16 +105,12 @@ export function ProgressionControls(props: ProgressionControlsProps) {
       </Row>
       <Row gap={4} style={{ alignItems: 'center' }}>
         <Label size={11}>Speed</Label>
-        <Button label="−" disabled={speed <= MIN_PROGRESSION_SPEED} onPress={() => props.onSpeedChange(stepProgressionSpeed(speed, -1))} />
-        <Body size={12} style={{ width: s(42), textAlign: 'center', fontFamily: MONOSPACE, fontWeight: '700' }}>
+        <Button label="" icon="minus" accessibilityLabel="Slower" disabled={speed <= MIN_PROGRESSION_SPEED} onPress={() => props.onSpeedChange(stepProgressionSpeed(speed, -1))} />
+        <Num size={14} style={{ width: s(48), textAlign: 'center' }}>
           {Math.round(speed * 100)}%
-        </Body>
-        <Button label="+" disabled={speed >= MAX_PROGRESSION_SPEED} onPress={() => props.onSpeedChange(stepProgressionSpeed(speed, 1))} />
+        </Num>
+        <Button label="" icon="plus" accessibilityLabel="Faster" disabled={speed >= MAX_PROGRESSION_SPEED} onPress={() => props.onSpeedChange(stepProgressionSpeed(speed, 1))} />
       </Row>
-      <Row gap={8} style={{ marginLeft: 'auto', alignItems: 'center' }}>
-        <Button label="Restart" tone="default" onPress={props.onRestart} />
-        <Button label={props.playing ? 'Pause' : 'Play progression'} tone="accent" onPress={props.onTogglePlaying} />
-      </Row>
-    </View>
+    </>
   );
 }

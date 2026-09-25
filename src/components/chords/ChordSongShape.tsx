@@ -21,6 +21,7 @@ export function ChordSongShape({
   label,
   nextChord,
   scaleKey,
+  allPositions = false,
   width = 128,
   maxHeight = Infinity,
   titleSize,
@@ -30,6 +31,8 @@ export function ChordSongShape({
   label?: string;
   nextChord?: CelloChordStudy;
   scaleKey?: string;
+  /** Mark every position of the chord's notes — the improvising map. */
+  allPositions?: boolean;
   width?: number;
   /** Measured device-pixel height available for the diagram. */
   maxHeight?: number;
@@ -60,6 +63,7 @@ export function ChordSongShape({
           tapeColors
           nextChord={nextChord}
           scaleKey={scaleKey}
+          allPositions={allPositions}
         />
       ) : (
         <View

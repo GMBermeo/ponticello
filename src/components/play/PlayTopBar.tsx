@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { View } from 'react-native';
 
-import { Button, Label, Row, Title } from '../ui';
+import { Button, GlassIconButton, Label, Row, Title } from '../ui';
 import { useTheme } from '@theme';
 import { Playhead, usePlayheadPosition } from './usePlayhead';
 
@@ -50,31 +50,20 @@ export const PlayTopBar = memo(function PlayTopBar({
       gap={10}
       style={{ minHeight: Math.max(theme.tap + theme.s(12), theme.s(TOP_BAR_HEIGHT)) }}
     >
-      <Button
-        label="×"
-        accessibilityLabel="End session"
-        onPress={onEndSession}
-        tone="ghost"
-        style={{ minWidth: theme.tap, alignItems: 'center', paddingHorizontal: 0 }}
-      />
+      <GlassIconButton icon="close" accessibilityLabel="End session" onPress={onEndSession} />
       <View style={{ flex: 1, minWidth: 0 }}>
         <Title size={16} numberOfLines={1}>{title}</Title>
         <BarReadout playhead={playhead} loopFromBar={loopFromBar} loopToBar={loopToBar} />
       </View>
+      <GlassIconButton icon="restart" accessibilityLabel="Restart the loop" onPress={onRestart} />
       <Button
-        label="↺"
-        accessibilityLabel="Restart the loop"
-        onPress={onRestart}
-        tone="ghost"
-        style={{ minWidth: theme.tap, paddingHorizontal: 0, alignItems: 'center' }}
-      />
-      <Button
+        icon={playRequested ? 'pause' : 'play'}
         label={starting ? 'Loading…' : transportLabel}
         accessibilityLabel={starting ? 'Preparing the music' : transportLabel}
         onPress={onTogglePlay}
         disabled={starting}
         tone="accent"
-        style={{ minWidth: theme.s(78), alignItems: 'center' }}
+        style={{ minWidth: theme.s(104), alignItems: 'center' }}
       />
     </Row>
   );

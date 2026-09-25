@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react';
 import { ScrollView } from 'react-native';
 
 import {
-  Button, exportProgressionJson, PresetsModal, ProgressionControls, ProgressionRowCard,
+  Button, exportProgressionJson, PresetsModal, ProgressionControls, ProgressionRowCard, ProgressionTempoCard,
   ProgressionSetupPanel, Row, SavedProgressionsModal, Screen, ScreenHeader, useProgressionPlayback,
   useProgressionStorage, type ChordCardActions, type ChordCardState, type GridCell,
 } from '@components';
@@ -23,6 +23,7 @@ export default function ChordProgressionScreen() {
   const [family, setFamily] = useState<ChordFamily>('triads');
   const [showTransition, setShowTransition] = useState(true);
   const [showKeyScale, setShowKeyScale] = useState(false);
+  const [showAllPositions, setShowAllPositions] = useState(false);
   const [presetsOpen, setPresetsOpen] = useState(false);
   const [savedOpen, setSavedOpen] = useState(false);
   const [dragged, setDragged] = useState<GridCell | null>(null);
@@ -83,6 +84,7 @@ export default function ChordProgressionScreen() {
     dropTarget,
     showTransition,
     scaleKey: showKeyScale ? progression.keyRoot : undefined,
+    allPositions: showAllPositions,
     rowCount,
   };
 
@@ -95,14 +97,16 @@ export default function ChordProgressionScreen() {
     <Screen scroll={false} padded={false}>
       <ScreenHeader backLabel="Library" meta="Chord progression">
         <Row gap={6} style={{ alignItems: 'center' }}>
-          <Button label={justSaved ? '✓ Saved!' : 'Save'} tone={justSaved ? 'accent' : 'default'} onPress={save} />
           <Button label={`Saved (${saved.length})`} tone="ghost" onPress={() => setSavedOpen(true)} />
-          <Button label="Presets" tone="ghost" onPress={() => setPresetsOpen(true)} />
-          <Button label="Clear" tone="ghost" onPress={() => setProgression(createDefaultProgression())} />
+          <Button label={justSaved ? 'Saved' : 'Save'} icon={justSaved ? 'check' : undefined} tone="accent" onPress={save} />
         </Row>
       </ScreenHeader>
 
-      <ScrollView ref={scroll} style={{ flex: 1 }} contentContainerStyle={{ padding: s(16), paddingBottom: s(110), gap: s(16) }}>
+      <ScrollView ref={scroll} style={{ flex: 1 }} contentContainerStyle={{ padding: s(16), paddingBottom: s(200), gap: s(16) }}>
+        <Row gap={8}>
+          <Button label="Presets" icon="sparkles" onPress={() => setPresetsOpen(true)} />
+          <Button label="Clear" icon="close" onPress={() => setProgression(createDefaultProgression())} />
+        </Row>
         <ProgressionSetupPanel
           progression={progression}
           onChange={patch}
@@ -114,6 +118,8 @@ export default function ChordProgressionScreen() {
           showTransition={showTransition}
           onShowTransitionChange={setShowTransition}
           showKeyScale={showKeyScale}
+          showAllPositions={showAllPositions}
+          onShowAllPositionsChange={setShowAllPositions}
           onShowKeyScaleChange={setShowKeyScale}
           targetRow={targetRow}
           onAddChord={addToTargetRow}
@@ -130,7 +136,19 @@ export default function ChordProgressionScreen() {
             actions={actions}
           />
         ))}
-        <Button label="+ Add new row" tone="default" onPress={() => edit(addRow)} />
+        <Button label="Add new row" icon="plus" tone="default" onPress={() => edit(addRow)} />
+        <ProgressionTempoCard
+          key={progression.bpm}
+          bpm={progression.bpm}
+          onBpmChange={(bpm) => patch({ bpm })}
+          beatsPerChord={progression.beatsPerChord}
+          onBeatsPerChordChange={(beatsPerChord) => patch({ beatsPerChord })}
+          speed={speed}
+          onSpeedChange={setSpeed}
+          playing={playback.playing}
+          onTogglePlaying={playback.togglePlaying}
+          onRestart={playback.restart}
+        />
       </ScrollView>
 
       <ProgressionControls

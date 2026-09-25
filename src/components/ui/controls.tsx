@@ -1,15 +1,14 @@
 import React, { useRef, useState } from 'react';
 import { Platform, Pressable, StyleProp, View, ViewStyle } from 'react-native';
 
-import { useTheme, type Chrome } from '@theme';
+import { RADIUS, useTheme, type Chrome } from '@theme';
+import { Icon, type IconName } from './Icon';
 import { Body, Num, Row, Title } from './primitives';
 
 const PRESSED_OPACITY = 0.7;
 const BUTTON_PRESSED_OPACITY = 0.75;
 const DISABLED_OPACITY = 0.4;
 const DISABLED_ROW_OPACITY = 0.55;
-const ACCENT_INK_DARK = '#060913';
-const ACCENT_INK_LIGHT = '#FFFFFF';
 
 type ControlFeedback = {
   events: {
@@ -49,15 +48,21 @@ export type ButtonTone = 'default' | 'accent' | 'ghost';
 
 type ButtonColors = { ink: string; background: string; border: string; hint: string };
 
+/**
+ * The three button styles of iOS: filled (`accent`), grey (`default`) and
+ * plain (`ghost`, tinted text with no fill). All three are capsules.
+ */
 function buttonColors(tone: ButtonTone, chrome: Chrome, hovered: boolean): ButtonColors {
   if (tone === 'accent') {
-    const ink = chrome.dark ? ACCENT_INK_DARK : ACCENT_INK_LIGHT;
-    return { ink, background: chrome.accent, border: chrome.accent, hint: ink };
+    return { ink: chrome.onAccent, background: chrome.accent, border: 'transparent', hint: chrome.onAccent };
+  }
+  if (tone === 'ghost') {
+    return { ink: chrome.accent, background: hovered ? chrome.fill : 'transparent', border: 'transparent', hint: chrome.dim };
   }
   return {
     ink: chrome.ink,
-    background: hovered ? chrome.surfaceElevated : chrome.surface,
-    border: tone === 'ghost' ? 'transparent' : chrome.lineSoft,
+    background: hovered ? chrome.lineSoft : chrome.fill,
+    border: 'transparent',
     hint: chrome.dim,
   };
 }
@@ -69,11 +74,13 @@ export type ButtonProps = {
   expanded?: boolean;
   onPress: () => void;
   tone?: ButtonTone;
+  /** A leading SF Symbol (a plain glyph off iOS). */
+  icon?: IconName;
   disabled?: boolean;
   style?: StyleProp<ViewStyle>;
 };
 
-export function Button({ label, hint, onPress, tone = 'default', disabled = false, style, accessibilityLabel, expanded }: ButtonProps) {
+export function Button({ label, hint, icon, onPress, tone = 'default', disabled = false, style, accessibilityLabel, expanded }: ButtonProps) {
   const theme = useTheme();
   const feedback = useControlFeedback();
   const colors = buttonColors(tone, theme.chrome, feedback.hovered);
@@ -85,14 +92,15 @@ export function Button({ label, hint, onPress, tone = 'default', disabled = fals
       accessibilityRole="button" accessibilityLabel={accessibilityLabel ?? (hint ? `${label}. ${hint}` : label)}
       accessibilityState={{ disabled, expanded }} aria-disabled={disabled} aria-expanded={expanded}
       style={({ pressed }) => [{
-        minHeight: theme.tap, justifyContent: 'center', borderRadius: theme.s(8),
-        paddingHorizontal: theme.s(14), paddingVertical: theme.s(11),
+        minHeight: theme.tap, justifyContent: 'center', ...theme.corners(RADIUS.pill),
+        paddingHorizontal: theme.s(tone === 'ghost' ? 12 : 18), paddingVertical: theme.s(10),
         backgroundColor: colors.background,
         borderWidth: theme.rule(1), borderColor: colors.border,
         opacity: pressOpacity(pressed, disabled, DISABLED_OPACITY, BUTTON_PRESSED_OPACITY),
       }, style, feedback.focusStyle, accentFocusRing]}>
-      <Row gap={10}>
-        <Title size={15} color={colors.ink} style={{ flexShrink: 1 }}>{label}</Title>
+      <Row gap={8} style={{ justifyContent: 'center' }}>
+        {icon ? <Icon name={icon} size={15} color={colors.ink} /> : null}
+        {label ? <Title size={15} color={colors.ink} style={{ flexShrink: 1 }}>{label}</Title> : null}
         {hint === undefined ? null : <Body size={12} color={colors.hint} style={{ marginLeft: 'auto' }}>{hint}</Body>}
       </Row>
     </Pressable>
@@ -107,8 +115,7 @@ export type ToggleProps = {
 };
 
 function toggleTrackColor(value: boolean, chrome: Chrome): string {
-  if (value) return chrome.accent;
-  return chrome.dark ? 'rgba(248,250,252,0.18)' : 'rgba(15,23,42,0.16)';
+  return value ? chrome.accent : chrome.fill;
 }
 
 export function Toggle({ label, hint, value, onChange }: ToggleProps) {
@@ -120,18 +127,18 @@ export function Toggle({ label, hint, value, onChange }: ToggleProps) {
       accessibilityLabel={label} accessibilityHint={hint} accessibilityState={{ checked: value }} aria-checked={value}
       style={({ pressed }) => [{
         flexDirection: 'row', alignItems: 'center', gap: theme.s(14), minHeight: theme.tap,
-        paddingVertical: theme.s(6), borderRadius: theme.s(6), opacity: pressed ? PRESSED_OPACITY : 1,
+        paddingVertical: theme.s(6), ...theme.corners(RADIUS.sm), opacity: pressed ? PRESSED_OPACITY : 1,
       }, feedback.focusStyle]}>
       <View style={{ flex: 1 }}>
         <Title size={15}>{label}</Title>
         {hint === undefined ? null : <Body size={12} color={chrome.dim} style={{ marginTop: theme.s(3) }}>{hint}</Body>}
       </View>
-      <View style={{ width: theme.s(44), height: theme.s(26), borderRadius: theme.s(13), backgroundColor: toggleTrackColor(value, chrome) }}>
+      <View style={{ width: theme.s(52), height: theme.s(32), borderRadius: theme.s(16), backgroundColor: toggleTrackColor(value, chrome) }}>
         <View style={{
-          position: 'absolute', top: theme.s(3), left: theme.s(value ? 21 : 3),
-          width: theme.s(20), height: theme.s(20), borderRadius: theme.s(10),
+          position: 'absolute', top: theme.s(2), left: theme.s(value ? 22 : 2),
+          width: theme.s(28), height: theme.s(28), borderRadius: theme.s(14),
           backgroundColor: '#FFFFFF',
-          shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 2, shadowOffset: { width: 0, height: 1 },
+          boxShadow: `0 ${theme.s(2)}px ${theme.s(6)}px rgba(0, 0, 0, 0.2)`,
         }} />
       </View>
     </Pressable>
@@ -152,12 +159,12 @@ export function Stepper({ label, value, display, onDecrement, onIncrement, canDe
   const theme = useTheme();
   const stepStyle: ViewStyle = { paddingHorizontal: 0, minWidth: theme.tap, alignItems: 'center' };
   return (
-    <Row style={{ borderWidth: theme.rule(1), borderColor: theme.chrome.lineSoft, borderRadius: theme.s(8), backgroundColor: theme.chrome.surface }}>
-      <Button label="−" accessibilityLabel={`Decrease ${label}`} onPress={onDecrement} disabled={!canDecrement} tone="ghost" style={stepStyle} />
+    <Row style={{ ...theme.corners(RADIUS.pill), backgroundColor: theme.chrome.fill }}>
+      <Button label="" icon="minus" accessibilityLabel={`Decrease ${label}`} onPress={onDecrement} disabled={!canDecrement} tone="ghost" style={stepStyle} />
       <View accessibilityLabel={`${label}: ${display ?? value}`} style={{ minWidth: theme.s(62), alignItems: 'center' }}>
         <Num size={15}>{display ?? String(value)}</Num>
       </View>
-      <Button label="+" accessibilityLabel={`Increase ${label}`} onPress={onIncrement} disabled={!canIncrement} tone="ghost" style={stepStyle} />
+      <Button label="" icon="plus" accessibilityLabel={`Increase ${label}`} onPress={onIncrement} disabled={!canIncrement} tone="ghost" style={stepStyle} />
     </Row>
   );
 }
@@ -192,7 +199,7 @@ export function Segmented<T extends string>({ segments, value, onChange, grow = 
     buttons.current[next]?.focus();
   };
   return (
-    <View accessibilityRole="radiogroup" accessibilityLabel={accessibilityLabel} style={{ flexDirection: 'row', padding: theme.s(3), borderRadius: theme.s(9), backgroundColor: theme.chrome.surface, alignSelf: grow ? 'stretch' : 'flex-start' }}>
+    <View accessibilityRole="radiogroup" accessibilityLabel={accessibilityLabel} style={{ flexDirection: 'row', padding: theme.s(3), ...theme.corners(RADIUS.pill), backgroundColor: theme.chrome.fill, alignSelf: grow ? 'stretch' : 'flex-start' }}>
       {segments.map((segment, index) => <SegmentButton key={segment.value} segment={segment} selected={segment.value === value} onPress={() => onChange(segment.value)} grow={grow} compact={compact} setRef={(node) => { buttons.current[index] = node; }} onArrow={(key) => selectWithKeyboard(index, key)} />)}
     </View>
   );
@@ -223,7 +230,7 @@ function webKeyboardProps(selected: boolean, onArrow: (key: string) => void) {
 }
 
 function segmentBackground(selected: boolean, hovered: boolean, chrome: Chrome): string {
-  if (selected) return chrome.surfaceElevated;
+  if (selected) return chrome.dark ? chrome.line : chrome.surfaceElevated;
   return hovered ? chrome.lineSoft : 'transparent';
 }
 
@@ -236,11 +243,13 @@ function SegmentButton<T extends string>({ segment, selected, onPress, grow, com
       accessibilityLabel={segment.label} accessibilityHint={segment.hint} accessibilityState={{ checked: selected }} aria-checked={selected}
       style={({ pressed }) => [{
         flex: grow ? 1 : undefined, minWidth: 0, minHeight: theme.tap,
-        alignItems: 'center', justifyContent: 'center', paddingHorizontal: theme.s(compact ? 7 : 11),
-        borderRadius: theme.s(6), backgroundColor: segmentBackground(selected, feedback.hovered, theme.chrome),
-        borderWidth: theme.rule(1), borderColor: selected ? theme.chrome.lineSoft : 'transparent', opacity: pressed ? PRESSED_OPACITY : 1,
+        alignItems: 'center', justifyContent: 'center', paddingHorizontal: theme.s(compact ? 8 : 14),
+        ...theme.corners(RADIUS.pill), backgroundColor: segmentBackground(selected, feedback.hovered, theme.chrome),
+        boxShadow: selected && !theme.chrome.dark ? `0 ${theme.s(1)}px ${theme.s(5)}px rgba(0, 0, 0, 0.12)` : undefined,
+        opacity: pressed ? PRESSED_OPACITY : 1,
       }, feedback.focusStyle]}>
-      <Title size={compact ? 12 : 13} color={selected ? theme.chrome.ink : theme.chrome.dim} style={{ textAlign: 'center' }}>{segment.label}</Title>
+      <Title size={compact ? 13 : 14} color={selected ? theme.chrome.ink : theme.chrome.dim} style={{ textAlign: 'center' }}
+        numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{segment.label}</Title>
     </Pressable>
   );
 }
@@ -263,7 +272,7 @@ export function PressableRow({ onPress, accessibilityLabel, selected, disabled =
       accessibilityLabel={accessibilityLabel} accessibilityState={{ selected, disabled: inert }} aria-pressed={selected} aria-disabled={inert}
       style={({ pressed }) => [{
         minHeight: theme.tap,
-        backgroundColor: selected || feedback.hovered ? theme.chrome.surface : 'transparent',
+        backgroundColor: selected || feedback.hovered ? theme.chrome.fill : 'transparent',
         opacity: pressOpacity(pressed, disabled, DISABLED_ROW_OPACITY, PRESSED_OPACITY),
       }, style, feedback.focusStyle]}>
       {children}
@@ -283,7 +292,9 @@ export function Disclosure({ title, summary, children }: DisclosureProps) {
       <Pressable {...feedback.events} onPress={() => setOpen(!open)} accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ expanded: open }} aria-expanded={open}
         style={[{ minHeight: theme.tap, paddingVertical: theme.s(14), flexDirection: 'row', alignItems: 'center', gap: theme.s(12) }, feedback.focusStyle]}>
         <View style={{ flex: 1 }}><Title size={15}>{title}</Title>{summary ? <Body size={12} color={theme.chrome.dim} style={{ marginTop: theme.s(3) }}>{summary}</Body> : null}</View>
-        <Title size={18} color={theme.chrome.dim}>{open ? '−' : '+'}</Title>
+        <View style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }}>
+          <Icon name="chevronDown" size={15} color={theme.chrome.dim} />
+        </View>
       </Pressable>
       {open ? <View style={{ gap: theme.s(12), paddingBottom: theme.s(18) }}>{children}</View> : null}
     </View>

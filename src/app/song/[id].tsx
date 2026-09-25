@@ -1,13 +1,14 @@
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useBacking } from '@audio';
 import {
   ARRANGEMENT_SEGMENTS, Body, Button, CHORDS_BLURB, CHORDS_SEGMENT, Disclosure, DisplayPreferences,
   effectiveBpm, Label, Num, PieceSummary, PracticeWindowControls, Row, Screen, ScreenHeader,
   Segmented, SoundPreferences, Stack, Title, trackChoiceSummary, TrackPicker, VISION_BLURB,
-  VISION_SEGMENTS, type SheetView,
+  VISION_SEGMENTS, type SheetView, Card, Glass,
 } from '@components';
 import { practiceLoop } from '@domain';
 import { getChordSheet, type LibraryRow } from '@scores';
@@ -15,7 +16,7 @@ import {
   useAudioPreferences, usePiece, useSession, useSettingsActions, useTrackChoice, useTrackOptions,
   useVisionPreferences,
 } from '@state';
-import { useTheme } from '@theme';
+import { RADIUS, useTheme } from '@theme';
 
 function startTarget(row: LibraryRow, chordsSelected: boolean): { label: string; href: Href } {
   if (chordsSelected) return { label: 'Read chords', href: `/chord-song/${row.id}` };
@@ -33,6 +34,7 @@ function startTarget(row: LibraryRow, chordsSelected: boolean): { label: string;
  */
 export default function SongScreen() {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const chordSheet = getChordSheet(id);
@@ -120,34 +122,38 @@ export default function SongScreen() {
   return (
     <Screen scroll={false} padded={false}>
       <ScreenHeader backLabel="Library" meta="Practice setup" />
-      <ScrollView contentContainerStyle={{ padding: theme.s(24), paddingBottom: theme.s(30) }} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={{ padding: theme.s(16), paddingBottom: theme.s(120) + insets.bottom }} keyboardShouldPersistTaps="handled">
         <View style={{ flexDirection: wide ? 'row' : 'column', gap: theme.s(wide ? 32 : 24) }}>
           <PieceSummary pieceId={id} piece={piece} arrangementLabel={arrangement?.label}
             arrangementHint={arrangement?.hint} wide={wide} />
 
-          <View style={{ flex: wide ? 1 : undefined, minWidth: 0, gap: theme.s(18) }}>
-            <Title size={20}>Make it your practice</Title>
+          <View style={{ flex: wide ? 1 : undefined, minWidth: 0, gap: theme.s(14) }}>
+            <Title size={22} style={{ paddingHorizontal: theme.s(4) }}>Make it your practice</Title>
             {adaptive ? (
-              <Stack gap={8}>
-                <Label size={11}>Arrangement</Label>
-                <Segmented accessibilityLabel="Arrangement difficulty" segments={ARRANGEMENT_SEGMENTS}
-                  value={setup.arrangementLevel} onChange={(arrangementLevel) => updateSetup({ arrangementLevel })} grow compact />
-              </Stack>
+              <Card gap={14}>
+                <Stack gap={8}>
+                  <Label size={11}>Arrangement</Label>
+                  <Segmented accessibilityLabel="Arrangement difficulty" segments={ARRANGEMENT_SEGMENTS}
+                    value={setup.arrangementLevel} onChange={(arrangementLevel) => updateSetup({ arrangementLevel })} grow compact />
+                </Stack>
+                {/* Immediately under the difficulty, because they are one decision:
+                    which line am I playing, and can I reach it. */}
+                {id ? (
+                  <TrackPicker options={trackOptions} line={line} choice={choice}
+                    level={setup.arrangementLevel} onChange={(next) => setTrackChoice(id, next)} />
+                ) : null}
+              </Card>
             ) : null}
-            {/* Immediately under the difficulty, because they are one decision:
-                which line am I playing, and can I reach it. */}
-            {adaptive && id ? (
-              <TrackPicker options={trackOptions} line={line} choice={choice}
-                level={setup.arrangementLevel} onChange={(next) => setTrackChoice(id, next)} />
-            ) : null}
-            <PracticeWindowControls setup={setup} bpm={bpm} barCount={barCount} onChange={updateSetup} />
-            <Stack gap={8}>
+            <Card gap={18}><PracticeWindowControls setup={setup} bpm={bpm} barCount={barCount} onChange={updateSetup} /></Card>
+            <Card gap={8}>
               <Label size={11}>Read the music as</Label>
               <Segmented<SheetView> accessibilityLabel="Music view" segments={viewSegments}
                 value={chordsSelected ? 'chords' : vision} onChange={selectView} grow />
               <Body size={12} color={theme.chrome.dim}>{chordsSelected ? CHORDS_BLURB : VISION_BLURB[vision]}</Body>
-            </Stack>
-            <View>
+            </Card>
+            {/* Clipped so the first disclosure's divider does not draw along the card's edge. */}
+            <Card padY={4} style={{ overflow: 'hidden' }}>
+              <View style={{ marginTop: -theme.rule(1) }}>
               <DisplayPreferences />
               <SoundPreferences listen={listen} fixedBacking={fixedBacking} previewing={previewing}
                 onTogglePreview={() => setPreviewFor(previewing ? null : (id ?? null))} />
@@ -157,17 +163,25 @@ export default function SongScreen() {
                   <Row key={label}><Body size={13} style={{ flex: 1 }}>{label}</Body><Num size={13}>{percent}%</Num></Row>
                 ))}
               </Disclosure>
-            </View>
+              </View>
+            </Card>
           </View>
         </View>
       </ScrollView>
-      <Row padX={24} padY={14} gap={16} style={{ borderTopWidth: theme.rule(1), borderColor: theme.chrome.lineSoft, backgroundColor: theme.chrome.bg }}>
+      <Glass
+        style={{
+          position: 'absolute', left: theme.s(12), right: theme.s(12), bottom: insets.bottom + theme.s(8),
+          flexDirection: 'row', alignItems: 'center', gap: theme.s(12),
+          paddingLeft: theme.s(20), paddingRight: theme.s(6), paddingVertical: theme.s(6),
+          ...theme.corners(RADIUS.pill),
+        }}
+      >
         <View style={{ flex: 1 }}>
-          <Title size={14}>{`Bars ${setup.loopFromBar}–${setup.loopToBar}`}</Title>
+          <Title size={15}>{`Bars ${setup.loopFromBar}–${setup.loopToBar}`}</Title>
           <Body size={12} color={theme.chrome.dim} numberOfLines={1}>{footerDetail}</Body>
         </View>
-        <Button label={start.label} hint="→" tone="accent" onPress={() => { setPreviewFor(null); router.push(start.href); }} />
-      </Row>
+        <Button label={start.label} icon="play" tone="accent" onPress={() => { setPreviewFor(null); router.push(start.href); }} />
+      </Glass>
     </Screen>
   );
 }

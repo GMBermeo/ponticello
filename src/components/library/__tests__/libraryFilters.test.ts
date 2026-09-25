@@ -46,6 +46,15 @@ describe('filterLibraryRows', () => {
     expect(filtered({ search: `  ${title.toUpperCase()}  ` }).map((row) => row.id)).toContain(ALL_ROWS[0].id);
   });
 
+  it('ignores accents on either side of the search', () => {
+    const accented: LibraryRow = { ...ALL_ROWS[0], id: 'accented', title: 'Prélude, Cello Suite No. 1' };
+    const rows = [accented, ...ALL_ROWS];
+    const search = (text: string) =>
+      filterLibraryRows(rows, { ...NO_FILTER, search: text }).map((row) => row.id);
+    expect(search('prelude')).toContain('accented');
+    expect(search('PRÉLUDE')).toContain('accented');
+  });
+
   it('drops chart-only rows when a level is chosen', () => {
     const chartOnlyIds = new Set(CHORD_SHEETS.map((sheet) => sheet.id));
     const beginner = filtered({ difficulty: 'Beginner' });

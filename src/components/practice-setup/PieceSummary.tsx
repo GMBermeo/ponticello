@@ -1,11 +1,9 @@
-import { View } from 'react-native';
-
 import { LIBRARY_KEY_CENSUS, censusForDrill, firstPositionVerdict, type ResolvedPiece } from '@scores';
 import { useTheme } from '@theme';
 
 import { trackChoiceSummary } from '../play';
 import { KeyCensusNote } from '../practice';
-import { Body, Kicker, Label, Stack, Title } from '../ui';
+import { Body, Card, Kicker, Label, Stack, Title } from '../ui';
 
 export type PieceSummaryProps = {
   pieceId: string | undefined;
@@ -46,18 +44,18 @@ export function PieceSummary(props: PieceSummaryProps) {
   const keyRow = censusForDrill(pieceId);
   if (!row) return null;
   return (
-    <Stack gap={14} style={wide ? { width: theme.s(260) } : undefined}>
+    <Stack gap={12} style={[{ paddingHorizontal: theme.s(4) }, wide ? { width: theme.s(280) } : null]}>
       <Kicker size={11}>{row.composer}</Kicker>
-      <Title accessibilityRole="header" size={30}>{row.title}</Title>
+      <Title accessibilityRole="header" size={32}>{row.title}</Title>
       <Body size={14} color={theme.chrome.dim}>
         {row.keySignature} · {score?.metadata.timeSignature ?? 'Meter unavailable'} · {score?.measures.length ?? 0} bars
       </Body>
-      <View style={{ backgroundColor: theme.chrome.surface, padding: theme.s(16), borderRadius: theme.s(10), gap: theme.s(8) }}>
+      <Card gap={8}>
         <Label size={11}>{piece.adaptive ? 'Your cello part' : 'About this study'}</Label>
         <Title size={19}>{cellPartHeadline(props)}</Title>
         <Body size={14} color={theme.chrome.dim}>{cellPartDetail(props)}</Body>
         <Body size={13} color={theme.chrome.dim}>Range {row.range}</Body>
-      </View>
+      </Card>
       {keyRow ? (
         <KeyCensusNote row={keyRow} of={LIBRARY_KEY_CENSUS.counted}
           verdict={firstPositionVerdict(keyRow.tonic, keyRow.mode).note} />

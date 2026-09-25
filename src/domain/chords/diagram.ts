@@ -1,5 +1,5 @@
 import { DISPLAY_STRING_ORDER, OPEN_STRING_MIDI, STRING_ORDER, stopDistanceMm } from '../cello';
-import type { CelloChordStudy, ChordPlacement } from './types';
+import type { CelloChordStudy, ChordPlacement, ChordTone } from './types';
 import { tapeGeometry, type TapeColor, type TapeSet } from '../tapes';
 import { parseScaleKey } from '../key';
 
@@ -20,6 +20,14 @@ export interface ChordDiagramOptions {
   readonly scalePitchClasses?: readonly number[];
   readonly scaleTonic?: number;
   readonly scaleColor?: string;
+  /**
+   * Mark every place on the drawn board where the chord's notes can be
+   * stopped, not just the one shape — the map for improvising over a chord
+   * rather than for playing it. With `nextChord`, the next chord's positions
+   * are drawn in grey too, and a note both chords share gets a ring: the
+   * places a melody can stay put across the change.
+   */
+  readonly allPositions?: boolean;
 }
 
 export const CHORD_DIAGRAM_SIZE = { width: 200, height: 380 } as const;
@@ -85,12 +93,50 @@ function scalePitchClassesOf(options: ChordDiagramOptions): { pitchClasses: Set<
 const occupies = (notes: readonly ChordPlacement[], string: StringName, semitones: number) =>
   notes.some((note) => note.string === string && note.semitones === semitones);
 
+type Spot = { string: StringName; semitones: number };
+const occupiesSpot = (spots: readonly Spot[], string: StringName, semitones: number) =>
+  spots.some((spot) => spot.string === string && spot.semitones === semitones);
+
+/** One place a chord tone can be stopped, outside the shape being drawn. */
+export interface ChordToneMarker {
+  string: StringName;
+  semitones: number;
+  x: number;
+  y: number;
+  tone: ChordTone;
+  /** The other chord (the next one, or the current one for a next-chord marker) has this note too. */
+  shared: boolean;
+}
+
+/** Every stop from the nut to `maxSemitones` whose pitch class is one of `tones`, minus `exclude`. */
+function toneMarkersFor(params: {
+  strings: readonly StringName[];
+  maxSemitones: number;
+  tones: readonly ChordTone[];
+  exclude: readonly Spot[];
+  sharedWith: ReadonlySet<number>;
+  x: (string: StringName) => number;
+  y: (semitones: number) => number;
+}): ChordToneMarker[] {
+  const { strings, maxSemitones, tones, exclude, sharedWith, x, y } = params;
+  const byPitchClass = new Map(tones.map((tone) => [tone.pitchClass, tone]));
+  const markers: ChordToneMarker[] = [];
+  for (const string of strings) {
+    for (let semitones = 0; semitones <= maxSemitones; semitones++) {
+      const tone = byPitchClass.get((OPEN_STRING_MIDI[string] + semitones) % 12);
+      if (!tone || occupiesSpot(exclude, string, semitones)) continue;
+      markers.push({ string, semitones, x: x(string), y: y(semitones), tone, shared: sharedWith.has(tone.pitchClass) });
+    }
+  }
+  return markers;
+}
+
 /** Scale notes not already covered by the chord or its successor, string by string. */
 function scaleMarkersFor(params: {
   strings: readonly StringName[];
   maxSemitones: number;
   scale: { pitchClasses: Set<number> | null; tonic: number | undefined };
-  covered: readonly ChordPlacement[];
+  covered: readonly Spot[];
   x: (string: StringName) => number;
   y: (semitones: number) => number;
 }): ScaleMarker[] {
@@ -102,7 +148,7 @@ function scaleMarkersFor(params: {
     const open = OPEN_STRING_MIDI[string];
     for (let semitones = 0; semitones <= maxSemitones; semitones++) {
       const pitchClass = (open + semitones) % 12;
-      if (!pitchClasses.has(pitchClass) || occupies(covered, string, semitones)) continue;
+      if (!pitchClasses.has(pitchClass) || occupiesSpot(covered, string, semitones)) continue;
       markers.push({
         string,
         semitones,
@@ -131,8 +177,19 @@ export function chordDiagramModel(chord: CelloChordStudy, options: ChordDiagramO
   const y = (semitones: number) => (semitones === 0
     ? NUT_Y
     : top + stopDistanceMm(semitones) / stopDistanceMm(maxSemitones) * (bottom - top));
+  const all = options.allPositions === true;
+  const nextTones = options.nextChord?.tones ?? [];
+  const toneMarkers = all ? toneMarkersFor({
+    strings, maxSemitones, tones: chord.tones, exclude: notes,
+    sharedWith: new Set(nextTones.map((tone) => tone.pitchClass)), x, y,
+  }) : [];
+  const nextToneMarkers = all && options.nextChord ? toneMarkersFor({
+    strings, maxSemitones, tones: nextTones, exclude: nextNotes,
+    sharedWith: new Set(chord.tones.map((tone) => tone.pitchClass)), x, y,
+  }) : [];
   const scaleMarkers = scaleMarkersFor({
-    strings, maxSemitones, scale: scalePitchClassesOf(options), covered: [...notes, ...nextNotes], x, y,
+    strings, maxSemitones, scale: scalePitchClassesOf(options),
+    covered: [...notes, ...nextNotes, ...toneMarkers, ...nextToneMarkers], x, y,
   });
 
   return {
@@ -140,6 +197,8 @@ export function chordDiagramModel(chord: CelloChordStudy, options: ChordDiagramO
     voicing, strings, top, bottom, x, y,
     guides: Array.from({ length: maxSemitones }, (_, i) => ({ semitones: i + 1, y: y(i + 1) })),
     scaleMarkers,
+    toneMarkers,
+    nextToneMarkers,
     markers: notes.map((note, i) => ({ note, x: x(note.string), y: y(note.semitones), sequence: i + 1 })),
     ghostMarkers: nextNotes.map((note) => ({ note, x: x(note.string), y: y(note.semitones),
       shared: occupies(notes, note.string, note.semitones) })),
@@ -200,6 +259,16 @@ function describeDiagram(chord: CelloChordStudy, model: DiagramModel, options: C
     const ghosts = model.ghostMarkers.map(({ note }) => `${note.string} string, semitone ${note.semitones}, finger ${note.finger}`);
     parts.push(`Grey preparation notes for ${options.nextChord.symbol}: ${ghosts.join('; ')}`);
   }
+  if (options.allPositions) {
+    const names = chord.tones.map((tone) => tone.name).join(', ');
+    parts.push(`Every position of ${names} up to the octave (${model.toneMarkers.length} more places)`);
+    if (options.nextChord) {
+      const common = model.toneMarkers.filter((marker) => marker.shared).map((marker) => marker.tone.name);
+      const kept = [...new Set(common)];
+      const shared = kept.length ? `; notes shared with it: ${kept.join(', ')}` : '';
+      parts.push(`Grey rings: every position of ${options.nextChord.symbol}${shared}`);
+    }
+  }
   const description = parts.join('. ');
   return options.scaleKey ? `${description}. Key scale notes for ${options.scaleKey}.` : description;
 }
@@ -247,6 +316,37 @@ function markerShape(square: boolean, x: number, y: number, radius: number, attr
   return square
     ? `<rect x="${x - radius}" y="${y - radius}" width="${radius * 2}" height="${radius * 2}" ${attrs}/>`
     : `<circle cx="${x}" cy="${y}" r="${radius}" ${attrs}/>`;
+}
+
+/**
+ * Where else a chord tone can be stopped: a tinted disc carrying the note's
+ * name — not a finger number, because it is a place to find, not a shape to
+ * hold. Roots are squares, as on the shape itself.
+ */
+function drawToneMarkers(model: DiagramModel, options: ChordDiagramOptions, palette: Palette): string[] {
+  return model.toneMarkers.flatMap(({ tone, semitones, x, y }) => {
+    const tape = tapeAt(semitones, options.markerColors);
+    let color = tone.isRoot ? palette.root : palette.ink;
+    if (tape && !tone.isRoot) color = escapeChordXml(tape.fill);
+    const attrs = `fill="${color}" fill-opacity="0.2" stroke="${color}" stroke-width="1.3" data-chord-tone="${escapeChordXml(tone.name)}"`;
+    // An opaque backing first, so the string line does not strike through the name.
+    const backing = markerShape(tone.isRoot, x, y, 6.5, `fill="${palette.background}"`);
+    return [backing, markerShape(tone.isRoot, x, y, 6.5, attrs), svgText(x, y + 2.6, tone.name, { size: tone.name.length > 1 ? 6 : 7.5, color, weight: 700 })];
+  });
+}
+
+/**
+ * The next chord's positions, as dashed grey rings with the note's name. A
+ * note the current chord shares is only a wider ring around the current
+ * marker — the name is already there.
+ */
+function drawNextToneMarkers(model: DiagramModel, palette: Palette): string[] {
+  return model.nextToneMarkers.flatMap(({ tone, shared, x, y }) => {
+    // A shared ring surrounds the current marker, so only an unshared one is backed.
+    const attrs = `fill="${shared ? 'none' : palette.background}" stroke="${palette.ghost}" stroke-width="1.4" stroke-dasharray="2.5 1.8" data-next-tone="${escapeChordXml(tone.name)}"`;
+    const ring = markerShape(tone.isRoot, x, y, shared ? 11 : 6.5, attrs);
+    return shared ? [ring] : [ring, svgText(x, y + 2.6, tone.name, { size: tone.name.length > 1 ? 6 : 7.5, color: palette.ghost, weight: 700 })];
+  });
 }
 
 /** Drawn before the chord's own markers, so those stay readable over a shared grey halo. */
@@ -315,6 +415,8 @@ export function celloChordSvg(chord: CelloChordStudy, options: ChordDiagramOptio
   svg.push(
     ...drawBoard(model, palette),
     ...model.scaleMarkers.map((marker) => drawScaleMarker(marker, options, palette)),
+    ...drawNextToneMarkers(model, palette),
+    ...drawToneMarkers(model, options, palette),
     ...drawGhostMarkers(model, palette),
     ...drawChordMarkers(model, options, palette),
     ...drawFooter(model, palette, atlas),

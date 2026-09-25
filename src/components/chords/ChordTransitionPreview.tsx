@@ -15,13 +15,15 @@ export type ChordTransitionPreviewProps = {
   /** Grey the next chord's notes onto the current diagram. */
   showTransition: boolean;
   scaleKey: string | undefined;
+  /** Every position of each chord's notes, and the next chord's in grey. */
+  allPositions: boolean;
   maxDiagramHeight: number;
   onHeightChange?: (height: number) => void;
 };
 
 /** The chord being played and the ones after it, as fingering diagrams. */
 export function ChordTransitionPreview(props: ChordTransitionPreviewProps) {
-  const { upcoming, compact, showTransition, scaleKey, maxDiagramHeight, onHeightChange } = props;
+  const { upcoming, compact, showTransition, scaleKey, allPositions, maxDiagramHeight, onHeightChange } = props;
   const theme = useTheme();
   const next = upcoming[1]?.study ?? undefined;
   const slots = PREVIEW_SLOTS.slice(0, upcoming.length);
@@ -53,6 +55,7 @@ export function ChordTransitionPreview(props: ChordTransitionPreviewProps) {
               study={upcoming[slot.offset]?.study}
               nextChord={slot.offset === 0 && showTransition ? next : undefined}
               scaleKey={scaleKey}
+              allPositions={allPositions}
               width={compact ? 112 : 124}
               maxHeight={maxDiagramHeight}
               titleSize={compact ? 18 : 20}

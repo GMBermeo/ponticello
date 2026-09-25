@@ -22,13 +22,21 @@ export interface CelloChordDiagramProps {
   scalePitchClasses?: readonly number[];
   scaleTonic?: number;
   scaleColor?: string;
+  /** Every place the chord's notes (and the next chord's) fall, not only the shape. */
+  allPositions?: boolean;
+}
+
+function allPositionsLabel(chord: CelloChordStudy, nextChord: CelloChordStudy | undefined): string {
+  const names = chord.tones.map((tone) => tone.name).join(', ');
+  const next = nextChord ? `, and of ${nextChord.symbol} in grey` : '';
+  return `Every position of ${names} is marked${next}.`;
 }
 
 /** Standalone diagram for future study/playback modes; no transport subscription. */
 export function CelloChordDiagram({
   chord, mode = 'voicing', voicingIndex = 0, orientation = 'low-to-high', width = 160, measuredWidth,
   presentation = 'full', tapeColors = false, nextChord,
-  scaleKey, scalePitchClasses, scaleTonic, scaleColor,
+  scaleKey, scalePitchClasses, scaleTonic, scaleColor, allPositions = false,
 }: CelloChordDiagramProps) {
   const { s, chrome } = useTheme();
   // Diagram colors depend only on tape positions, not board visibility/actions.
@@ -39,12 +47,13 @@ export function CelloChordDiagram({
     mode, voicingIndex, orientation, ink: chrome.ink, muted: chrome.dim,
     rootColor: chrome.accent, background: chrome.bg, ghostColor: chrome.dim,
     presentation, markerColors: tapeSets ? chordTapeMarkerColors(tapeSets, chrome.tapes) : undefined, nextChord,
-    scaleKey, scalePitchClasses, scaleTonic, scaleColor,
+    scaleKey, scalePitchClasses, scaleTonic, scaleColor, allPositions,
   }).replace(/ (?:aria-label|data-[a-z-]+|role)="[^"]*"/g, '');
   const accessibilityLabel = [
     `${chord.symbol}. Squares mark roots.`,
     mode === 'arpeggio' || !chord.voicings.length ? 'Arpeggio: play notes separately.' : 'Suggested chord fingering.',
     nextChord ? `Grey notes prepare ${nextChord.symbol}.` : '',
+    allPositions ? allPositionsLabel(chord, nextChord) : '',
     scaleKey ? `Scale notes for key ${scaleKey}.` : '',
   ].filter(Boolean).join(' ');
   // SvgXml camel-cases arbitrary XML attributes on web. Expose accessibility
