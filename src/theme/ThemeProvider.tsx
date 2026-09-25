@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useMemo } from 'react';
-import { StyleSheet, TextStyle } from 'react-native';
+import { StyleSheet, TextStyle, ViewStyle } from 'react-native';
 
-import { Chrome, CHROMES, ChromeName, FONT, MENU_CHROME, TAP_TARGET, TRACKING } from './tokens';
+import { FACE } from './faces';
+import { Chrome, CHROMES, ChromeName, MENU_CHROME, RADIUS, TAP_TARGET, TRACKING } from './tokens';
 import { ScaleInfo, useScale } from './scale';
 
 /**
@@ -20,6 +21,8 @@ export interface Theme {
   rule: (units?: number) => number;
   /** Minimum touch target in dp — clamped, never scaled below 44. */
   tap: number;
+  /** A continuous-curve corner of `units` design units (see `RADIUS`). */
+  corners: (units: number) => ViewStyle;
 }
 
 const ThemeContext = createContext<Theme | null>(null);
@@ -39,6 +42,10 @@ export function ThemeProvider({
       font: (units: number) => Math.max(9, units * scale.scale),
       rule: (units = 1) => Math.max(StyleSheet.hairlineWidth, units * scale.scale),
       tap: Math.max(44, TAP_TARGET * scale.scale),
+      corners: (units: number) => ({
+        borderRadius: units >= RADIUS.pill ? RADIUS.pill : s(units),
+        borderCurve: 'continuous',
+      }),
     };
   }, [chrome, scale]);
 
@@ -76,7 +83,7 @@ export function labelTracking(fontSize: number): number {
 export function labelStyle(theme: Theme, color?: string): TextStyle {
   const fontSize = theme.font(12);
   return {
-    fontFamily: FONT.semibold,
+    ...FACE.semibold,
     fontSize,
     letterSpacing: labelTracking(fontSize),
     textTransform: 'uppercase',
@@ -86,18 +93,18 @@ export function labelStyle(theme: Theme, color?: string): TextStyle {
 
 export function titleStyle(theme: Theme, size = 24, color?: string): TextStyle {
   return {
-    fontFamily: size >= 24 ? FONT.heavy : FONT.semibold,
+    ...(size >= 20 ? FACE.heavy : FACE.semibold),
     fontSize: theme.font(size),
-    letterSpacing: size >= 24 ? TRACKING.tight : 0,
+    letterSpacing: size >= 24 ? TRACKING.tight * (size / 24) : 0,
     color: color ?? theme.chrome.ink,
   };
 }
 
 export function bodyStyle(theme: Theme, size = 16, color?: string): TextStyle {
   return {
-    fontFamily: FONT.regular,
+    ...FACE.regular,
     fontSize: theme.font(size),
-    lineHeight: theme.font(size) * 1.45,
+    lineHeight: theme.font(size) * 1.4,
     color: color ?? theme.chrome.ink,
   };
 }
@@ -105,7 +112,7 @@ export function bodyStyle(theme: Theme, size = 16, color?: string): TextStyle {
 /** Tabular figures so numbers do not jitter as they change. */
 export function numberStyle(theme: Theme, size = 16, color?: string): TextStyle {
   return {
-    fontFamily: FONT.heavy,
+    ...FACE.rounded,
     fontSize: theme.font(size),
     fontVariant: ['tabular-nums'],
     color: color ?? theme.chrome.ink,

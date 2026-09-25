@@ -1,18 +1,18 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { LayoutChangeEvent, ScrollView, View } from 'react-native';
 
-import { Fingerboard, FingerboardScaleNote, FingerboardStringLabels } from '@/components/Fingerboard';
 import {
-  Callout, CentsStill, FingerKey, HighwayStill, TabStill, TapeTable,
-} from '@/components/tutorial/diagrams';
-import { PressableRow } from '@/components/ui/controls';
-import { Body, Kicker, Label, Num, Row, Rule, Stack, Title } from '@/components/ui/primitives';
-import { Screen, ScreenHeader } from '@/components/ui/Screen';
-import { stopDistanceMm, STRING_LENGTH_MM } from '@/domain/cello';
-import { useSettings } from '@/state/settings';
-import { useTheme } from '@/theme/ThemeProvider';
+  Fingerboard, FingerboardScaleNote, FingerboardStringLabels, Callout, CentsStill, FingerKey,
+  HighwayStill, TabStill, TapeTable, PressableRow, Body, Kicker, Label, Num, Row, Rule, Stack,
+  Title, Screen, ScreenHeader,
+} from '@components';
+import { stopDistanceMm, STRING_LENGTH_MM } from '@domain';
+import { useTapeSettings } from '@state';
+import { useTheme } from '@theme';
 
-const SECTIONS = [
+type SectionId = 'nut' | 'numbers' | 'first' | 'tab' | 'highway' | 'score' | 'cents';
+
+const SECTIONS: readonly { id: SectionId; label: string }[] = [
   { id: 'nut', label: 'The nut is zero' },
   { id: 'numbers', label: 'The numbers are fingers' },
   { id: 'first', label: 'Your tapes' },
@@ -20,9 +20,7 @@ const SECTIONS = [
   { id: 'highway', label: 'Reading Highway' },
   { id: 'score', label: 'Reading Score' },
   { id: 'cents', label: 'The cents rail' },
-] as const;
-
-type SectionId = (typeof SECTIONS)[number]['id'];
+];
 
 /**
  * Tutorial.
@@ -36,7 +34,7 @@ type SectionId = (typeof SECTIONS)[number]['id'];
 export default function TutorialScreen() {
   const theme = useTheme();
   const { chrome } = theme;
-  const { settings } = useSettings();
+  const { tapeSets } = useTapeSettings();
 
   const scrollRef = useRef<ScrollView>(null);
   const offsets = useRef<Partial<Record<SectionId, number>>>({});
@@ -52,7 +50,7 @@ export default function TutorialScreen() {
     if (y !== undefined) scrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true });
   }, []);
 
-  const [firstSet] = settings.tapeSets;
+  const [firstSet] = tapeSets;
   const wide = !theme.scale.compact;
 
   return (
@@ -122,7 +120,7 @@ export default function TutorialScreen() {
                 <Fingerboard
                   height={theme.s(300)}
                   maxMm={460}
-                  tapeSets={settings.tapeSets}
+                  tapeSets={tapeSets}
                   gutter={54}
                 />
                 <FingerboardStringLabels gutter={54} />

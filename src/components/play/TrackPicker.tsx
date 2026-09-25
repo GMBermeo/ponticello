@@ -1,13 +1,15 @@
 import { useMemo } from 'react';
 import { View } from 'react-native';
 
-import { Button, PressableRow, Stepper } from '@/components/ui/controls';
-import { Badge, Body, Kicker, Label, Row, Stack, Title } from '@/components/ui/primitives';
-import { ArrangementLevel, ARRANGEMENT_PROFILES } from '@/domain/arrangement';
-import { midiToPitchName } from '@/domain/cello';
-import { CelloPartOption, nearestWorkableOctave, TrackChoice } from '@/domain/trackPicker';
-import { ResolvedCelloLine } from '@/state/usePiece';
-import { useTheme } from '@/theme/ThemeProvider';
+import {
+  Button, PressableRow, Stepper, Badge, Body, Kicker, Label, Row, Stack, Title,
+} from '../ui';
+import {
+  ArrangementLevel, ARRANGEMENT_PROFILES, midiToPitchName, CelloPartOption, nearestWorkableOctave,
+  TrackChoice,
+} from '@domain';
+import { ResolvedCelloLine } from '@state';
+import { useTheme } from '@theme';
 
 /**
  * Which part of the song you play, and where it sits.
@@ -200,11 +202,10 @@ function OctaveControl({ option, choice, onChange, level }: {
     // refused octave cannot be reached even if the workable set has a gap in it.
     const nextDown = [...workable].reverse().find((value) => value < choice.octaves);
     const nextUp = workable.find((value) => value > choice.octaves);
-    const beyond = nextDown === undefined
-      ? option.octaves.find((candidate) => candidate.octaves === choice.octaves - 1)
-      : nextUp === undefined
-        ? option.octaves.find((candidate) => candidate.octaves === choice.octaves + 1)
-        : undefined;
+    const octaveAt = (offset: number) => option.octaves.find((candidate) => candidate.octaves === choice.octaves + offset);
+    let beyond: CelloPartOption['octaves'][number] | undefined;
+    if (nextDown === undefined) beyond = octaveAt(-1);
+    else if (nextUp === undefined) beyond = octaveAt(1);
     return {
       fit: option.octaves.find((candidate) => candidate.octaves === choice.octaves) ?? null,
       down: nextDown,

@@ -10,7 +10,7 @@
  * It sounds like Bach on the first attempt, which no scale does.
  */
 
-import { CelloSongScore } from '@/domain/schema';
+import { CelloSongScore } from '@domain';
 import { alternateBows, buildScore, Event, twice } from './build';
 
 /** The bar's eight-semiquaver figure; Bach writes each one twice. */

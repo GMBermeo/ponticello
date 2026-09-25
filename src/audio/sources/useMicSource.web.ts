@@ -117,9 +117,7 @@ export function useMicSource(onSamples: SampleSink, enabled: boolean): MicSource
         setOutcome({
           status: denied ? 'denied' : 'error',
           sampleRate: TARGET_SAMPLE_RATE,
-          error: denied
-            ? 'Microphone access was refused.'
-            : (cause instanceof Error ? cause.message : String(cause)),
+          error: denied ? 'Microphone access was refused.' : errorMessage(cause),
         });
       }
     }
@@ -143,4 +141,8 @@ export function useMicSource(onSamples: SampleSink, enabled: boolean): MicSource
     error: enabled ? outcome.error : null,
     live: status === 'running',
   };
+}
+
+function errorMessage(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
 }

@@ -1,6 +1,6 @@
 import { chroma, transpose } from '@tonaljs/note';
 import { CELLO_CHORD_LIBRARY, CELLO_CHORD_ROOTS, CELLO_CHORD_TYPES } from './celloChords';
-import type { CelloChordType } from './celloChords';
+import type { CelloChordType } from './chords';
 
 export const CHORD_SCALES = [
   { id: 'all', label: 'All scales', intervals: [] },

@@ -167,6 +167,60 @@ describe('cello chord diagrams', () => {
     expect(() => chordDiagramModel(chord, { nextChord, nextVoicingIndex: 999 })).toThrow();
   });
 
+  describe('all positions', () => {
+    const noteAt = (string: 'C' | 'G' | 'D' | 'A', semitones: number) => (OPEN_STRING_MIDI[string] + semitones) % 12;
+
+    it('marks every stop of every chord tone up to the drawn octave, outside the shape', () => {
+      const chord = getCelloChord('F');
+      const model = chordDiagramModel(chord, { allPositions: true });
+      const pitchClasses = new Set(chord.tones.map((tone) => tone.pitchClass));
+      const expected = STRING_ORDER.flatMap((string) =>
+        Array.from({ length: 13 }, (_, semitones) => ({ string, semitones }))
+          .filter(({ semitones }) => pitchClasses.has(noteAt(string, semitones)))
+          .filter(({ semitones }) => !model.markers.some(({ note }) => note.string === string && note.semitones === semitones)));
+      expect(model.toneMarkers.map(({ string, semitones }) => ({ string, semitones }))).toEqual(expected);
+      for (const marker of model.toneMarkers) {
+        expect(marker.tone.pitchClass).toBe(noteAt(marker.string, marker.semitones));
+      }
+    });
+
+    it('finds the F on the C string and the E and F high on the G string', () => {
+      const model = chordDiagramModel(getCelloChord('F'), { allPositions: true });
+      const spots = new Set([...model.toneMarkers, ...model.markers.map(({ note }) => note)]
+        .map(({ string, semitones }) => `${string}${semitones}`));
+      expect(spots.has('C5')).toBe(true);   // F on the C string
+      expect(spots.has('G10')).toBe(true);  // F on the G string, fourth position
+      expect(spots.has('C4')).toBe(false);  // E is not in F major
+    });
+
+    it('draws the next chord everywhere too, ringing the notes both chords share', () => {
+      const chord = getCelloChord('C');
+      const nextChord = getCelloChord('F');
+      const model = chordDiagramModel(chord, { allPositions: true, nextChord });
+      const nextPitchClasses = new Set(nextChord.tones.map((tone) => tone.pitchClass));
+      expect(model.nextToneMarkers.length).toBeGreaterThan(0);
+      for (const marker of model.nextToneMarkers) {
+        expect(nextPitchClasses.has(marker.tone.pitchClass)).toBe(true);
+        expect(model.ghostMarkers.some(({ note }) => note.string === marker.string && note.semitones === marker.semitones)).toBe(false);
+      }
+      // C is in both C and F major: shared on both sides of the change.
+      expect(model.nextToneMarkers.filter((marker) => marker.tone.name === 'C').every((marker) => marker.shared)).toBe(true);
+      expect(model.nextToneMarkers.filter((marker) => marker.tone.name === 'F').every((marker) => !marker.shared)).toBe(true);
+      expect(celloChordSvg(chord, { allPositions: true, nextChord })).toContain('every position of F');
+    });
+
+    it('is off by default, and scale notes never double up on a chord tone', () => {
+      const chord = getCelloChord('C');
+      const plain = chordDiagramModel(chord);
+      expect(plain.toneMarkers).toHaveLength(0);
+      expect(plain.nextToneMarkers).toHaveLength(0);
+      const both = chordDiagramModel(chord, { allPositions: true, scaleKey: 'C' });
+      for (const marker of both.scaleMarkers) {
+        expect(both.toneMarkers.some((tone) => tone.string === marker.string && tone.semitones === marker.semitones)).toBe(false);
+      }
+    });
+  });
+
   it('matches saved tape semitones, keeps roots square and numbers legible', () => {
     const palette = { blue: '#0000ff', yellow: '#ffff00', green: '#00ff00', red: '#ff0000', orange: '#ff8800', white: '#ffffff' };
     const colors = chordTapeMarkerColors(DEFAULT_TAPE_SETS, palette);
@@ -188,8 +242,8 @@ describe('cello chord diagrams', () => {
       const model = chordDiagramModel(chord);
       const svg = celloChordSvg(chord);
       const roots = model.markers.filter((m) => m.note.tone.isRoot).length;
-      expect((svg.match(/<rect /g) ?? []).length).toBe(roots);
-      expect((svg.match(/<circle /g) ?? []).length).toBe(model.markers.length - roots);
+      expect(svg.match(/<rect /g) ?? []).toHaveLength(roots);
+      expect(svg.match(/<circle /g) ?? []).toHaveLength(model.markers.length - roots);
       expect(svg).not.toMatch(/NaN|undefined/);
       expect(svg).toContain('aria-label=');
     }

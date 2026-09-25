@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { BackingPart } from '@/domain/backing';
+import { BackingPart } from '../backing';
 import {
   clipToLoop, loopBudget, loopOffsetSeconds, MAX_RENDER_SECONDS, practiceLoop,
-} from '@/domain/loop';
-import { CelloSongScore } from '@/domain/schema';
-import { inflateBacking, inflateScore } from '@/scores/bundledSongs';
-import { COMPACT_SCORES } from '@/scores';
-import { LIBRARY_EDITION } from '@/scores/libraryEdition';
+} from '../loop';
+import { CelloSongScore } from '../schema';
+import { inflateBacking, inflateScore, COMPACT_SCORES, LIBRARY_EDITION } from '@scores';
 
 /** Size thresholds describe the full library; the free edition ships a dozen pieces. */
 const FULL_LIBRARY = LIBRARY_EDITION.id === 'full';
@@ -74,7 +72,7 @@ describe('practiceLoop', () => {
 
   it('floors the tempo so a stepper held at zero cannot ask for infinite audio', () => {
     const loop = practiceLoop(scoreOf(2), { loopFromBar: 1, loopToBar: 2, tempoPercent: 0 });
-    expect(loop.tempoScale).toBe(0.1);
+    expect(loop.tempoScale).toBeCloseTo(0.1, 10);
     expect(Number.isFinite(loop.realDurationMs)).toBe(true);
   });
 

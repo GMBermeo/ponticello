@@ -9,7 +9,6 @@ import {
   ArrangeMidiOptions,
   ArrangeScoreOptions,
   ArrangementLevel,
-  ArrangementRange,
   ArrangementSourceKind,
 } from './profiles';
 import { bassLine, harmonicGuide, sourceKind } from './harmonicBass';
@@ -144,55 +143,74 @@ export function scoreMidiNotes(score: CelloSongScore): MidiNote[] {
   }));
 }
 
-/** Derive a difficulty level from one stored full line without duplicating JSON. */
-export function arrangeScoreForLevel(
-  score: CelloSongScore, level: ArrangementLevel, options: ArrangeScoreOptions = {},
-): CelloSongScore {
-  if (score.notes.length === 0) return score;
+type ArrangementRole = 'roots' | 'bass' | 'melody';
+type PreparedLine = ReturnType<typeof preparePracticeLine>['fit'];
+type ArrangedEvents = { fit: PreparedLine; events: RawNoteEvent[] };
 
+/** Arranges a line for the level and clips it to the score's length. */
+function prepareEvents(input: readonly MidiNote[], level: ArrangementLevel, score: CelloSongScore, totalMs: number): ArrangedEvents {
+  const { fit, notes: arranged } = preparePracticeLine(input, level, ARRANGEMENT_PROFILES[level].range, score.metadata.bpm);
+  const events: RawNoteEvent[] = arranged.map((note) => ({
+    midiNumber: note.midiNumber,
+    startTimeMs: note.startTimeMs,
+    durationMs: Math.max(1, Math.min(note.durationMs, totalMs - note.startTimeMs)),
+  })).filter((note) => note.durationMs > 0 && note.startTimeMs < totalMs);
+  return { fit, events };
+}
+
+/** A score seen as a one-track MIDI file, so the harmonic guide can read it. */
+function scoreAsParsedMidi(score: CelloSongScore, notes: MidiNote[], totalMs: number): ParsedMidi {
+  return {
+    notes,
+    bpm: score.metadata.bpm,
+    timeSignature: score.measures[0]?.timeSignature ?? [4, 4],
+    durationMs: totalMs,
+    tracks: [{
+      index: 0, name: 'Score', program: 42, channels: [0], noteCount: notes.length,
+      lowestMidi: 36, highestMidi: 81, isPercussion: false,
+    }],
+  };
+}
+
+/** The stored guide or bass line the level asks for, when one was supplied. */
+function offeredLine(level: ArrangementLevel, options: ArrangeScoreOptions): ArrangeScoreOptions['guide'] {
   const profile = ARRANGEMENT_PROFILES[level];
-  const totalMs = scoreDurationMs(score);
+  if (profile.prefersGuide) return options.guide;
+  return profile.prefersBass ? options.bass : undefined;
+}
 
-  const prepare = (input: readonly MidiNote[], range: ArrangementRange) => {
-    const { fit, notes: arranged } = preparePracticeLine(input, level, range, score.metadata.bpm);
-    const events: RawNoteEvent[] = arranged.map((note) => ({
-      midiNumber: note.midiNumber,
-      startTimeMs: note.startTimeMs,
-      durationMs: Math.max(1, Math.min(note.durationMs, totalMs - note.startTimeMs)),
-    })).filter((note) => note.durationMs > 0 && note.startTimeMs < totalMs);
-    return { fit, events };
-  };
+/** Without a usable stored line, the score itself is arranged — through a derived guide on guide levels. */
+function arrangeFromScore(score: CelloSongScore, level: ArrangementLevel, totalMs: number): ArrangedEvents {
+  const source = scoreMidiNotes(score);
+  const input = ARRANGEMENT_PROFILES[level].prefersGuide
+    ? harmonicGuide(scoreAsParsedMidi(score, source, totalMs), totalMs)
+    : source;
+  return prepareEvents(input, level, score, totalMs);
+}
 
-  const offered = profile.prefersGuide ? options.guide
-    : profile.prefersBass ? options.bass : undefined;
-  const accompaniment = offered?.length
-    ? prepare(offered.map((note) => ({ ...note, track: 0, channel: 0, velocity: 112 })), profile.range)
-    : null;
+function arrangementRole(level: ArrangementLevel, usedStoredLine: boolean): ArrangementRole {
+  const profile = ARRANGEMENT_PROFILES[level];
+  if (profile.prefersGuide) return 'roots';
+  return profile.prefersBass && usedStoredLine ? 'bass' : 'melody';
+}
 
-  const fallback = () => {
-    const source = scoreMidiNotes(score);
-    if (!profile.prefersGuide) return prepare(source, profile.range);
-    const derived = harmonicGuide({ notes: source, bpm: score.metadata.bpm,
-      timeSignature: score.measures[0]?.timeSignature ?? [4, 4], durationMs: totalMs,
-      tracks: [{ index: 0, name: 'Score', program: 42, channels: [0], noteCount: source.length,
-        lowestMidi: 36, highestMidi: 81, isPercussion: false }] }, totalMs);
-    return prepare(derived, profile.range);
-  };
-  const { fit: fitted, events } = accompaniment?.events.length ? accompaniment : fallback();
-  const guide = profile.prefersGuide;
-  const role = guide ? 'roots' : profile.prefersBass && accompaniment?.events.length ? 'bass' : 'melody';
+function measureIndexAt(score: CelloSongScore, timeMs: number): number {
+  return Math.max(0, score.measures.findIndex((measure) =>
+    timeMs >= measure.startBarTimeMs && timeMs < measure.startBarTimeMs + measure.durationMs));
+}
 
-  const states: CelloState[] = seatLine(events, { closedFrameOnly: profile.closedFrameOnly });
+type NoteBuild = { score: CelloSongScore; level: ArrangementLevel; role: ArrangementRole; states: readonly CelloState[] };
+
+/** Fingered notes for the arranged events, carrying articulation over from the melody where it is the melody. */
+function arrangedNotes(events: readonly RawNoteEvent[], build: NoteBuild): CelloNote[] {
+  const { score, level, role, states } = build;
   const originalsByStart = new Map<number, CelloNote>();
   for (const note of score.notes) if (!originalsByStart.has(note.startTimeMs)) originalsByStart.set(note.startTimeMs, note);
-
-  const notes: CelloNote[] = events.map((event, index) => {
+  const melody = role === 'melody';
+  return events.map((event, index) => {
     const state = states[index];
     if (!state) throw new Error(`No fingering was found for arranged note ${index + 1}.`);
     const original = originalsByStart.get(event.startTimeMs);
-    const measureIndex = Math.max(0, score.measures.findIndex((measure) =>
-      event.startTimeMs >= measure.startBarTimeMs
-      && event.startTimeMs < measure.startBarTimeMs + measure.durationMs));
     return {
       id: `${score.id}-${level.toLowerCase()}-${index + 1}`,
       startTimeMs: Math.round(event.startTimeMs),
@@ -204,22 +222,41 @@ export function arrangeScoreForLevel(
       finger: state.finger,
       position: state.position,
       extension: state.extension,
-      articulation: role !== 'melody' ? 'accent' : original?.articulation ?? 'arco',
+      articulation: melody ? original?.articulation ?? 'arco' : 'accent',
       tie: false,
-      measureIndex,
+      measureIndex: measureIndexAt(score, event.startTimeMs),
       bowDirection: index % 2 === 0 ? 'down' : 'up',
-      isHarmonic: role === 'melody' ? original?.isHarmonic : undefined,
+      isHarmonic: melody ? original?.isHarmonic : undefined,
     };
   });
+}
 
-  const changed = notes.length !== score.notes.length || fitted.octaveShift !== 0 || fitted.foldedNotes > 0;
-  const detail = role === 'bass'
-    ? `${level} line: a simple bass accompaniment in first position, with rests for difficult changes.`
-    : guide
-      ? `${level} line: ${notes.length} bass anchors in the low register, drawn from the song's own harmony.`
-      : changed
-        ? `${level} line: ${notes.length}/${score.notes.length} attacks, ${profile.range.low}–${profile.range.high} MIDI.`
-        : `${level} line: the full part already fits this level.`;
+function describeArrangement(level: ArrangementLevel, role: ArrangementRole, noteCount: number, score: CelloSongScore, fit: PreparedLine): string {
+  if (role === 'bass') return `${level} line: a simple bass accompaniment in first position, with rests for difficult changes.`;
+  if (role === 'roots') return `${level} line: ${noteCount} bass anchors in the low register, drawn from the song's own harmony.`;
+  const changed = noteCount !== score.notes.length || fit.octaveShift !== 0 || fit.foldedNotes > 0;
+  if (!changed) return `${level} line: the full part already fits this level.`;
+  const { range } = ARRANGEMENT_PROFILES[level];
+  return `${level} line: ${noteCount}/${score.notes.length} attacks, ${range.low}–${range.high} MIDI.`;
+}
+
+/** Derive a difficulty level from one stored full line without duplicating JSON. */
+export function arrangeScoreForLevel(
+  score: CelloSongScore, level: ArrangementLevel, options: ArrangeScoreOptions = {},
+): CelloSongScore {
+  if (score.notes.length === 0) return score;
+
+  const profile = ARRANGEMENT_PROFILES[level];
+  const totalMs = scoreDurationMs(score);
+  const offered = offeredLine(level, options);
+  const stored = offered?.length
+    ? prepareEvents(offered.map((note) => ({ ...note, track: 0, channel: 0, velocity: 112 })), level, score, totalMs)
+    : null;
+  const usedStoredLine = !!stored?.events.length;
+  const { fit, events } = stored && usedStoredLine ? stored : arrangeFromScore(score, level, totalMs);
+  const role = arrangementRole(level, usedStoredLine);
+  const states = seatLine(events, { closedFrameOnly: profile.closedFrameOnly });
+  const notes = arrangedNotes(events, { score, level, role, states });
 
   return {
     ...score,
@@ -227,7 +264,7 @@ export function arrangeScoreForLevel(
       ...score.metadata,
       difficulty: level,
       arrangementRole: role,
-      teaches: `${detail} ${score.metadata.teaches}`,
+      teaches: `${describeArrangement(level, role, notes.length, score, fit)} ${score.metadata.teaches}`,
     },
     notes,
   };

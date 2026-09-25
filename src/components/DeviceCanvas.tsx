@@ -1,9 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
-import { CANVAS, FOLD5_PX, ViewportContext } from '@/theme/scale';
-import { FONT, PAPER } from '@/theme/tokens';
-import { useTheme } from '@/theme/ThemeProvider';
+import { CANVAS, FOLD5_PX, ViewportContext, FACE, PAPER, useTheme } from '@theme';
 
 export type WebPreviewMode = 'fullscreen' | 'fold5';
 
@@ -249,13 +247,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   pillText: {
-    fontFamily: FONT.semibold,
+    ...FACE.semibold,
     fontSize: 11,
     color: '#2b302a',
     letterSpacing: 0.1,
   },
   pillHint: {
-    fontFamily: FONT.regular,
+    ...FACE.regular,
     fontSize: 10,
     color: '#70776d',
     backgroundColor: '#ebede8',
@@ -293,13 +291,13 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   pillTextAccent: {
-    fontFamily: FONT.semibold,
+    ...FACE.semibold,
     fontSize: 12,
     color: '#ffffff',
     letterSpacing: 0.2,
   },
   pillHintAccent: {
-    fontFamily: FONT.regular,
+    ...FACE.regular,
     fontSize: 10,
     color: '#b0b8ac',
     backgroundColor: '#2f372e',

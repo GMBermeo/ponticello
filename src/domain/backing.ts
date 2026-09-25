@@ -15,6 +15,7 @@ import { midiToPitchName, OPEN_STRING_MIDI } from './cello';
 import { clipToLoop, PracticeLoop } from './loop';
 import { MidiNote, MidiTrack } from './midi';
 import { CelloSongScore } from './schema';
+import { bestTriad, triadTones, weighPitchClasses, weightAt } from './harmony';
 
 export type PartRole = 'solo' | 'accompaniment';
 
@@ -150,7 +151,7 @@ export function tonicPitchClass(keySignature: string): number {
 }
 
 export function isMinorKey(keySignature: string): boolean {
-  return /minor|min\b|m$/i.test(keySignature.trim());
+  return /(?:minor|min\b|m$)/i.test(keySignature.trim());
 }
 
 /**
@@ -174,24 +175,6 @@ function lowestPitchClass(score: CelloSongScore, fromMs: number, toMs: number): 
   return lowest === null ? null : lowest % 12;
 }
 
-/** Weight of each pitch class in a time window, by how long it sounds. */
-function pitchClassWeights(score: CelloSongScore, fromMs: number, toMs: number): number[] {
-  const weights: number[] = new Array(12).fill(0);
-  for (const note of score.notes) {
-    const start = Math.max(note.startTimeMs, fromMs);
-    const end = Math.min(note.startTimeMs + note.durationMs, toMs);
-    if (end <= start) continue;
-    const slot = ((note.midiNumber % 12) + 12) % 12;
-    weights[slot] = (weights[slot] ?? 0) + (end - start);
-  }
-  return weights;
-}
-
-/** Total read of the twelve-slot pitch-class table. */
-function weightAt(weights: readonly number[], pitchClass: number): number {
-  return weights[((pitchClass % 12) + 12) % 12] ?? 0;
-}
-
 export interface InferredChord {
   root: number;
   minor: boolean;
@@ -213,51 +196,58 @@ export interface InferredChord {
 export function inferChord(
   score: CelloSongScore, fromMs: number, toMs: number, fallbackRoot: number, fallbackMinor: boolean,
 ): InferredChord {
-  const weights = pitchClassWeights(score, fromMs, toMs);
+  const { weights } = weighPitchClasses(score.notes, { window: { fromMs, toMs } });
   const total = weights.reduce((a, b) => a + b, 0);
-  const bass = lowestPitchClass(score, fromMs, toMs);
   if (total === 0) {
-    const [r, t, f] = fallbackMinor ? [0, 3, 7] : [0, 4, 7];
-    return {
-      root: fallbackRoot,
-      minor: fallbackMinor,
-      tones: [(fallbackRoot + r) % 12, (fallbackRoot + t) % 12, (fallbackRoot + f) % 12],
-      confidence: 0,
-    };
+    return { root: fallbackRoot, minor: fallbackMinor, tones: triadTones(fallbackRoot, fallbackMinor), confidence: 0 };
   }
+  const best = bestTriad({ weights, total }, {
+    bassPc: lowestPitchClass(score, fromMs, toMs),
+    bassBonus: BASS_ROOT_BONUS,
+    fallback: { root: fallbackRoot, minor: fallbackMinor, score: -1 },
+  });
+  const tones = triadTones(best.root, best.minor);
+  const accounted = tones.reduce((sum, tone) => sum + weightAt(weights, tone), 0);
+  return { root: best.root, minor: best.minor, tones, confidence: Math.min(1, accounted / total) };
+}
 
-  let best = { root: fallbackRoot, minor: fallbackMinor, score: -1 };
-  for (let root = 0; root < 12; root++) {
-    for (const minor of [false, true]) {
-      const third = (root + (minor ? 3 : 4)) % 12;
-      const fifth = (root + 7) % 12;
-      // The root carries the most information about which chord this is, the
-      // third decides its quality, and the fifth barely distinguishes anything.
-      let value = weightAt(weights, root) * 1.6
-        + weightAt(weights, third) * 1.2
-        + weightAt(weights, fifth) * 0.6;
+/**
+ * The lowest note is the single strongest cue for the root — it is why
+ * figured bass works at all. Without this the opening of the Bach reads as
+ * B minor: B and D each sound six times against a G that sounds twice, but
+ * that G is the bass and the bar is plainly G major.
+ */
+const BASS_ROOT_BONUS = 0.5;
 
-      // The lowest note is the single strongest cue for the root — it is why
-      // figured bass works at all. Without this the opening of the Bach reads
-      // as B minor: B and D each sound six times against a G that sounds
-      // twice, but that G is the bass and the bar is plainly G major.
-      if (bass !== null && root === bass) value += total * 0.5;
-
-      if (value > best.score) best = { root, minor, score: value };
-    }
-  }
-
-  const third = (best.root + (best.minor ? 3 : 4)) % 12;
-  const fifth = (best.root + 7) % 12;
+/** Tonic and fifth only. Adding the third would fix the chord's quality and defeat the point — a drone is a reference, not a harmony. */
+function dronePart(scoreId: string, measures: readonly CelloSongScore['measures'][number][], tonic: number): BackingPart {
+  const durationMs = measures.reduce((sum, m) => sum + m.durationMs, 0);
+  const root = inBassRegister(tonic);
   return {
-    root: best.root,
-    minor: best.minor,
-    tones: [best.root, third, fifth],
-    confidence: Math.min(
-      1,
-      (weightAt(weights, best.root) + weightAt(weights, third) + weightAt(weights, fifth)) / total,
-    ),
+    id: `${scoreId}-drone`,
+    name: `Drone on ${midiToPitchName(root)}`,
+    instrument: 'drone',
+    role: 'accompaniment',
+    gain: 0.4,
+    muted: false,
+    notes: [root, root + 7].map((midiNumber) => ({ midiNumber, startTimeMs: 0, durationMs, velocity: 0.5 })),
   };
+}
+
+function heldChord(voicing: readonly number[], startTimeMs: number, barMs: number): BackingNote[] {
+  return voicing.map((midiNumber) => ({ midiNumber, startTimeMs, durationMs: barMs * 0.98, velocity: 0.45 }));
+}
+
+/** One chord per beat. Beat one carries the bar; the rest step back so the pulse has shape. */
+function pulsedChord(voicing: readonly number[], startTimeMs: number, measure: CelloSongScore['measures'][number]): BackingNote[] {
+  const beats = measure.timeSignature[0];
+  const beatMs = measure.durationMs / beats;
+  return Array.from({ length: beats }, (_, beat) => voicing.map((midiNumber) => ({
+    midiNumber,
+    startTimeMs: startTimeMs + beat * beatMs,
+    durationMs: beatMs * 0.7,
+    velocity: beat === 0 ? 0.5 : 0.32,
+  }))).flat();
 }
 
 export interface AccompanimentOptions {
@@ -289,65 +279,20 @@ export function generateAccompaniment(
   const tonic = tonicPitchClass(score.metadata.keySignature);
   const minor = isMinorKey(score.metadata.keySignature);
 
-  if (style === 'drone') {
-    const durationMs = measures.reduce((sum, m) => sum + m.durationMs, 0);
-    const root = inBassRegister(tonic);
-    return [{
-      id: `${score.id}-drone`,
-      name: `Drone on ${midiToPitchName(root)}`,
-      instrument: 'drone',
-      role: 'accompaniment',
-      gain: 0.4,
-      muted: false,
-      // Tonic and fifth only. Adding the third would fix the chord's quality
-      // and defeat the point — a drone is a reference, not a harmony.
-      notes: [root, root + 7].map((midiNumber) => ({
-        midiNumber,
-        startTimeMs: 0,
-        durationMs,
-        velocity: 0.5,
-      })),
-    }];
-  }
+  if (style === 'drone') return [dronePart(score.id, measures, tonic)];
 
-  const notes: BackingNote[] = [];
-  for (const measure of measures) {
+  const notes: BackingNote[] = measures.flatMap((measure) => {
     const barStart = measure.startBarTimeMs;
-    const barEnd = barStart + measure.durationMs;
-    const chord = inferChord(score, barStart, barEnd, tonic, minor);
-
+    const chord = inferChord(score, barStart, barStart + measure.durationMs, tonic, minor);
     const voicing = [
       inBassRegister(chord.tones[0]),
       inBassRegister(chord.tones[1]) + 12,
       inBassRegister(chord.tones[2]) + 12,
     ];
-
-    if (style === 'chords') {
-      for (const midiNumber of voicing) {
-        notes.push({
-          midiNumber,
-          startTimeMs: barStart - origin,
-          durationMs: measure.durationMs * 0.98,
-          velocity: 0.45,
-        });
-      }
-      continue;
-    }
-
-    const beats = measure.timeSignature[0];
-    const beatMs = measure.durationMs / beats;
-    for (let beat = 0; beat < beats; beat++) {
-      for (const midiNumber of voicing) {
-        notes.push({
-          midiNumber,
-          startTimeMs: barStart - origin + beat * beatMs,
-          durationMs: beatMs * 0.7,
-          // Beat one carries the bar; the rest step back so the pulse has shape.
-          velocity: beat === 0 ? 0.5 : 0.32,
-        });
-      }
-    }
-  }
+    return style === 'chords'
+      ? heldChord(voicing, barStart - origin, measure.durationMs)
+      : pulsedChord(voicing, barStart - origin, measure);
+  });
 
   return [{
     id: `${score.id}-${style}`,

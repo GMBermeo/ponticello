@@ -1,0 +1,5 @@
+# Only the product site is published; the rest of docs/ is internal.
+cello-arrangement-audit.*
+visual-review
+wayfinder
+README.md

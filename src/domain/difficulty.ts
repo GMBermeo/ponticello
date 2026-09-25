@@ -31,8 +31,6 @@ import { CelloString, POSITION_ORDER, stopDistanceMm } from './cello';
 import { CelloState, detectShifts, handSemitones, RawNoteEvent } from './fingering';
 import { DifficultyTier } from './schema';
 
-export type { DifficultyTier };
-
 export const DIFFICULTY_TIERS: readonly DifficultyTier[] =
   ['Beginner', 'Intermediate', 'Advanced', 'Expert'] as const;
 
@@ -183,6 +181,44 @@ function handMm(state: CelloState): number {
   return stopDistanceMm(handSemitones(state));
 }
 
+/** Adjacent strings are one apart; C to A is three. */
+const STRING_INDEX: Record<CelloString, number> = { C: 0, G: 1, D: 2, A: 3 };
+
+type MotionTally = { travelMm: number; maxShiftMm: number; wideCrossings: number };
+
+/** How far the hand travels between consecutive notes, its biggest single move, and how often the bow skips a string. */
+function tallyMotion(states: readonly CelloState[]): MotionTally {
+  const tally: MotionTally = { travelMm: 0, maxShiftMm: 0, wideCrossings: 0 };
+  for (let i = 1; i < states.length; i++) {
+    const state = states[i];
+    const previous = states[i - 1];
+    // Cannot fire — `i` is bounded by `states.length` — but the compiler cannot
+    // see that under `noUncheckedIndexedAccess`.
+    if (!state || !previous) continue;
+    // An open string does not move the hand, so it cannot contribute travel.
+    if (state.finger !== '0' && previous.finger !== '0') {
+      const moved = Math.abs(handMm(state) - handMm(previous));
+      tally.travelMm += moved;
+      tally.maxShiftMm = Math.max(tally.maxShiftMm, moved);
+    }
+    if (Math.abs(STRING_INDEX[state.string] - STRING_INDEX[previous.string]) >= 2) tally.wideCrossings++;
+  }
+  return tally;
+}
+
+type HandPlaceTally = { upper: number; thumb: number; extensions: number };
+
+/** Notes played in thumb position, above fourth position, or with an extended hand. */
+function tallyHandPlaces(states: readonly CelloState[]): HandPlaceTally {
+  const tally: HandPlaceTally = { upper: 0, thumb: 0, extensions: 0 };
+  for (const state of states) {
+    if (state.position === 'Thumb') tally.thumb++;
+    else if (POSITION_ORDER[state.position] >= 5) tally.upper++;
+    if (state.extension !== 'none') tally.extensions++;
+  }
+  return tally;
+}
+
 export function measure(
   notes: readonly RawNoteEvent[], states: readonly CelloState[],
 ): DifficultyFactors {
@@ -197,42 +233,8 @@ export function measure(
   if (!last) return empty;
   const seconds = Math.max(1, (last.startTimeMs + last.durationMs) / 1000);
 
-  let travelMm = 0;
-  let maxShiftMm = 0;
-  let wideCrossings = 0;
-  let upper = 0;
-  let thumb = 0;
-  let extensions = 0;
-
-  /** Adjacent strings are one apart; C to A is three. */
-  const stringIndex: Record<CelloString, number> = { C: 0, G: 1, D: 2, A: 3 };
-
-  for (let i = 0; i < states.length; i++) {
-    const state = states[i];
-    // The guards below cannot fire — `i` is bounded by `states.length` — but
-    // the compiler cannot see that under `noUncheckedIndexedAccess`, and
-    // skipping a note is the honest answer if the invariant is ever broken.
-    if (!state) continue;
-
-    const order = POSITION_ORDER[state.position];
-    if (state.position === 'Thumb') thumb++;
-    else if (order >= 5) upper++;
-    if (state.extension !== 'none') extensions++;
-
-    if (i === 0) continue;
-    const previous = states[i - 1];
-    if (!previous) continue;
-
-    // An open string does not move the hand, so it cannot contribute travel.
-    if (state.finger !== '0' && previous.finger !== '0') {
-      const moved = Math.abs(handMm(state) - handMm(previous));
-      travelMm += moved;
-      maxShiftMm = Math.max(maxShiftMm, moved);
-    }
-    if (Math.abs(stringIndex[state.string] - stringIndex[previous.string]) >= 2) {
-      wideCrossings++;
-    }
-  }
+  const { travelMm, maxShiftMm, wideCrossings } = tallyMotion(states);
+  const { upper, thumb, extensions } = tallyHandPlaces(states);
 
   const shifts = detectShifts(notes, states);
   const hurried = shifts.filter((s) => s.preparationMs < HURRIED_MS).length;

@@ -1,25 +1,71 @@
 import { interpretSheetChord, validateChordSheet, type ChordSheet, type SheetLine } from './chordSheet';
 
+/** A line is at least one bar of four beats, and whole bars of up to four changes each. */
+const BEATS_PER_BAR = 4;
+
+type Directive = { name: string; value: string };
+
+/** `{title: Yesterday}` → `{ name: 'title', value: 'Yesterday' }`; anything else is null. */
+export function parseDirective(raw: string): Directive | null {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return null;
+  const body = trimmed.slice(1, -1);
+  const colon = body.indexOf(':');
+  if (colon <= 0) return null;
+  const name = body.slice(0, colon);
+  if (name.includes('}')) return null;
+  return { name: name.toLowerCase(), value: body.slice(colon + 1).trimStart() };
+}
+
+type InlineChords = { text: string; changes: SheetLine['changes'] };
+
+/** Strips `[C]`-style chords out of a lyric line, recording the column each one sat over. */
+export function extractInlineChords(raw: string): InlineChords {
+  let text = '';
+  const changes: SheetLine['changes'] = [];
+  let cursor = 0;
+  while (cursor < raw.length) {
+    const open = raw.indexOf('[', cursor);
+    const close = open < 0 ? -1 : raw.indexOf(']', open + 1);
+    if (close < 0) break;
+    text += raw.slice(cursor, open);
+    const symbol = raw.slice(open + 1, close);
+    if (symbol) changes.push({ symbol, column: text.length, beat: 0 });
+    else text += '[]';
+    cursor = close + 1;
+  }
+  text += raw.slice(cursor);
+  return { text, changes };
+}
+
+function isSkippable(raw: string): boolean {
+  const trimmed = raw.trim();
+  return !trimmed || trimmed.startsWith('#');
+}
+
+/** Spreads a line's changes evenly across whole bars, since ChordPro carries no timing. */
+function lyricLine(raw: string, index: number): SheetLine {
+  const { text, changes } = extractInlineChords(raw);
+  const beats = Math.max(BEATS_PER_BAR, Math.ceil(changes.length / BEATS_PER_BAR) * BEATS_PER_BAR);
+  changes.forEach((change, i) => { change.beat = i * beats / changes.length; });
+  return {
+    id: `line-${index + 1}`,
+    kind: text.trim() ? 'lyric' : 'instrumental',
+    text,
+    changes,
+    beats,
+    columns: Math.max(text.length, ...changes.map((change) => change.column + change.symbol.length)),
+  };
+}
+
 /** Local/user-supplied text. Inline [chords] avoid fragile whitespace editing. */
 export function parseChordPro(input: string, id: string): ChordSheet {
   const metadata: Record<string, string> = {};
   const lines: SheetLine[] = [];
-  for (const raw of input.replace(/\r\n?/g, '\n').split('\n')) {
-    const directive = /^\s*\{([^:}]+):\s*(.*?)\}\s*$/.exec(raw);
-    if (directive) { metadata[directive[1]!.toLowerCase()] = directive[2]!; continue; }
-    if (!raw.trim() || raw.trim().startsWith('#')) continue;
-    let text = '', previous = 0;
-    const changes: SheetLine['changes'] = [];
-    for (const match of raw.matchAll(/\[([^\]]+)\]/g)) {
-      text += raw.slice(previous, match.index);
-      changes.push({ symbol: match[1]!, column: text.length, beat: 0 });
-      previous = match.index! + match[0].length;
-    }
-    text += raw.slice(previous);
-    const beats = Math.max(4, Math.ceil(changes.length / 4) * 4);
-    changes.forEach((c, i) => { c.beat = i * beats / changes.length; });
-    lines.push({ id: `line-${lines.length + 1}`, kind: text.trim() ? 'lyric' : 'instrumental', text, changes, beats,
-      columns: Math.max(text.length, ...changes.map((c) => c.column + c.symbol.length)) });
+  for (const raw of input.replaceAll(/\r\n?/g, '\n').split('\n')) {
+    const directive = parseDirective(raw);
+    if (directive) metadata[directive.name] = directive.value;
+    else if (!isSkippable(raw)) lines.push(lyricLine(raw, lines.length));
   }
   const bpm = metadata.tempo ? Number(metadata.tempo) : null;
   const sheet: ChordSheet = {
@@ -27,7 +73,8 @@ export function parseChordPro(input: string, id: string): ChordSheet {
     key: metadata.key ?? null, bpm, bpmSource: bpm === null ? 'unknown' : 'manual', sourceUrl: '',
     instrument: 'chordpro', lyrics: 'included', timing: 'estimated', timingModel: null,
     credits: metadata.composer ? `Composed by: ${metadata.composer}` : (metadata.credits ?? null),
-    chords: [...new Set(lines.flatMap((l) => l.changes.map((c) => c.symbol)))].map((s) => interpretSheetChord(s)), lines,
+    chords: [...new Set(lines.flatMap((line) => line.changes.map((change) => change.symbol)))].map((symbol) => interpretSheetChord(symbol)),
+    lines,
   };
   validateChordSheet(sheet);
   return sheet;

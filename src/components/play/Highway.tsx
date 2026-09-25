@@ -2,13 +2,12 @@ import { memo, useMemo } from 'react';
 import { View } from 'react-native';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 
-import { CelloNote, CelloSongScore } from '@/domain/schema';
-import { DISPLAY_STRING_ORDER, OPEN_STRING_MIDI } from '@/domain/cello';
-import { TapeSet, tapeForSemitones } from '@/domain/tapes';
-import { FlowAxis } from '@/state/settings';
-import { Theme, useTheme } from '@/theme/ThemeProvider';
-import { alpha } from '@/theme/tokens';
-import { Label, Num } from '../ui/primitives';
+import {
+  CelloNote, CelloSongScore, DISPLAY_STRING_ORDER, OPEN_STRING_MIDI, TapeSet, tapeForSemitones,
+} from '@domain';
+import { FlowAxis } from '@state';
+import { Theme, useTheme, alpha } from '@theme';
+import { Label, Num } from '../ui';
 import { flowWindow, laneGeometry, timeAlongOffset, visibleSlice } from './flow';
 import { Playhead, usePlayheadPosition } from './usePlayhead';
 
@@ -282,6 +281,9 @@ const NoteCapsule = memo(function NoteCapsule({
   const stringColor = chrome.strings[note.string];
   const active = state === 'active';
   const played = state === 'played';
+  let fill = alpha(stringColor, 0.3);
+  if (active) fill = stringColor;
+  else if (played) fill = alpha(stringColor, 0.08);
 
   return (
     <View
@@ -295,7 +297,7 @@ const NoteCapsule = memo(function NoteCapsule({
         top: horizontal ? lane : along - length,
         width: horizontal ? length : laneSize,
         height: horizontal ? laneSize : length,
-        backgroundColor: active ? stringColor : alpha(stringColor, played ? 0.08 : 0.3),
+        backgroundColor: fill,
         borderWidth: theme.rule(2),
         borderColor: played ? chrome.lineSoft : stringColor,
         opacity: played ? 0.5 : 1,

@@ -2,20 +2,20 @@
   "expo": {
     "name": "Ponticello",
     "slug": "ponticello",
-    "version": "1.7.0",
+    "version": "1.8.0",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "ponticello",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon",
       "bundleIdentifier": "com.bermeo.ponticello",
-      "buildNumber": "8"
+      "buildNumber": "12"
     },
     "android": {
-      "versionCode": 10,
+      "versionCode": 12,
       "adaptiveIcon": {
-        "backgroundColor": "#f3f2f2",
+        "backgroundColor": "#2A1C9E",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -38,7 +38,7 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#f3f2f2",
+          "backgroundColor": "#0B0A14",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 148
         }
@@ -48,13 +48,14 @@
         {
           "microphonePermission": "Ponticello listens to your cello to show whether each note is in tune. Nothing is recorded and nothing leaves the device."
         }
-      ]
+      ],
+      "./plugins/withSceneLifecycle"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
     },
-    "description": "Offline intonation practice for acoustic cello, laid out for the Galaxy Z Fold 5 inner display.",
-    "backgroundColor": "#f3f2f2"
+    "description": "Offline intonation practice for acoustic cello, designed for the iPhone Duo and the Galaxy Z Fold 5.",
+    "backgroundColor": "#F2F2F7"
   }
 }

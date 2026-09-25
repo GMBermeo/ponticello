@@ -15,6 +15,7 @@
  * the open A string is a preference rather than a cliff.
  */
 
+import { frequencyToMidi } from '@domain';
 import { Decimator, RingBuffer } from './decimate';
 import { SpectralFluxGate } from './flux';
 import { McLeodPitchDetector, PitchResult } from './mpm';
@@ -332,10 +333,12 @@ export interface TunerSmoothedReading {
  * - Gentle hold duration between bow changes so the pitch readout remains stable.
  * - Instant reset when switching to a different string/note.
  */
+interface TunerSample { time: number; frequency: number; cents: number; midi: number }
+
 export class TunerPitchSmoother {
   private readonly windowMs: number;
   private readonly holdMs: number;
-  private samples: Array<{ time: number; frequency: number; cents: number; midi: number }> = [];
+  private samples: TunerSample[] = [];
   private lastVoicedTime = 0;
   private currentMidi: number | null = null;
   private smoothedCents = 0;
@@ -355,7 +358,7 @@ export class TunerPitchSmoother {
     }
 
     this.lastVoicedTime = nowMs;
-    const midi = Math.round(69 + 12 * Math.log2(frequency / 440));
+    const midi = Math.round(frequencyToMidi(frequency));
 
     // If note changed to a different pitch (> 1.5 semitones), reset window for instant response
     if (this.currentMidi !== null && Math.abs(midi - this.currentMidi) >= 2) {

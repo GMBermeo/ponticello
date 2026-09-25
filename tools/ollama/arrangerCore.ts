@@ -14,31 +14,14 @@
 import { basename } from "node:path";
 
 import {
-  CelloFinger,
-  CelloPosition,
-  CelloString,
-  midiToFrequency,
-  midiToPitchName,
-  OPEN_STRING_MIDI,
-  stopDistanceMm,
-} from "../../src/domain/cello";
-import {
-  candidateStates,
-  CelloState,
-  firstPositionFingering,
-  RawNoteEvent,
-} from "../../src/domain/fingering";
-import { detectKey } from "../../src/domain/key";
+  CelloFinger, CelloPosition, CelloString, midiToFrequency, midiToPitchName, OPEN_STRING_MIDI,
+  stopDistanceMm, candidateStates, CelloState, firstPositionFingering, RawNoteEvent, detectKey,
+  MidiNote, ParsedMidi, CelloMeasure, CelloNote, CelloSongScore, DifficultyTier,
+  measureDurationMs,
+  weighPitchClasses,
+} from "@domain";
 import { POSITION_FREEDOM_DOCTRINE } from "./benchmarkCore";
 import { CelloScoringSkill, planContext, skillMessages } from "./celloScoringSkill";
-import { MidiNote, ParsedMidi } from "../../src/domain/midi";
-import {
-  CelloMeasure,
-  CelloNote,
-  CelloSongScore,
-  DifficultyTier,
-  measureDurationMs,
-} from "../../src/domain/schema";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -147,7 +130,7 @@ export function foldToRegister(
   return m;
 }
 
-export function detectBarChord(notes: readonly MidiNote[]): {
+export interface BarChord {
   rootPc: number;
   rootName: string;
   chordName: string;
@@ -156,120 +139,216 @@ export function detectBarChord(notes: readonly MidiNote[]): {
   thirdMidi: number;
   isBassOpenString: boolean;
   celloBassDesc: string;
-} {
-  if (notes.length === 0) {
-    return {
-      rootPc: 0,
-      rootName: "C",
-      chordName: "C",
-      lowestRootMidi: 36,
-      fifthMidi: 43,
-      thirdMidi: 40,
-      isBassOpenString: true,
-      celloBassDesc: "C2 (open C string, C root)",
-    };
-  }
-  const histogram = new Array(12).fill(0);
-  for (const n of notes) {
-    const pc = ((n.midiNumber % 12) + 12) % 12;
-    // Notes in the bass register (< 60 MIDI) carry stronger harmonic foundation weight
-    const bassWeight = n.midiNumber < 48 ? 3.0 : n.midiNumber < 60 ? 2.0 : 1.0;
-    histogram[pc] += Math.max(1, n.durationMs) * bassWeight;
-  }
+}
+
+const EMPTY_BAR_CHORD: BarChord = {
+  rootPc: 0,
+  rootName: "C",
+  chordName: "C",
+  lowestRootMidi: 36,
+  fifthMidi: 43,
+  thirdMidi: 40,
+  isBassOpenString: true,
+  celloBassDesc: "C2 (open C string, C root)",
+};
+
+/** Notes in the bass register carry stronger harmonic foundation weight. */
+function registerWeight(midiNumber: number): number {
+  if (midiNumber < 48) return 3.0;
+  return midiNumber < 60 ? 2.0 : 1.0;
+}
+
+function weightedPitchClasses(notes: readonly MidiNote[]): number[] {
+  return weighPitchClasses(notes, { weightOf: (note, ms) => Math.max(1, ms) * registerWeight(note.midiNumber) }).weights;
+}
+
+type ChordIntervals = {
+  min3: boolean; maj3: boolean; sus4: boolean; dim5: boolean; p5: boolean; aug5: boolean; min7: boolean; maj7: boolean;
+};
+
+/** Which intervals above the root sound strongly enough to count, relative to the root's weight. */
+function intervalsPresent(histogram: readonly number[], rootPc: number, rootWeight: number): ChordIntervals {
+  const strong = (semitones: number, share: number) => histogram[(rootPc + semitones) % 12]! > rootWeight * share;
+  const min3 = strong(3, 0.2);
+  const maj3 = strong(4, 0.2);
+  return {
+    min3,
+    maj3,
+    sus4: !min3 && !maj3 && strong(5, 0.25),
+    dim5: strong(6, 0.25),
+    p5: strong(7, 0.2),
+    aug5: strong(8, 0.25),
+    min7: strong(10, 0.2),
+    maj7: strong(11, 0.2),
+  };
+}
+
+function majorQuality(i: ChordIntervals): string {
+  if (i.maj7) return "maj7";
+  return i.min7 ? "7" : "";
+}
+
+function chordQuality(i: ChordIntervals): string {
+  if (i.min3 && i.dim5) return "dim";
+  if (i.maj3 && i.aug5) return "aug";
+  if (i.sus4 && i.p5) return "sus4";
+  if (i.min3 && !i.maj3) return i.min7 ? "m7" : "m";
+  if (i.maj3) return majorQuality(i);
+  return i.p5 ? "5" : "";
+}
+
+function fifthOffset(i: ChordIntervals): number {
+  if (i.dim5) return 6;
+  return i.aug5 ? 8 : 7;
+}
+
+/** The finger that stops a note this many semitones above the open string, in first position. */
+function stoppingFinger(semitones: number): string {
+  if (semitones <= 1) return "half pos";
+  if (semitones === 2) return "1st finger";
+  return semitones <= 4 ? "2nd/3rd finger" : "4th finger";
+}
+
+function celloBassDescription(lowestRootMidi: number, chordName: string): string {
+  const pitch = midiToPitchName(lowestRootMidi);
+  if (lowestRootMidi === 36) return `${pitch} (open C string, ${chordName} root)`;
+  if (lowestRootMidi === 43) return `${pitch} (open G string, ${chordName} root)`;
+  const [string, open] = lowestRootMidi < 43 ? ["C", 36] : ["G", 43];
+  return `${pitch} (stopped on ${string} string ${stoppingFinger(lowestRootMidi - open)}, ${chordName} root)`;
+}
+
+export function detectBarChord(notes: readonly MidiNote[]): BarChord {
+  if (notes.length === 0) return { ...EMPTY_BAR_CHORD };
+  const histogram = weightedPitchClasses(notes);
   let bestPc = 0;
   let maxWeight = -1;
   for (let pc = 0; pc < 12; pc++) {
-    if (histogram[pc] > maxWeight) {
-      maxWeight = histogram[pc];
+    if (histogram[pc]! > maxWeight) {
+      maxWeight = histogram[pc]!;
       bestPc = pc;
     }
   }
   const rootName = PITCH_NAMES[bestPc] ?? "C";
-  const min3Pc = (bestPc + 3) % 12;
-  const maj3Pc = (bestPc + 4) % 12;
-  const sus4Pc = (bestPc + 5) % 12;
-  const dim5Pc = (bestPc + 6) % 12;
-  const p5Pc = (bestPc + 7) % 12;
-  const aug5Pc = (bestPc + 8) % 12;
-  const min7Pc = (bestPc + 10) % 12;
-  const maj7Pc = (bestPc + 11) % 12;
-
-  const hasMin3 = histogram[min3Pc] > maxWeight * 0.2;
-  const hasMaj3 = histogram[maj3Pc] > maxWeight * 0.2;
-  const hasSus4 = !hasMin3 && !hasMaj3 && histogram[sus4Pc] > maxWeight * 0.25;
-  const hasDim5 = histogram[dim5Pc] > maxWeight * 0.25;
-  const hasP5 = histogram[p5Pc] > maxWeight * 0.2;
-  const hasAug5 = histogram[aug5Pc] > maxWeight * 0.25;
-  const hasMin7 = histogram[min7Pc] > maxWeight * 0.2;
-  const hasMaj7 = histogram[maj7Pc] > maxWeight * 0.2;
-
-  let chordQuality = "";
-  if (hasMin3 && hasDim5) {
-    chordQuality = "dim";
-  } else if (hasMaj3 && hasAug5) {
-    chordQuality = "aug";
-  } else if (hasSus4 && hasP5) {
-    chordQuality = "sus4";
-  } else if (hasMin3 && !hasMaj3) {
-    chordQuality = hasMin7 ? "m7" : "m";
-  } else if (hasMaj3) {
-    chordQuality = hasMaj7 ? "maj7" : hasMin7 ? "7" : "";
-  } else if (hasP5) {
-    chordQuality = "5";
-  }
-
-  const chordName = `${rootName}${chordQuality}`;
+  const intervals = intervalsPresent(histogram, bestPc, maxWeight);
+  const chordName = `${rootName}${chordQuality(intervals)}`;
   const lowestRootMidi = 36 + bestPc; // C2 (36) to B2 (47)
-  const isBassOpenString = lowestRootMidi === 36 || lowestRootMidi === 43; // C2 or G2
-
-  const thirdOffset = hasMin3 ? 3 : 4;
-  const thirdMidi = foldToRegister(lowestRootMidi + thirdOffset, 36, 55);
-  const fifthOffset = hasDim5 ? 6 : hasAug5 ? 8 : 7;
-  const fifthMidi = foldToRegister(lowestRootMidi + fifthOffset, 36, 55);
-
-  let celloBassDesc = "";
-  const pitchWithOctave = midiToPitchName(lowestRootMidi);
-  if (lowestRootMidi === 36) {
-    celloBassDesc = `${pitchWithOctave} (open C string, ${chordName} root)`;
-  } else if (lowestRootMidi === 43) {
-    celloBassDesc = `${pitchWithOctave} (open G string, ${chordName} root)`;
-  } else if (lowestRootMidi < 43) {
-    const semitonesAboveC = lowestRootMidi - 36;
-    const finger =
-      semitonesAboveC <= 1
-        ? "half pos"
-        : semitonesAboveC === 2
-        ? "1st finger"
-        : semitonesAboveC <= 4
-        ? "2nd/3rd finger"
-        : "4th finger";
-    celloBassDesc = `${pitchWithOctave} (stopped on C string ${finger}, ${chordName} root)`;
-  } else {
-    const semitonesAboveG = lowestRootMidi - 43;
-    const finger =
-      semitonesAboveG <= 1
-        ? "half pos"
-        : semitonesAboveG === 2
-        ? "1st finger"
-        : semitonesAboveG <= 4
-        ? "2nd/3rd finger"
-        : "4th finger";
-    celloBassDesc = `${pitchWithOctave} (stopped on G string ${finger}, ${chordName} root)`;
-  }
-
   return {
     rootPc: bestPc,
     rootName,
     chordName,
     lowestRootMidi,
-    fifthMidi,
-    thirdMidi,
-    isBassOpenString,
-    celloBassDesc,
+    fifthMidi: foldToRegister(lowestRootMidi + fifthOffset(intervals), 36, 55),
+    thirdMidi: foldToRegister(lowestRootMidi + (intervals.min3 ? 3 : 4), 36, 55),
+    isBassOpenString: lowestRootMidi === 36 || lowestRootMidi === 43, // C2 or G2
+    celloBassDesc: celloBassDescription(lowestRootMidi, chordName),
   };
 }
 
 // ─── Deterministic Multi-Track & Harmonic Feature Extraction ─────────────────
+
+type PitchedTrack = ParsedMidi["tracks"][number];
+
+const meanPitch = (track: PitchedTrack) => (track.lowestMidi + track.highestMidi) / 2;
+
+/** A track on a bass program (32–39), else the lowest-sounding one. */
+function pickBassTrack(tracks: readonly PitchedTrack[]): PitchedTrack | undefined {
+  const byProgram = tracks.find((t) => t.program !== null && t.program >= 32 && t.program <= 39);
+  if (byProgram || tracks.length === 0) return byProgram;
+  return tracks.reduce((lowest, current) => (meanPitch(current) < meanPitch(lowest) ? current : lowest), tracks[0]!);
+}
+
+/** The busiest track that is not the bass; the bass itself when it is alone. */
+function pickMelodyTrack(tracks: readonly PitchedTrack[], bass: PitchedTrack | undefined): PitchedTrack | undefined {
+  const others = tracks.filter((t) => t !== bass);
+  if (others.length === 0) return bass;
+  return others.reduce((best, curr) => (curr.noteCount > best.noteCount ? curr : best), others[0]!);
+}
+
+const soundsIn = (n: MidiNote, startMs: number, endMs: number) =>
+  n.startTimeMs < endMs && n.startTimeMs + n.durationMs > startMs;
+
+function soundingMs(notes: readonly MidiNote[], startMs: number, endMs: number): number {
+  return notes.reduce((acc, n) => acc + Math.max(0, Math.min(endMs, n.startTimeMs + n.durationMs) - Math.max(startMs, n.startTimeMs)), 0);
+}
+
+type ProminentTrack = { index: number | null; name: string | null; riff: string };
+
+/** The busiest other track in a bar, named, with its first four notes as a riff. */
+function prominentTrack(others: readonly MidiNote[], tracks: readonly PitchedTrack[]): ProminentTrack {
+  const counts = new Map<number, number>();
+  for (const n of others) counts.set(n.track, (counts.get(n.track) ?? 0) + 1);
+  let best = -1;
+  let maxCount = 0;
+  for (const [index, count] of counts) {
+    if (count > maxCount) {
+      maxCount = count;
+      best = index;
+    }
+  }
+  if (best < 0) return { index: null, name: null, riff: "" };
+  const riff = others.filter((n) => n.track === best).slice(0, 4).map((n) => midiToPitchName(n.midiNumber)).join(" ");
+  return { index: best, name: tracks.find((t) => t.index === best)?.name ?? `Track ${best}`, riff };
+}
+
+interface BarInput {
+  bar: number;
+  startMs: number;
+  endMs: number;
+  notes: readonly MidiNote[];
+  pitchedTracks: readonly PitchedTrack[];
+  pitchedTrackIndices: ReadonlySet<number>;
+  bassNotes: readonly MidiNote[];
+  melodyNotes: readonly MidiNote[];
+  bassTrackIndex: number;
+  melodyTrackIndex: number;
+}
+
+const BASS_INACTIVE_PERCENT = 25;
+
+function analyseBar(input: BarInput): MeasureAnalysis {
+  const { bar, startMs, endMs } = input;
+  const barMs = endMs - startMs;
+  const pitched = input.notes.filter((n) => input.pitchedTrackIndices.has(n.track) && soundsIn(n, startMs, endMs));
+  const bNotes = input.bassNotes.filter((n) => soundsIn(n, startMs, endMs));
+  const mNotes = input.melodyNotes.filter((n) => soundsIn(n, startMs, endMs));
+  const oNotes = pitched.filter((n) => n.track !== input.bassTrackIndex && n.track !== input.melodyTrackIndex);
+  const bassActivePercent = Math.min(100, Math.round((soundingMs(bNotes, startMs, endMs) / barMs) * 100));
+  const isBassInactive = bassActivePercent < BASS_INACTIVE_PERCENT;
+  const chord = detectBarChord(pitched);
+  const prominent = isBassInactive && oNotes.length > 0
+    ? prominentTrack(oNotes, input.pitchedTracks)
+    : { index: null, name: null, riff: "" };
+  return {
+    bar: bar + 1,
+    startMs,
+    endMs,
+    chordName: chord.chordName,
+    rootPc: chord.rootPc,
+    lowestRootMidi: chord.lowestRootMidi,
+    fifthMidi: chord.fifthMidi,
+    thirdMidi: chord.thirdMidi,
+    isBassOpenString: chord.isBassOpenString,
+    celloBassDesc: chord.celloBassDesc,
+    bassActivePercent,
+    isBassInactive,
+    prominentTrackIndex: prominent.index,
+    prominentTrackName: prominent.name,
+    prominentRiffSnippet: prominent.riff,
+    melodyNotesInBar: mNotes,
+    bassNotesInBar: bNotes,
+    otherNotesInBar: oNotes,
+  };
+}
+
+/** What carries a bar, for the prompt: the riff or drone when the bass rests, else the melody or the groove. */
+function activeLineLabel(m: MeasureAnalysis): string {
+  if (m.isBassInactive) {
+    return m.prominentTrackName ? `${m.prominentTrackName}: ${m.prominentRiffSnippet}` : `Harmonic Bass: ${m.celloBassDesc}`;
+  }
+  if (m.melodyNotesInBar.length === 0) return "Bass groove";
+  const opening = m.melodyNotesInBar.slice(0, 3).map((n) => midiToPitchName(n.midiNumber)).join(" ");
+  return `Melody: ${opening}`;
+}
 
 export function extractMidiFeatures(parsed: ParsedMidi, fileName: string) {
   const baseTitle = basename(fileName).replace(/\.midi?$/i, "");
@@ -284,27 +363,8 @@ export function extractMidiFeatures(parsed: ParsedMidi, fileName: string) {
   );
   const pitchedTrackIndices = new Set(pitchedTracks.map((t) => t.index));
 
-  // Identify Bass candidate: programs 32-39 or lowest mean pitch
-  let bassTrack = pitchedTracks.find(
-    (t) => t.program !== null && t.program >= 32 && t.program <= 39,
-  );
-  if (!bassTrack && pitchedTracks.length > 0) {
-    bassTrack = pitchedTracks.reduce((lowest, current) => {
-      const avgCurrent = (current.lowestMidi + current.highestMidi) / 2;
-      const avgLowest = (lowest.lowestMidi + lowest.highestMidi) / 2;
-      return avgCurrent < avgLowest ? current : lowest;
-    }, pitchedTracks[0]);
-  }
-
-  // Identify Melody candidate: non-bass track with prominent activity in mid-high register
-  const nonBassTracks = pitchedTracks.filter((t) => t !== bassTrack);
-  const melodyTrack =
-    nonBassTracks.length > 0
-      ? nonBassTracks.reduce(
-          (best, curr) => (curr.noteCount > best.noteCount ? curr : best),
-          nonBassTracks[0],
-        )
-      : bassTrack;
+  const bassTrack = pickBassTrack(pitchedTracks);
+  const melodyTrack = pickMelodyTrack(pitchedTracks, bassTrack);
 
   // Calculate measure metrics
   const barDurationMs = measureDurationMs(timeSignature, bpm);
@@ -322,91 +382,12 @@ export function extractMidiFeatures(parsed: ParsedMidi, fileName: string) {
 
   for (let bar = 0; bar < totalBars; bar++) {
     const startMs = bar * barDurationMs;
-    const endMs = startMs + barDurationMs;
-
-    const barPitchedNotes = parsed.notes.filter(
-      (n) =>
-        pitchedTrackIndices.has(n.track) &&
-        n.startTimeMs < endMs &&
-        n.startTimeMs + n.durationMs > startMs,
-    );
-
-    const bNotes = bassNotes.filter(
-      (n) => n.startTimeMs < endMs && n.startTimeMs + n.durationMs > startMs,
-    );
-    const mNotes = melodyNotes.filter(
-      (n) => n.startTimeMs < endMs && n.startTimeMs + n.durationMs > startMs,
-    );
-    const oNotes = barPitchedNotes.filter(
-      (n) => n.track !== bassTrackIndex && n.track !== melodyTrackIndex,
-    );
-
-    const bassSoundingMs = bNotes.reduce((acc, n) => {
-      const overlap =
-        Math.min(endMs, n.startTimeMs + n.durationMs) -
-        Math.max(startMs, n.startTimeMs);
-      return acc + Math.max(0, overlap);
-    }, 0);
-    const bassActivePercent = Math.min(
-      100,
-      Math.round((bassSoundingMs / barDurationMs) * 100),
-    );
-    const isBassInactive = bassActivePercent < 25;
-
-    if (isBassInactive) inactiveBassBarsCount++;
-
-    const chord = detectBarChord(barPitchedNotes);
-
-    // Find prominent other track in this bar if bass is inactive
-    let prominentTrackIndex: number | null = null;
-    let prominentTrackName: string | null = null;
-    let prominentRiffSnippet = "";
-
-    if (isBassInactive && oNotes.length > 0) {
-      const trackCounts = new Map<number, number>();
-      for (const n of oNotes) {
-        trackCounts.set(n.track, (trackCounts.get(n.track) ?? 0) + 1);
-      }
-      let bestTrack = -1;
-      let maxCount = 0;
-      for (const [tIdx, count] of trackCounts.entries()) {
-        if (count > maxCount) {
-          maxCount = count;
-          bestTrack = tIdx;
-        }
-      }
-      if (bestTrack >= 0) {
-        prominentTrackIndex = bestTrack;
-        const trk = pitchedTracks.find((t) => t.index === bestTrack);
-        prominentTrackName = trk?.name ?? `Track ${bestTrack}`;
-        const riffNotes = oNotes
-          .filter((n) => n.track === bestTrack)
-          .slice(0, 4)
-          .map((n) => midiToPitchName(n.midiNumber));
-        prominentRiffSnippet = riffNotes.join(" ");
-      }
-    }
-
-    measureDetails.push({
-      bar: bar + 1,
-      startMs,
-      endMs,
-      chordName: chord.chordName,
-      rootPc: chord.rootPc,
-      lowestRootMidi: chord.lowestRootMidi,
-      fifthMidi: chord.fifthMidi,
-      thirdMidi: chord.thirdMidi,
-      isBassOpenString: chord.isBassOpenString,
-      celloBassDesc: chord.celloBassDesc,
-      bassActivePercent,
-      isBassInactive,
-      prominentTrackIndex,
-      prominentTrackName,
-      prominentRiffSnippet,
-      melodyNotesInBar: mNotes,
-      bassNotesInBar: bNotes,
-      otherNotesInBar: oNotes,
+    const detail = analyseBar({
+      bar, startMs, endMs: startMs + barDurationMs, notes: parsed.notes, pitchedTracks, pitchedTrackIndices,
+      bassNotes, melodyNotes, bassTrackIndex, melodyTrackIndex,
     });
+    if (detail.isBassInactive) inactiveBassBarsCount++;
+    measureDetails.push(detail);
   }
 
   // Pick representative sample measures for the prompt
@@ -421,16 +402,7 @@ export function extractMidiFeatures(parsed: ParsedMidi, fileName: string) {
       chord: m.chordName,
       bassActivePercent: m.bassActivePercent,
       isBassInactive: m.isBassInactive,
-      activeRiffOrDrone: m.isBassInactive
-        ? m.prominentTrackName
-          ? `${m.prominentTrackName}: ${m.prominentRiffSnippet}`
-          : `Harmonic Bass: ${m.celloBassDesc}`
-        : m.melodyNotesInBar.length > 0
-          ? `Melody: ${m.melodyNotesInBar
-              .slice(0, 3)
-              .map((n) => midiToPitchName(n.midiNumber))
-              .join(" ")}`
-          : "Bass groove",
+      activeRiffOrDrone: activeLineLabel(m),
     }));
 
   return {
@@ -662,8 +634,7 @@ export async function queryOllama(
     .trim();
 
   // Extract JSON from potential code fences
-  const fenceMatch = jsonContent.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-  const cleanedJson = fenceMatch ? fenceMatch[1] : jsonContent;
+  const cleanedJson = fencedContent(jsonContent) ?? jsonContent;
 
   let blueprint: ArrangementBlueprint;
   try {
@@ -684,148 +655,153 @@ export async function queryOllama(
 
 // ─── Top-Down Hierarchical Synthesizers ──────────────────────────────────────
 
+const FENCE = "```";
+
+/** The body of the first ``` or ```json code fence, trimmed; null when there is no closed fence. */
+function fencedContent(text: string): string | null {
+  const open = text.indexOf(FENCE);
+  if (open < 0) return null;
+  let bodyStart = open + FENCE.length;
+  if (text.startsWith("json", bodyStart)) bodyStart += "json".length;
+  const close = text.indexOf(FENCE, bodyStart);
+  return close < 0 ? null : text.slice(bodyStart, close).trim();
+}
+
+/** Where melody leaves the downbeat empty, silence at the start of a bar longer than this is filled. */
+const DOWNBEAT_GAP_MS = 350;
+const MIN_NOTE_MS = 40;
+
+type BarAnalysis = ReturnType<typeof extractMidiFeatures>["measureDetails"][number];
+
+function copied(notes: readonly MidiNote[], low: number, high: number): RawNoteEvent[] {
+  return notes.map((n) => ({
+    midiNumber: foldToRegister(n.midiNumber, low, high),
+    startTimeMs: n.startTimeMs,
+    durationMs: Math.max(MIN_NOTE_MS, n.durationMs),
+  }));
+}
+
+/** Every melody note, with the bass (or the chord root) on the downbeat if the melody enters late. */
+function melodyBar(m: BarAnalysis): RawNoteEvent[] {
+  const events = copied(m.melodyNotesInBar, 36, 81);
+  const firstStart = m.melodyNotesInBar[0]!.startTimeMs;
+  if (firstStart - m.startMs <= DOWNBEAT_GAP_MS) return events;
+  const downbeatBass = m.bassNotesInBar.find((b) => b.startTimeMs < m.startMs + DOWNBEAT_GAP_MS);
+  events.push(downbeatBass
+    ? {
+      midiNumber: foldToRegister(downbeatBass.midiNumber, 36, 50),
+      startTimeMs: Math.max(m.startMs, downbeatBass.startTimeMs),
+      durationMs: Math.min(downbeatBass.durationMs, firstStart - m.startMs - 20),
+    }
+    : {
+      midiNumber: foldToRegister(m.lowestRootMidi, 36, 47),
+      startTimeMs: m.startMs,
+      durationMs: Math.min(500, firstStart - m.startMs - 20),
+    });
+  return events;
+}
+
+/**
+ * Neither melody nor bass: zero dead air. The cello takes the busiest other
+ * part's riff in its low register, or else the chord root with a fifth on
+ * beat three when the bar is long enough.
+ */
+function fillerBar(m: BarAnalysis): RawNoteEvent[] {
+  const riff = m.prominentTrackIndex === null
+    ? m.otherNotesInBar
+    : m.otherNotesInBar.filter((n) => n.track === m.prominentTrackIndex);
+  if (riff.length > 0) return copied(riff, 36, 55);
+  const barDur = m.endMs - m.startMs;
+  const events: RawNoteEvent[] = [{
+    midiNumber: foldToRegister(m.lowestRootMidi, 36, 47),
+    startTimeMs: m.startMs,
+    durationMs: Math.max(100, Math.min(barDur * 0.9, 1500)),
+  }];
+  if (barDur >= 1400) {
+    events.push({ midiNumber: foldToRegister(m.fifthMidi, 36, 55), startTimeMs: m.startMs + barDur / 2, durationMs: Math.max(100, barDur * 0.4) });
+  }
+  return events;
+}
+
+function expertBar(m: BarAnalysis): RawNoteEvent[] {
+  if (m.melodyNotesInBar.length > 0) return melodyBar(m);
+  if (m.bassNotesInBar.length > 0 && !m.isBassInactive) return copied(m.bassNotesInBar, 36, 55);
+  return fillerBar(m);
+}
+
+/** One note at a time: of simultaneous attacks the highest wins, and each note ends where the next begins. */
+function toMonophonic(events: RawNoteEvent[]): RawNoteEvent[] {
+  events.sort((a, b) => a.startTimeMs - b.startTimeMs);
+  const out: RawNoteEvent[] = [];
+  events.forEach((curr, i) => {
+    if (i > 0 && curr.startTimeMs === events[i - 1]!.startTimeMs) {
+      if (curr.midiNumber > out[out.length - 1]!.midiNumber) out[out.length - 1] = curr;
+      return;
+    }
+    const next = events[i + 1];
+    if (next && curr.startTimeMs + curr.durationMs > next.startTimeMs) {
+      curr.durationMs = Math.max(30, next.startTimeMs - curr.startTimeMs);
+    }
+    if (curr.durationMs >= 30) out.push(curr);
+  });
+  return out;
+}
+
 /**
  * 1. EXPERT TIER (Master Score - 100% Complete)
- * Retains 100% of melody notes in the original key.
- * During melody gaps, weaves in bass downbeat roots.
- * When bass is inactive, takes over guitar/keyboard riffs in low register or harmonic drones.
- * Zero dead air.
+ * Retains 100% of melody notes in the original key — backing MIDI plays in the
+ * source key, so this never transposes. During melody gaps, weaves in bass
+ * downbeat roots. When bass is inactive, takes over guitar/keyboard riffs in
+ * low register or harmonic drones. Zero dead air.
  */
 export function buildMasterExpertNotes(
   features: ReturnType<typeof extractMidiFeatures>,
   _blueprint: ArrangementBlueprint,
 ): RawNoteEvent[] {
-  // Invariant: NEVER transpose to another key because MIDI backing tracks play in original key
-  const transposition = 0;
-  const expertEvents: RawNoteEvent[] = [];
+  return toMonophonic(features.measureDetails.flatMap(expertBar));
+}
 
-  for (const m of features.measureDetails) {
-    const {
-      startMs,
-      endMs,
-      melodyNotesInBar,
-      bassNotesInBar,
-      otherNotesInBar,
-    } = m;
+/**
+ * Moves `midi` by octaves, within `[low, high]`, until it is no more than
+ * `maxLeap` semitones from `previous`.
+ */
+function limitLeap(midi: number, previous: number, maxLeap: number, low: number, high: number): number {
+  let m = midi;
+  while (m - previous > maxLeap && m - 12 >= low) m -= 12;
+  while (m - previous < -maxLeap && m + 12 <= high) m += 12;
+  return m;
+}
 
-    if (melodyNotesInBar.length > 0) {
-      // 100% of melody notes are preserved!
-      for (const n of melodyNotesInBar) {
-        const midi = foldToRegister(n.midiNumber + transposition, 36, 81);
-        expertEvents.push({
-          midiNumber: midi,
-          startTimeMs: n.startTimeMs,
-          durationMs: Math.max(40, n.durationMs),
-        });
-      }
-
-      // Check if beat 1 downbeat has a rest before melody starts
-      const firstStart = melodyNotesInBar[0]!.startTimeMs;
-      if (firstStart - startMs > 350) {
-        // Gap at beginning of bar: weave in bass downbeat root
-        const downbeatBass = bassNotesInBar.find(
-          (b) => b.startTimeMs < startMs + 350,
-        );
-        if (downbeatBass) {
-          const bassMidi = foldToRegister(
-            downbeatBass.midiNumber + transposition,
-            36,
-            50,
-          );
-          expertEvents.push({
-            midiNumber: bassMidi,
-            startTimeMs: Math.max(startMs, downbeatBass.startTimeMs),
-            durationMs: Math.min(
-              downbeatBass.durationMs,
-              firstStart - startMs - 20,
-            ),
-          });
-        } else {
-          // Add harmonic root on beat 1
-          const rootMidi = foldToRegister(m.lowestRootMidi, 36, 47);
-          expertEvents.push({
-            midiNumber: rootMidi,
-            startTimeMs: startMs,
-            durationMs: Math.min(500, firstStart - startMs - 20),
-          });
-        }
-      }
-    } else if (bassNotesInBar.length > 0 && !m.isBassInactive) {
-      // Melody rests, but bass is active: cello plays full bass groove
-      for (const n of bassNotesInBar) {
-        const midi = foldToRegister(n.midiNumber + transposition, 36, 55);
-        expertEvents.push({
-          midiNumber: midi,
-          startTimeMs: n.startTimeMs,
-          durationMs: Math.max(40, n.durationMs),
-        });
-      }
-    } else {
-      // Inactive bass & inactive melody: Zero Dead Air!
-      // Cello plays other instrument's riff or harmonic bass foundation based on chord analysis
-      const targetRiffNotes =
-        m.prominentTrackIndex !== null
-          ? otherNotesInBar.filter((n) => n.track === m.prominentTrackIndex)
-          : otherNotesInBar;
-
-      if (targetRiffNotes.length > 0) {
-        for (const n of targetRiffNotes) {
-          // Adapt to cello's lowest register (C2 to G3, MIDI 36-55)
-          const midi = foldToRegister(n.midiNumber + transposition, 36, 55);
-          expertEvents.push({
-            midiNumber: midi,
-            startTimeMs: n.startTimeMs,
-            durationMs: Math.max(40, n.durationMs),
-          });
-        }
-      } else {
-        // Emit harmonic bass foundation based on chord analysis of this bar.
-        // The chord root is placed in the low cello register (C2 to B2 / MIDI 36-47), stopped or open.
-        const rootMidi = foldToRegister(m.lowestRootMidi, 36, 47);
-        const barDur = endMs - startMs;
-        const bassDur = Math.max(100, Math.min(barDur * 0.9, 1500));
-        expertEvents.push({
-          midiNumber: rootMidi,
-          startTimeMs: startMs,
-          durationMs: bassDur,
-        });
-        if (barDur >= 1400) {
-          // Secondary pulse on beat 3 (perfect 5th of the chord) for rhythmic vitality and harmonic support
-          const fifthMidi = foldToRegister(m.fifthMidi, 36, 55);
-          expertEvents.push({
-            midiNumber: fifthMidi,
-            startTimeMs: startMs + barDur / 2,
-            durationMs: Math.max(100, barDur * 0.4),
-          });
-        }
-      }
+/** Shortens each note so it ends where the next begins, but never below `minMs`. */
+function trimOverlaps(notes: RawNoteEvent[], minMs: number): RawNoteEvent[] {
+  for (let i = 0; i < notes.length - 1; i++) {
+    const curr = notes[i]!;
+    const next = notes[i + 1]!;
+    if (curr.startTimeMs + curr.durationMs > next.startTimeMs) {
+      curr.durationMs = Math.max(minMs, next.startTimeMs - curr.startTimeMs);
     }
   }
+  return notes;
+}
 
-  // Sort and resolve monophonic overlaps
-  expertEvents.sort((a, b) => a.startTimeMs - b.startTimeMs);
-  const monophonicExpert: RawNoteEvent[] = [];
-  for (let i = 0; i < expertEvents.length; i++) {
-    const curr = expertEvents[i]!;
-    if (i > 0 && curr.startTimeMs === expertEvents[i - 1]!.startTimeMs) {
-      if (
-        curr.midiNumber >
-        monophonicExpert[monophonicExpert.length - 1]!.midiNumber
-      ) {
-        monophonicExpert[monophonicExpert.length - 1] = curr;
+type Thinning = { maxLeap: number; low: number; high: number; mergeWithinMs: number; merges: (index: number) => boolean };
+
+/** Seats each note near the last one, folding an attack that follows too closely into the note before it. */
+function thinLine(notes: readonly RawNoteEvent[], rule: Thinning, seat: (midi: number) => number): RawNoteEvent[] {
+  const out: RawNoteEvent[] = [];
+  notes.forEach((note, i) => {
+    const curr = { ...note, midiNumber: seat(note.midiNumber) };
+    const prev = out.at(-1);
+    if (prev) {
+      curr.midiNumber = limitLeap(curr.midiNumber, prev.midiNumber, rule.maxLeap, rule.low, rule.high);
+      if (curr.startTimeMs - prev.startTimeMs < rule.mergeWithinMs && rule.merges(i)) {
+        prev.durationMs += curr.durationMs;
+        return;
       }
-      continue;
     }
-    const next = expertEvents[i + 1];
-    if (next && curr.startTimeMs + curr.durationMs > next.startTimeMs) {
-      curr.durationMs = Math.max(30, next.startTimeMs - curr.startTimeMs);
-    }
-    if (curr.durationMs >= 30) {
-      monophonicExpert.push(curr);
-    }
-  }
-
-  return monophonicExpert;
+    out.push(curr);
+  });
+  return out;
 }
 
 /**
@@ -835,44 +811,8 @@ export function buildMasterExpertNotes(
 export function deriveAdvancedNotes(
   expertNotes: readonly RawNoteEvent[],
 ): RawNoteEvent[] {
-  const out: RawNoteEvent[] = [];
-  for (let i = 0; i < expertNotes.length; i++) {
-    const curr = { ...expertNotes[i]! };
-    if (curr.midiNumber > 79) {
-      curr.midiNumber -= 12;
-    }
-
-    if (out.length > 0) {
-      const prev = out[out.length - 1]!;
-      let diff = curr.midiNumber - prev.midiNumber;
-      while (diff > 12 && curr.midiNumber - 12 >= 36) {
-        curr.midiNumber -= 12;
-        diff = curr.midiNumber - prev.midiNumber;
-      }
-      while (diff < -12 && curr.midiNumber + 12 <= 79) {
-        curr.midiNumber += 12;
-        diff = curr.midiNumber - prev.midiNumber;
-      }
-
-      const gapMs = curr.startTimeMs - prev.startTimeMs;
-      if (gapMs < 130 && i % 2 !== 0) {
-        prev.durationMs += curr.durationMs;
-        continue;
-      }
-    }
-
-    out.push(curr);
-  }
-
-  for (let i = 0; i < out.length - 1; i++) {
-    const curr = out[i]!;
-    const next = out[i + 1]!;
-    if (curr.startTimeMs + curr.durationMs > next.startTimeMs) {
-      curr.durationMs = Math.max(30, next.startTimeMs - curr.startTimeMs);
-    }
-  }
-
-  return out;
+  const rule: Thinning = { maxLeap: 12, low: 36, high: 79, mergeWithinMs: 130, merges: (i) => i % 2 !== 0 };
+  return trimOverlaps(thinLine(expertNotes, rule, (midi) => (midi > 79 ? midi - 12 : midi)), 30);
 }
 
 /**
@@ -882,42 +822,34 @@ export function deriveAdvancedNotes(
 export function deriveIntermediateNotes(
   advancedNotes: readonly RawNoteEvent[],
 ): RawNoteEvent[] {
-  const out: RawNoteEvent[] = [];
-  for (let i = 0; i < advancedNotes.length; i++) {
-    const curr = { ...advancedNotes[i]! };
-    while (curr.midiNumber > 62) curr.midiNumber -= 12;
-    while (curr.midiNumber < 36) curr.midiNumber += 12;
+  const rule: Thinning = { maxLeap: 12, low: 36, high: 62, mergeWithinMs: 200, merges: () => true };
+  return trimOverlaps(thinLine(advancedNotes, rule, (midi) => foldToRegister(midi, 36, 62)), 40);
+}
 
-    if (out.length > 0) {
-      const prev = out[out.length - 1]!;
-      let diff = curr.midiNumber - prev.midiNumber;
-      while (diff > 12 && curr.midiNumber - 12 >= 36) {
-        curr.midiNumber -= 12;
-        diff = curr.midiNumber - prev.midiNumber;
-      }
-      while (diff < -12 && curr.midiNumber + 12 <= 62) {
-        curr.midiNumber += 12;
-        diff = curr.midiNumber - prev.midiNumber;
-      }
+const BEGINNER_LEAP = 9;
 
-      const gapMs = curr.startTimeMs - prev.startTimeMs;
-      if (gapMs < 200) {
-        prev.durationMs += curr.durationMs;
-        continue;
-      }
-    }
-
-    out.push(curr);
+/** One bar of the beginner line: its downbeat, held, and a second note near the middle if there is room. */
+function beginnerBar(m: BarAnalysis, barNotes: readonly RawNoteEvent[], previous: number | undefined, barDurationMs: number): RawNoteEvent[] {
+  const { startMs, endMs } = m;
+  if (barNotes.length === 0) {
+    return [{ midiNumber: foldToRegister(m.lowestRootMidi, 36, 50), startTimeMs: startMs, durationMs: Math.max(200, (endMs - startMs) * 0.85) }];
   }
-
-  for (let i = 0; i < out.length - 1; i++) {
-    const curr = out[i]!;
-    const next = out[i + 1]!;
-    if (curr.startTimeMs + curr.durationMs > next.startTimeMs) {
-      curr.durationMs = Math.max(40, next.startTimeMs - curr.startTimeMs);
-    }
+  const downbeat = barNotes[0]!;
+  const seated = foldToRegister(downbeat.midiNumber, 36, 62);
+  const firstMidi = previous === undefined ? seated : limitLeap(seated, previous, BEGINNER_LEAP, 36, 62);
+  const firstDuration = barNotes.length === 1
+    ? Math.max(300, (endMs - downbeat.startTimeMs) * 0.85)
+    : Math.min(barDurationMs / 2 - 20, Math.max(200, downbeat.durationMs));
+  const out: RawNoteEvent[] = [{ midiNumber: firstMidi, startTimeMs: downbeat.startTimeMs, durationMs: firstDuration }];
+  const midpoint = startMs + barDurationMs / 2;
+  const second = barNotes.find((n) => n.startTimeMs >= midpoint - 100);
+  if (second && second.startTimeMs - downbeat.startTimeMs > 400) {
+    out.push({
+      midiNumber: limitLeap(foldToRegister(second.midiNumber, 36, 62), firstMidi, BEGINNER_LEAP, 36, 62),
+      startTimeMs: second.startTimeMs,
+      durationMs: Math.max(200, (endMs - second.startTimeMs) * 0.85),
+    });
   }
-
   return out;
 }
 
@@ -931,89 +863,40 @@ export function deriveBeginnerNotes(
   blueprint: ArrangementBlueprint,
 ): RawNoteEvent[] {
   const barDurationMs = measureDurationMs(blueprint.meter, blueprint.tempoBpm);
-  // Invariant: NEVER transpose to another key because MIDI backing tracks play in original key
-  const transposition = 0;
   const out: RawNoteEvent[] = [];
-
   for (const m of features.measureDetails) {
-    const { startMs, endMs, lowestRootMidi } = m;
-    const barInterNotes = intermediateNotes.filter(
-      (n) => n.startTimeMs >= startMs && n.startTimeMs < endMs,
-    );
-
-    if (barInterNotes.length === 0) {
-      const rootMidi = foldToRegister(lowestRootMidi + transposition, 36, 50);
-      out.push({
-        midiNumber: rootMidi,
-        startTimeMs: startMs,
-        durationMs: Math.max(200, (endMs - startMs) * 0.85),
-      });
-      continue;
-    }
-
-    const downbeat = barInterNotes[0]!;
-    let firstMidi = foldToRegister(downbeat.midiNumber, 36, 62);
-
-    if (out.length > 0) {
-      const prev = out[out.length - 1]!;
-      let diff = firstMidi - prev.midiNumber;
-      while (diff > 9 && firstMidi - 12 >= 36) {
-        firstMidi -= 12;
-        diff = firstMidi - prev.midiNumber;
-      }
-      while (diff < -9 && firstMidi + 12 <= 62) {
-        firstMidi += 12;
-        diff = firstMidi - prev.midiNumber;
-      }
-    }
-
-    const firstNoteDuration =
-      barInterNotes.length === 1
-        ? Math.max(300, (endMs - downbeat.startTimeMs) * 0.85)
-        : Math.min(barDurationMs / 2 - 20, Math.max(200, downbeat.durationMs));
-
-    out.push({
-      midiNumber: firstMidi,
-      startTimeMs: downbeat.startTimeMs,
-      durationMs: firstNoteDuration,
-    });
-
-    const midpoint = startMs + barDurationMs / 2;
-    const secondNote = barInterNotes.find(
-      (n) => n.startTimeMs >= midpoint - 100,
-    );
-    if (secondNote && secondNote.startTimeMs - downbeat.startTimeMs > 400) {
-      let secondMidi = foldToRegister(secondNote.midiNumber, 36, 62);
-      let diff = secondMidi - firstMidi;
-      while (diff > 9 && secondMidi - 12 >= 36) {
-        secondMidi -= 12;
-        diff = secondMidi - firstMidi;
-      }
-      while (diff < -9 && secondMidi + 12 <= 62) {
-        secondMidi += 12;
-        diff = secondMidi - firstMidi;
-      }
-
-      out.push({
-        midiNumber: secondMidi,
-        startTimeMs: secondNote.startTimeMs,
-        durationMs: Math.max(200, (endMs - secondNote.startTimeMs) * 0.85),
-      });
-    }
+    const barNotes = intermediateNotes.filter((n) => n.startTimeMs >= m.startMs && n.startTimeMs < m.endMs);
+    out.push(...beginnerBar(m, barNotes, out.at(-1)?.midiNumber, barDurationMs));
   }
-
-  for (let i = 0; i < out.length - 1; i++) {
-    const curr = out[i]!;
-    const next = out[i + 1]!;
-    if (curr.startTimeMs + curr.durationMs > next.startTimeMs) {
-      curr.durationMs = Math.max(40, next.startTimeMs - curr.startTimeMs);
-    }
-  }
-
-  return out;
+  return trimOverlaps(out, 40);
 }
 
 // ─── Fretboard & Ambiguous Note Verification Gate ────────────────────────────
+
+type Placement = { verdict: AmbiguousNoteAudit["verdict"]; reason: string };
+
+/** Why a chosen placement is idiomatic for the tier, or that it is not. */
+function placementVerdict(state: CelloState, tier: DifficultyTier, distanceMm: number, riffContinuation: boolean): Placement {
+  if (state.finger === "0") {
+    return { verdict: "OK_OPEN_STRING", reason: `Utilizes open string ${state.string} for intonation anchor and acoustic resonance.` };
+  }
+  if (riffContinuation) {
+    return { verdict: "OK_RIFF_CONTINUATION", reason: `Maintains string ${state.string} with finger ${state.finger} to preserve riff continuity and tonal cohesion.` };
+  }
+  const beginner = tier === "Beginner";
+  if (beginner && (state.position === "1st" || state.position === "Half")) {
+    return { verdict: "OK_RIFF_CONTINUATION", reason: `Within 1st position hand frame (${distanceMm.toFixed(1)} mm).` };
+  }
+  if (!beginner && distanceMm > 173) {
+    return { verdict: "OK_HIGHER_POSITION", reason: `Higher position (${state.position}) acceptable for ${tier} tier.` };
+  }
+  if (beginner && distanceMm > 175) {
+    return { verdict: "FLAGGED_UNIDIOMATIC", reason: `Note exceeds 1st position limit (${distanceMm.toFixed(1)} mm > 173 mm) in Beginner tier!` };
+  }
+  return { verdict: "OK_OPEN_STRING", reason: "Standard placement." };
+}
+
+const roundTenth = (mm: number) => Math.round(mm * 10) / 10;
 
 export function auditFretboardNotes(
   notes: readonly RawNoteEvent[],
@@ -1021,51 +904,18 @@ export function auditFretboardNotes(
   tier: DifficultyTier,
 ): AmbiguousNoteAudit[] {
   const audits: AmbiguousNoteAudit[] = [];
-
-  for (let i = 0; i < notes.length; i++) {
-    const note = notes[i];
+  notes.forEach((note, i) => {
     const state = states[i];
-    if (!note || !state) continue;
-
+    if (!state) return;
     const candidates = candidateStates(note.midiNumber);
-    if (candidates.length <= 1) continue; // Unambiguous note
+    if (candidates.length <= 1) return; // Unambiguous note
 
-    const semitonesOnString = note.midiNumber - OPEN_STRING_MIDI[state.string];
-    const chosenDistanceMm = stopDistanceMm(semitonesOnString);
-
-    const prevNote = i > 0 ? notes[i - 1] : null;
-    const prevState = i > 0 ? states[i - 1] : null;
-
-    const isSameString = prevState && prevState.string === state.string;
-    const isSmallStep =
-      prevNote && Math.abs(note.midiNumber - prevNote.midiNumber) <= 4;
-    const isRiffContinuation = Boolean(
-      isSameString && isSmallStep && state.finger !== "0",
-    );
-
-    let verdict: AmbiguousNoteAudit["verdict"] = "OK_OPEN_STRING";
-    let reason = "Standard placement.";
-
-    if (state.finger === "0") {
-      verdict = "OK_OPEN_STRING";
-      reason = `Utilizes open string ${state.string} for intonation anchor and acoustic resonance.`;
-    } else if (isRiffContinuation) {
-      verdict = "OK_RIFF_CONTINUATION";
-      reason = `Maintains string ${state.string} with finger ${state.finger} to preserve riff continuity and tonal cohesion.`;
-    } else if (
-      tier === "Beginner" &&
-      (state.position === "1st" || state.position === "Half")
-    ) {
-      verdict = "OK_RIFF_CONTINUATION";
-      reason = `Within 1st position hand frame (${chosenDistanceMm.toFixed(1)} mm).`;
-    } else if (tier !== "Beginner" && chosenDistanceMm > 173) {
-      verdict = "OK_HIGHER_POSITION";
-      reason = `Higher position (${state.position}) acceptable for ${tier} tier.`;
-    } else if (tier === "Beginner" && chosenDistanceMm > 175) {
-      verdict = "FLAGGED_UNIDIOMATIC";
-      reason = `Note exceeds 1st position limit (${chosenDistanceMm.toFixed(1)} mm > 173 mm) in Beginner tier!`;
-    }
-
+    const chosenDistanceMm = stopDistanceMm(note.midiNumber - OPEN_STRING_MIDI[state.string]);
+    const prevNote = notes[i - 1];
+    const prevState = states[i - 1];
+    const riffContinuation = prevState?.string === state.string
+      && !!prevNote && Math.abs(note.midiNumber - prevNote.midiNumber) <= 4
+      && state.finger !== "0";
     audits.push({
       noteIndex: i + 1,
       midiNumber: note.midiNumber,
@@ -1073,22 +923,17 @@ export function auditFretboardNotes(
       chosenString: state.string,
       chosenPosition: state.position,
       chosenFinger: state.finger,
-      chosenDistanceMm: Math.round(chosenDistanceMm * 10) / 10,
+      chosenDistanceMm: roundTenth(chosenDistanceMm),
       numCandidateLocations: candidates.length,
-      candidateLocations: candidates.map((c) => {
-        const semi = note.midiNumber - OPEN_STRING_MIDI[c.string];
-        return {
-          string: c.string,
-          position: c.position,
-          finger: c.finger,
-          distanceMm: Math.round(stopDistanceMm(semi) * 10) / 10,
-        };
-      }),
-      verdict,
-      reason,
+      candidateLocations: candidates.map((c) => ({
+        string: c.string,
+        position: c.position,
+        finger: c.finger,
+        distanceMm: roundTenth(stopDistanceMm(note.midiNumber - OPEN_STRING_MIDI[c.string])),
+      })),
+      ...placementVerdict(state, tier, chosenDistanceMm, riffContinuation),
     });
-  }
-
+  });
   return audits;
 }
 

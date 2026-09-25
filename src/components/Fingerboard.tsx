@@ -4,14 +4,16 @@ import { View } from 'react-native';
 import {
   alternativePlacements, CelloFinger, CelloString, DISPLAY_STRING_ORDER, Landmark, LANDMARKS,
   midiAt, midiToPitchName, NECK_REACH_SEMITONES, OPEN_STRING_MIDI, Placement, semitonesAtMm,
-  stopDistanceMm,
-} from '@/domain/cello';
-import { noteColorName } from '@/domain/noteColors';
-import { CelloNote } from '@/domain/schema';
-import { TapeGeometry, TapeSet, tapeForSemitones, tapeGeometry } from '@/domain/tapes';
-import { useTheme } from '@/theme/ThemeProvider';
-import { alpha } from '@/theme/tokens';
-import { Label, Num } from './ui/primitives';
+  stopDistanceMm, noteColorName, CelloNote, TapeGeometry, TapeSet, tapeForSemitones, tapeGeometry,
+} from '@domain';
+import { useTheme, alpha } from '@theme';
+import { Label, Num } from './ui';
+
+/** Overlay dot diameters in design units: the tonic reads a size larger. */
+const OVERLAY_DOT_SIZE = {
+  compact: { tonic: 10, other: 8 },
+  regular: { tonic: 13, other: 10 },
+} as const;
 
 /**
  * The fingerboard, drawn to scale.
@@ -319,7 +321,7 @@ const BoardBackdrop = memo(function BoardBackdrop({
       {noteOverlay ? noteOverlay
         .filter((marker) => stopDistanceMm(marker.semitones) <= maxMm)
         .map((marker) => {
-          const dot = theme.s(compact ? (marker.isTonic ? 10 : 8) : (marker.isTonic ? 13 : 10));
+          const dot = theme.s(OVERLAY_DOT_SIZE[compact ? 'compact' : 'regular'][marker.isTonic ? 'tonic' : 'other']);
           return (
             <View
               key={`ov-${marker.string}-${marker.semitones}`}

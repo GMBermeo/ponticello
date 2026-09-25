@@ -1,5 +1,6 @@
 import { chroma } from '@tonaljs/note';
-import { getCelloChord, type CelloChordStudy } from './celloChords';
+import { getCelloChord } from './celloChords';
+import type { CelloChordStudy } from './chords';
 
 export interface SheetChord {
   symbol: string;
@@ -66,7 +67,8 @@ export function sheetChordStudy(chord: SheetChord): CelloChordStudy | null {
 }
 
 export interface SheetEvent { lineIndex: number; changeIndex: number; symbol: string; beat: number }
-export function sheetTimeline(sheet: ChordSheet): { events: SheetEvent[]; starts: number[]; totalBeats: number } {
+export interface SheetTimeline { events: SheetEvent[]; starts: number[]; totalBeats: number }
+export function sheetTimeline(sheet: ChordSheet): SheetTimeline {
   let beat = 0;
   const events: SheetEvent[] = [];
   const starts: number[] = [];
@@ -118,32 +120,72 @@ export function sheetLineSegments(line: SheetLine): { lyric: string; chord: Shee
   return parts;
 }
 
+const SHEET_ID = /^[a-z0-9][a-z0-9-]*$/;
+const LYRIC_MODES = new Set(['included', 'omitted']);
+const SOURCE_INSTRUMENTS = new Set(['keyboard', 'guitar', 'chordpro']);
+const MIN_SHEET_BPM = 20;
+const MAX_SHEET_BPM = 300;
+const MAX_LINE_BEATS = 128;
+
+function isPitchClass(n: number): boolean {
+  return Number.isInteger(n) && n >= 0 && n <= 11;
+}
+
+function hasValidMetadata(sheet: ChordSheet): boolean {
+  return sheet.version === 1 && typeof sheet.id === 'string' && SHEET_ID.test(sheet.id)
+    && !!sheet.title && !!sheet.artist && Array.isArray(sheet.lines) && Array.isArray(sheet.chords)
+    && LYRIC_MODES.has(sheet.lyrics) && SOURCE_INSTRUMENTS.has(sheet.instrument) && sheet.timing === 'estimated';
+}
+
+function hasValidBpm(bpm: number | null): boolean {
+  return bpm === null || (Number.isFinite(bpm) && bpm >= MIN_SHEET_BPM && bpm <= MAX_SHEET_BPM);
+}
+
+function validateChordDictionary(chords: ChordSheet['chords'], lineCount: number): Set<string> {
+  const symbols = new Set(chords.map((chord) => chord.symbol));
+  if (symbols.size !== chords.length || !symbols.size || !lineCount) throw new Error('Empty or duplicate chord dictionary');
+  for (const chord of chords) {
+    const validPitches = Array.isArray(chord.keyboardPitchClasses) && chord.keyboardPitchClasses.every(isPitchClass);
+    if (typeof chord.symbol !== 'string' || !validPitches) throw new Error('Invalid chord definition');
+    // Throws when the canonical name is not a chord the cello catalogue can build.
+    if (chord.canonical !== null) getCelloChord(chord.canonical);
+  }
+  return symbols;
+}
+
+function hasValidLineShape(line: SheetLine, seenIds: ReadonlySet<string>): boolean {
+  const beatsInRange = Number.isFinite(line.beats) && line.beats >= 0 && line.beats <= MAX_LINE_BEATS;
+  return !!line.id && !seenIds.has(line.id) && typeof line.text === 'string' && Array.isArray(line.changes)
+    && Number.isInteger(line.columns) && line.columns >= line.text.length
+    && beatsInRange && !(line.changes.length > 0 && line.beats <= 0);
+}
+
+/** Changes must name a known chord, sit inside the line, and move strictly forward in time. */
+function validateAnchors(line: SheetLine, symbols: ReadonlySet<string>): void {
+  let lastColumn = -1;
+  let lastBeat = -1;
+  for (const change of line.changes) {
+    const columnOk = Number.isInteger(change.column) && change.column >= Math.max(0, lastColumn) && change.column <= line.columns;
+    const beatOk = Number.isFinite(change.beat) && change.beat >= 0 && change.beat > lastBeat && change.beat < line.beats;
+    if (!symbols.has(change.symbol) || !columnOk || !beatOk) {
+      throw new Error(`Invalid chord anchor: ${line.id} ${change.symbol}, column ${change.column}, beat ${change.beat}/${line.beats}`);
+    }
+    lastColumn = change.column;
+    lastBeat = change.beat;
+  }
+}
+
 export function validateChordSheet(value: unknown): asserts value is ChordSheet {
   if (!value || typeof value !== 'object') throw new Error('Invalid chord sheet');
-  const s = value as ChordSheet;
-  if (s.version !== 1 || typeof s.id !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(s.id)
-    || !s.title || !s.artist || !Array.isArray(s.lines) || !Array.isArray(s.chords)
-    || !['included', 'omitted'].includes(s.lyrics) || !['keyboard', 'guitar', 'chordpro'].includes(s.instrument) || s.timing !== 'estimated') throw new Error('Invalid chord sheet metadata');
-  if (s.credits !== undefined && s.credits !== null && typeof s.credits !== 'string') throw new Error('Invalid chord sheet credits');
-  if (s.bpm !== null && (!Number.isFinite(s.bpm) || s.bpm < 20 || s.bpm > 300)) throw new Error('Invalid BPM');
-  const symbols = new Set(s.chords.map((c) => c.symbol));
-  if (symbols.size !== s.chords.length || !symbols.size || !s.lines.length) throw new Error('Empty or duplicate chord dictionary');
-  for (const c of s.chords) {
-    if (typeof c.symbol !== 'string' || !Array.isArray(c.keyboardPitchClasses) || c.keyboardPitchClasses.some((n) => !Number.isInteger(n) || n < 0 || n > 11)) throw new Error('Invalid chord definition');
-    if (c.canonical !== null) getCelloChord(c.canonical);
-  }
+  const sheet = value as ChordSheet;
+  if (!hasValidMetadata(sheet)) throw new Error('Invalid chord sheet metadata');
+  if (sheet.credits !== undefined && sheet.credits !== null && typeof sheet.credits !== 'string') throw new Error('Invalid chord sheet credits');
+  if (!hasValidBpm(sheet.bpm)) throw new Error('Invalid BPM');
+  const symbols = validateChordDictionary(sheet.chords, sheet.lines.length);
   const ids = new Set<string>();
-  for (const line of s.lines) {
-    if (!line.id || ids.has(line.id) || typeof line.text !== 'string' || !Array.isArray(line.changes)
-      || !Number.isInteger(line.columns) || line.columns < line.text.length
-      || !Number.isFinite(line.beats) || line.beats < 0 || line.beats > 128
-      || (line.changes.length > 0 && line.beats <= 0)) throw new Error('Invalid chord line');
+  for (const line of sheet.lines) {
+    if (!hasValidLineShape(line, ids)) throw new Error('Invalid chord line');
     ids.add(line.id);
-    let lastColumn = -1, lastBeat = -1;
-    for (const c of line.changes) {
-      if (!symbols.has(c.symbol) || !Number.isInteger(c.column) || c.column < 0 || c.column < lastColumn || c.column > line.columns
-        || !Number.isFinite(c.beat) || c.beat < 0 || c.beat <= lastBeat || c.beat >= line.beats) throw new Error(`Invalid chord anchor: ${line.id} ${c.symbol}, column ${c.column}, beat ${c.beat}/${line.beats}`);
-      lastColumn = c.column; lastBeat = c.beat;
-    }
+    validateAnchors(line, symbols);
   }
 }

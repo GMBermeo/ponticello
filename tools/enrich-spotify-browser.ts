@@ -16,6 +16,23 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 
+/** Joins between performers: "feat.", "ft.", "&", a comma, or Portuguese "e". */
+const ARTIST_SEPARATOR = /feat\.?|ft\.?|&|,|\be\b/i;
+
+/** "Song (Ao Vivo)" → "Song": each parenthetical removed, scanning rather than backtracking. */
+function withoutParentheticals(text: string): string {
+  let out = '';
+  let cursor = 0;
+  for (;;) {
+    const open = text.indexOf('(', cursor);
+    const close = open < 0 ? -1 : text.indexOf(')', open + 1);
+    if (close < 0) break;
+    out += text.slice(cursor, open);
+    cursor = close + 1;
+  }
+  return (out + text.slice(cursor)).trim();
+}
+
 interface CliOptions {
   chartsDir: string;
   cacheFile: string;
@@ -196,7 +213,8 @@ class ChromeCDP {
       }
 
       return trackHref;
-    } catch (err) {
+    } catch {
+      // A failed search is a miss, not an error: the caller tries the next query.
       return null;
     } finally {
       if (ws) {
@@ -225,6 +243,46 @@ function insertSpotifyUrl(rawJson: Record<string, any>, spotifyUrl: string): Rec
     out.spotifyUrl = spotifyUrl;
   }
   return out;
+}
+
+/** Tracks the search picks wrongly, pinned by hand. */
+const PINNED_TRACKS: Readonly<Record<string, string>> = {
+  '3-doors-down-kryptonite': 'https://open.spotify.com/track/6ZOBP3NvffbU4SZcrnt1k6?si=ba02766359f946af',
+};
+
+type KnownUrl = { url: string; source: 'pinned' | 'chart' | 'cache' };
+
+/** A URL that needs no search: pinned, already in the chart, or cached — unless forcing a fresh look. */
+function knownSpotifyUrl(songId: string, chart: Record<string, any>, cache: SpotifyCache, force: boolean): KnownUrl | null {
+  const pinned = PINNED_TRACKS[songId];
+  if (pinned) return { url: pinned, source: 'pinned' };
+  if (force) return null;
+  if (chart.spotifyUrl) return { url: chart.spotifyUrl, source: 'chart' };
+  const cached = cache[songId]?.spotifyUrl;
+  return cached ? { url: cached, source: 'cache' } : null;
+}
+
+function trackIdOf(hrefOrUrl: string): string | null {
+  return /\/track\/([a-zA-Z0-9]+)/.exec(hrefOrUrl)?.[1] ?? null;
+}
+
+/**
+ * Searches as written, then without parenthetical notes such as "(Ao Vivo)",
+ * then with only the first of several performers.
+ */
+async function findTrackHref(cdp: ChromeCDP, artist: string, title: string): Promise<{ href: string | null; query: string }> {
+  const cleanTitle = withoutParentheticals(title);
+  const primaryArtist = artist.split(ARTIST_SEPARATOR)[0].trim();
+  const queries = [`${artist} ${title}`];
+  if (cleanTitle !== title.trim()) queries.push(`${artist} ${cleanTitle}`);
+  if (primaryArtist !== artist.trim()) queries.push(`${primaryArtist} ${cleanTitle}`);
+  let query = queries[0]!;
+  for (const candidate of queries) {
+    query = candidate;
+    const href = await cdp.searchTrack(candidate);
+    if (href) return { href, query };
+  }
+  return { href: null, query };
 }
 
 async function main() {
@@ -263,109 +321,70 @@ async function main() {
 
   const results: { file: string; id: string; spotifyUrl: string | null }[] = [];
 
+  type Outcome = 'updated' | 'cached' | 'failed';
+
+  const readChart = (filePath: string): Record<string, any> | null => {
+    try {
+      return JSON.parse(readFileSync(filePath, 'utf8'));
+    } catch (err) {
+      console.error(`Failed to parse ${filePath}:`, err);
+      return null;
+    }
+  };
+
+  const writeChart = (filePath: string, chart: Record<string, any>) => {
+    writeFileSync(filePath, JSON.stringify(chart, null, 2) + '\n');
+  };
+
+  const remember = (songId: string, chart: Record<string, any>, spotifyUrl: string) => {
+    cache[songId] = {
+      id: songId, title: chart.title, artist: chart.artist, spotifyUrl, trackId: trackIdOf(spotifyUrl), timestamp: new Date().toISOString(),
+    };
+    saveCache(options.cacheFile, cache);
+  };
+
+  const processChart = async (filename: string, tag: string): Promise<Outcome> => {
+    const filePath = join(options.chartsDir, filename);
+    const chart = readChart(filePath);
+    if (!chart) return 'failed';
+    const songId = chart.id || filename.replace('.json', '');
+    const { title, artist } = chart;
+
+    const known = knownSpotifyUrl(songId, chart, cache, options.force);
+    if (known) {
+      if (known.source !== 'chart') writeChart(filePath, insertSpotifyUrl(chart, known.url));
+      results.push({ file: filename, id: songId, spotifyUrl: known.url });
+      if (known.source === 'pinned') {
+        remember(songId, chart, known.url);
+        console.log(`${tag} ✓ ${title} by ${artist} -> ${known.url} (user default)`);
+        return 'updated';
+      }
+      const where = known.source === 'chart' ? 'already present' : 'from cache';
+      console.log(`${tag} • ${title} by ${artist} -> ${where}: ${known.url}`);
+      return 'cached';
+    }
+
+    const { href, query } = await findTrackHref(cdp, artist, title);
+    if (!href) {
+      console.warn(`${tag} ✗ No track found on Spotify for "${query}"`);
+      results.push({ file: filename, id: songId, spotifyUrl: null });
+      return 'failed';
+    }
+    const trackId = trackIdOf(href);
+    const spotifyUrl = trackId ? `https://open.spotify.com/track/${trackId}` : `https://open.spotify.com${href}`;
+    writeChart(filePath, insertSpotifyUrl(chart, spotifyUrl));
+    remember(songId, chart, spotifyUrl);
+    console.log(`${tag} ✓ ${title} by ${artist} -> ${spotifyUrl}`);
+    results.push({ file: filename, id: songId, spotifyUrl });
+    return 'updated';
+  };
+
   const worker = async () => {
-    while (queue.length > 0) {
-      const filename = queue.shift();
-      if (!filename) break;
-
-      const idx = ++currentIndex;
-      const filePath = join(options.chartsDir, filename);
-      let chart: Record<string, any>;
-      try {
-        chart = JSON.parse(readFileSync(filePath, 'utf8'));
-      } catch (err) {
-        console.error(`[${idx}/${targets.length}] Failed to parse ${filename}:`, err);
-        failedCount++;
-        continue;
-      }
-
-      const songId = chart.id || filename.replace('.json', '');
-      const title = chart.title;
-      const artist = chart.artist;
-
-      // Check special case for kryptonite
-      if (songId === '3-doors-down-kryptonite') {
-        const specialUrl = 'https://open.spotify.com/track/6ZOBP3NvffbU4SZcrnt1k6?si=ba02766359f946af';
-        chart = insertSpotifyUrl(chart, specialUrl);
-        writeFileSync(filePath, JSON.stringify(chart, null, 2) + '\n');
-        cache[songId] = {
-          id: songId,
-          title,
-          artist,
-          spotifyUrl: specialUrl,
-          trackId: '6ZOBP3NvffbU4SZcrnt1k6',
-          timestamp: new Date().toISOString(),
-        };
-        saveCache(options.cacheFile, cache);
-        console.log(`[${idx}/${targets.length}] ✓ ${title} by ${artist} -> ${specialUrl} (user default)`);
-        updatedCount++;
-        results.push({ file: filename, id: songId, spotifyUrl: specialUrl });
-        continue;
-      }
-
-      // If already in file and not forcing
-      if (!options.force && chart.spotifyUrl) {
-        console.log(`[${idx}/${targets.length}] • ${title} by ${artist} -> already present: ${chart.spotifyUrl}`);
-        cachedCount++;
-        results.push({ file: filename, id: songId, spotifyUrl: chart.spotifyUrl });
-        continue;
-      }
-
-      // If in cache and not forcing
-      if (!options.force && cache[songId]?.spotifyUrl) {
-        const cachedUrl = cache[songId].spotifyUrl!;
-        chart = insertSpotifyUrl(chart, cachedUrl);
-        writeFileSync(filePath, JSON.stringify(chart, null, 2) + '\n');
-        console.log(`[${idx}/${targets.length}] • ${title} by ${artist} -> from cache: ${cachedUrl}`);
-        cachedCount++;
-        results.push({ file: filename, id: songId, spotifyUrl: cachedUrl });
-        continue;
-      }
-
-      // Primary search query
-      let query = `${artist} ${title}`;
-      let trackHref = await cdp.searchTrack(query);
-
-      // Fallback 1: remove text in parentheses from title (e.g. "(Ao Vivo)", "(feat. ...)")
-      if (!trackHref && /\([^)]*\)/.test(title)) {
-        const cleanTitle = title.replace(/\([^)]*\)/g, '').trim();
-        query = `${artist} ${cleanTitle}`;
-        trackHref = await cdp.searchTrack(query);
-      }
-
-      // Fallback 2: if artist has multiple performers (feat, e, &), use primary artist
-      if (!trackHref && /(?:feat\.?|ft\.?|&|,|\be\b)/i.test(artist)) {
-        const primaryArtist = artist.split(/(?:feat\.?|ft\.?|&|,|\be\b)/i)[0].trim();
-        query = `${primaryArtist} ${title.replace(/\([^)]*\)/g, '').trim()}`;
-        trackHref = await cdp.searchTrack(query);
-      }
-
-      if (trackHref) {
-        const match = /\/track\/([a-zA-Z0-9]+)/.exec(trackHref);
-        const trackId = match ? match[1] : null;
-        const spotifyUrl = trackId ? `https://open.spotify.com/track/${trackId}` : `https://open.spotify.com${trackHref}`;
-
-        chart = insertSpotifyUrl(chart, spotifyUrl);
-        writeFileSync(filePath, JSON.stringify(chart, null, 2) + '\n');
-
-        cache[songId] = {
-          id: songId,
-          title,
-          artist,
-          spotifyUrl,
-          trackId,
-          timestamp: new Date().toISOString(),
-        };
-        saveCache(options.cacheFile, cache);
-
-        console.log(`[${idx}/${targets.length}] ✓ ${title} by ${artist} -> ${spotifyUrl}`);
-        updatedCount++;
-        results.push({ file: filename, id: songId, spotifyUrl });
-      } else {
-        console.warn(`[${idx}/${targets.length}] ✗ No track found on Spotify for "${query}"`);
-        failedCount++;
-        results.push({ file: filename, id: songId, spotifyUrl: null });
-      }
+    for (let filename = queue.shift(); filename; filename = queue.shift()) {
+      const outcome = await processChart(filename, `[${++currentIndex}/${targets.length}]`);
+      if (outcome === 'updated') updatedCount++;
+      else if (outcome === 'cached') cachedCount++;
+      else failedCount++;
     }
   };
 

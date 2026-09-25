@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { solveFingering } from "../../src/domain/fingering";
+import { solveFingering } from "@domain";
 import {
   applyFingeringAnswers,
   buildFingeringUserPrompt,

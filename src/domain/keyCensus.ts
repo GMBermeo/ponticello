@@ -17,7 +17,7 @@
  * Pure: no React, no React Native, no Web Audio. See AGENTS.md.
  */
 
-import { CelloString } from './cello';
+import { CelloString, toPitchClass } from './cello';
 import { KeyMode, PitchClass, keyName } from './key';
 
 // ─── Naming ──────────────────────────────────────────────────────────────────
@@ -54,9 +54,7 @@ export function parseKeyName(label: string): ParsedKey | null {
   const trimmed = label.trim().toLowerCase();
   if (!trimmed) return null;
 
-  const mode: KeyMode | null = /\bmin(or)?\b/.test(trimmed) ? 'minor'
-    : /\bmaj(or)?\b/.test(trimmed) ? 'major'
-      : null;
+  const mode = keyModeOf(trimmed);
   if (!mode) return null;
 
   const letter = trimmed.split(/\s+/)[0];
@@ -87,7 +85,7 @@ export function canonicalKeyName(key: ParsedKey): string {
 const OPEN_STRING_TONIC: Record<number, CelloString> = { 0: 'C', 7: 'G', 2: 'D', 9: 'A' };
 
 export function openStringTonic(tonic: PitchClass): CelloString | null {
-  return OPEN_STRING_TONIC[((tonic % 12) + 12) % 12] ?? null;
+  return OPEN_STRING_TONIC[toPitchClass(tonic)] ?? null;
 }
 
 /**
@@ -101,7 +99,7 @@ export function openStringTonic(tonic: PitchClass): CelloString | null {
  */
 export function fifthsOf(key: ParsedKey): number {
   const relativeMajor = key.mode === 'minor' ? key.tonic + 3 : key.tonic;
-  return ((((relativeMajor * 7 + 5) % 12) + 12) % 12) - 5;
+  return (toPitchClass(relativeMajor * 7 + 5)) - 5;
 }
 
 // ─── The census ──────────────────────────────────────────────────────────────
@@ -187,7 +185,7 @@ export function keyCensus(songs: readonly { key: string }[]): KeyCensus {
 export function censusEntry(
   census: KeyCensus, tonic: PitchClass, mode: KeyMode,
 ): KeyCensusEntry | undefined {
-  const wanted = ((tonic % 12) + 12) % 12;
+  const wanted = toPitchClass(tonic);
   return census.entries.find((entry) => entry.tonic === wanted && entry.mode === mode);
 }
 
@@ -247,10 +245,16 @@ export function censusLine(entry: KeyCensusEntry, total: number): string {
   const one = entry.songs === 1;
   const songs = `${entry.songs} ${one ? 'song' : 'songs'}`;
   const of = total > 0 ? ` of ${total}` : '';
-  const lead = entry.rank === 1
-    ? `${songs}${of} in your library ${one ? 'is' : 'are'} in ${entry.key} — more than any other key.`
-    : `${songs}${of} in your library ${one ? 'is' : 'are'} in ${entry.key}.`;
+  const verb = one ? 'is' : 'are';
+  const emphasis = entry.rank === 1 ? ' — more than any other key' : '';
+  const lead = `${songs}${of} in your library ${verb} in ${entry.key}${emphasis}.`;
   return entry.openString
     ? `${lead} Its tonic is the open ${entry.openString} string, so you can tune the drone to it by ear.`
     : lead;
+}
+
+function keyModeOf(text: string): KeyMode | null {
+  if (/\bmin(or)?\b/.test(text)) return 'minor';
+  if (/\bmaj(or)?\b/.test(text)) return 'major';
+  return null;
 }

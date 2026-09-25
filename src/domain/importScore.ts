@@ -11,7 +11,7 @@
  * from a file the app never had to ship.
  */
 
-import { arrangeMidi, bassLine, harmonicGuide, rebaseLine } from './arrangement';
+import { arrangeMidi, bassLine, harmonicGuide, rebaseLine } from './arranger';
 import { BackingTrack, backingFromMidi, soloPartFromScore } from './backing';
 import { midiToFrequency, midiToPitchName } from './cello';
 import { difficultyOf } from './difficulty';

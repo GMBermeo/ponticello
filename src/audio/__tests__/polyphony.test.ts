@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { practiceLoop } from '@/domain/loop';
-import { BackingPart } from '@/domain/backing';
+import { practiceLoop, BackingPart } from '@domain';
 import { VOICES } from '../voices';
 import { buildProgram, limitPolyphony, MAX_POLYPHONY, ScheduledNote } from '../backing/program';
 

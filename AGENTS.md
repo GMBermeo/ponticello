@@ -22,7 +22,9 @@ timeMs.set(timeMs.get() + delta);
 ## Sizes are design units, not pixels
 
 Everything visual is written against an 829 × 690 canvas (the Fold 5 inner
-display at its native density) and converted through `useTheme().s()`. See
+display at its native density) and converted through `useTheme().s()`, which
+never goes below 1.0 — smaller screens, the iPhone Duo included, reflow to the
+compact layout rather than shrink. See
 `src/theme/scale.ts`. Drawing components that need to fill a box take **device
 pixels** and get them from `useMeasuredSize()` — do not compute a column's
 height by subtracting constants from the canvas, because safe-area insets and
@@ -33,6 +35,36 @@ stable getter function during render** (`const choice = store.get(id)`): the
 compiler memoises the call on the getter's identity, so the value never updates
 — this is why picking a track part once did nothing. Subscribe instead
 (`useSettingsSelector`, `useTrackChoice`, `usePlayheadPosition`).
+
+Settings are read only through narrow selector hooks — `useVisionPreferences`,
+`useAudioPreferences`, `useTapeSettings`, `useThemePreference`,
+`useTrackChoice`, or `useSettingsSelector` for anything else — and written
+through `useSettingsActions`. There is deliberately no whole-object hook: a
+component re-renders only when a setting it draws changes.
+
+## The design system (since 1.8)
+
+The interface is designed for the iPhone Duo (466 × 678 pt inner display,
+iOS 27) and must still work on Android and the web. Reach for the shared
+pieces instead of hand-styling:
+
+- **Surfaces:** `Card` for grouped content; `Glass` / `GlassIconButton` only
+  for chrome that floats over content (Liquid Glass on iOS 26+, an opaque card
+  elsewhere). No hairline rules between regions — cards and gaps do that.
+- **Shape:** `RADIUS` and `theme.corners(units)` (continuous corners on iOS).
+  Controls are capsules. Shadows use `boxShadow`; the `shadow*` props are
+  deprecated in RN 0.86.
+- **Type:** spread a face from `FACE` (`...FACE.heavy`) — SF Pro / SF Pro
+  Rounded on iOS, Archivo elsewhere. There is no `FONT` any more.
+- **Colour:** chrome tokens only (`bg`, `surface`, `fill`, `accent`,
+  `onAccent`, `dim`…). The accent is indigo; blue, green, red and yellow are
+  note and string colours and never chrome.
+- **Icons:** `Icon` by meaning (`back`, `play`, `tuner`…), an SF Symbol on iOS.
+- **Tabs:** Library, Practice, Tuner and Chords live in `src/app/(tabs)`.
+  Tabs are mounted before they are shown, so anything with a side effect (the
+  microphone) must follow `useIsFocused()`, not mount.
+- A `Screen` nested in another does not re-apply safe-area insets — nest
+  freely, but never pad with `useSafeAreaInsets()` a second time by hand.
 
 ## The play screen's clock
 
@@ -50,11 +82,47 @@ only) regenerate `bundledSongs.json`, `catalogIndex.ts` and
 into `releases/`. Tests that assert library *size* gate on
 `LIBRARY_EDITION.id`; correctness checks run for both.
 
+## Folders and imports
+
+Routes in `src/app` are composition only; a screen's pieces live in a feature
+folder under `src/components/` (`library/`, `practice-setup/`, `play/`,
+`chords/`, `progression/`, `tuner/`). Pure logic a component needs goes in a
+plain `.ts` file beside it (e.g. `library/libraryFilters.ts`) or in
+`src/domain`, and gets a test.
+
+Every top-level folder has an `index.ts` barrel: `@audio`, `@components`,
+`@domain`, `@scores`, `@state`, `@theme` (see `tsconfig.json` `paths` and
+`tools/pathAliases.ts`, which must stay in step). Use the alias across
+folders; inside a folder use relative imports — importing your own barrel
+creates a cycle. A new file must be added to its folder's `index.ts`.
+
+Shared logic lives in one deep module rather than being re-derived:
+`domain/harmony` for anything about which chord or root is sounding (the
+accompaniment, the harmonic guide, the Ollama features and the audit all use
+it, each passing its own documented policy), `toPitchClass` in `domain/cello`
+for pitch-class arithmetic, and `audio/pitchTracker` for what the player sees
+of their pitch — `usePitch` only adapts it to shared values and listeners.
+
+The barrels are not split per screen for startup speed, on purpose: all of
+`src/components` is about 0.5 MB of source against 43 MB of bundled song and
+chord JSON, and Expo Router loads every route module at startup on native
+anyway. Revisit only with a measured cold-start profile.
+
+Static types: option lists are `readonly Segment<T>[]`, lookups are
+`Record<Union, …>`; no `as const` object arrays, no `any` in `src`.
+
+## Lint
+
+`npx eslint .` runs Expo's config plus SonarJS (`eslint-plugin-sonarjs`) and
+must report nothing. A justified exception gets an
+`eslint-disable-next-line <rule> -- reason` comment, never a blanket disable.
+
 ## Before you commit
 
 ```
 npm run typecheck
 npm test
+npx eslint .
 ```
 
 Tests are pure TypeScript and must stay that way — nothing in `src/domain`,

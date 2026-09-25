@@ -11,7 +11,7 @@
  * would otherwise let a drill vote for its own key.
  */
 
-import { KeyCensus, keyCensus } from '@/domain/keyCensus';
+import { KeyCensus, keyCensus } from '@domain';
 import { COMPACT_SCORES } from './bundledSongs';
 
 export const LIBRARY_KEY_CENSUS: KeyCensus = keyCensus(COMPACT_SCORES);

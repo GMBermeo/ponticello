@@ -30,16 +30,18 @@
  */
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { ARRANGEMENT_LEVELS, ARRANGEMENT_PROFILES, arrangeScoreForLevel } from '../src/domain/arrangement';
-import { BackingPart, isMinorKey, tonicPitchClass } from '../src/domain/backing';
-import { midiToPitchName, OPEN_STRING_MIDI } from '../src/domain/cello';
-import { difficultyOf } from '../src/domain/difficulty';
-import { firstPositionFingering, RawNoteEvent } from '../src/domain/fingering';
-import { DetectedKey, detectKey } from '../src/domain/key';
-import { CelloSongScore, DifficultyTier, measureDurationMs, validateScore } from '../src/domain/schema';
-import { COMPACT_SCORES, CORE_SCORES, getBassLine, getBundledBacking, getGuideLine, getScore } from '../src/scores';
+import {
+  ARRANGEMENT_LEVELS, ARRANGEMENT_PROFILES, arrangeScoreForLevel, BackingPart, isMinorKey,
+  tonicPitchClass, midiToPitchName, OPEN_STRING_MIDI, difficultyOf, firstPositionFingering,
+  RawNoteEvent, DetectedKey, detectKey, CelloSongScore, DifficultyTier, measureDurationMs,
+  validateScore, type ArrangementLevel, bestTriad, overlapMs, weighPitchClasses, toPitchClass,
+} from '@domain';
+import {
+  COMPACT_SCORES, CORE_SCORES, getBassLine, getBundledBacking, getGuideLine, getScore,
+} from '@scores';
 
-type Level = string;
+/** A level, or '-' for a check that belongs to the whole song. */
+type AuditLevel = ArrangementLevel | '-';
 
 // ─── Doctrine: measured from published beginner cello material ───────────────
 
@@ -53,7 +55,7 @@ const G4 = 67;
  */
 const DOCTRINE = {
   /** §1/#1 — ABRSM sight-reading ranges: Grades 1–3 stop at d′ (D4); Grade 4 reaches g′. */
-  ceiling: { Beginner: D4, Intermediate: D4, Advanced: D4, Expert: G4 } as Record<Level, number>,
+  ceiling: { Beginner: D4, Intermediate: D4, Advanced: D4, Expert: G4 } as Record<ArrangementLevel, number>,
   /** The instrument's own floor. §6 #2's G2 floor is a Grade-1 *melody* bound — see `belowOpenG`. */
   floor: OPEN_STRING_MIDI.C,
   /**
@@ -61,7 +63,7 @@ const DOCTRINE = {
    * an octave (12) is S6 Für Elise and 16 is S7 Bach Minuet, both stated
    * "Beginners with some playing experience".
    */
-  maxLeap: { Beginner: 9, Intermediate: 12, Advanced: 16, Expert: 16 } as Record<Level, number>,
+  maxLeap: { Beginner: 9, Intermediate: 12, Advanced: 16, Expert: 16 } as Record<ArrangementLevel, number>,
   /** §4/#11 — fewer than 4% of intervals exceed a perfect 5th at "Beginners". */
   wideLeapShare: 0.04,
   /**
@@ -69,7 +71,7 @@ const DOCTRINE = {
    * Grade 1; semiquavers first appear at Grade 3. So the shortest attack gap
    * is a quaver until Advanced, and a semiquaver there.
    */
-  shortestAttackBeats: { Beginner: 0.5, Intermediate: 0.5, Advanced: 0.25, Expert: 0 } as Record<Level, number>,
+  shortestAttackBeats: { Beginner: 0.5, Intermediate: 0.5, Advanced: 0.25, Expert: 0 } as Record<ArrangementLevel, number>,
   /** §1/#6 — dotted minims appear at Grade 2; nothing longer is listed below Grade 3. */
   longestNoteBeats: 3,
   /** §3/#9 — measured: the published drone/bass part holds nothing longer than a crotchet. */
@@ -170,13 +172,13 @@ const CHECKS: readonly CheckDef[] = [
 ];
 type CheckName = (typeof CHECKS)[number]['name'];
 
-interface Failure { check: CheckName; kind: CheckKind; id: string; level: Level; message: string }
+interface Failure { check: CheckName; kind: CheckKind; id: string; level: AuditLevel; message: string }
 
 const KIND_OF = new Map(CHECKS.map((def) => [def.name, def.kind]));
 const failures: Failure[] = [];
 const rows: Record<string, string | number>[] = [];
 
-function check(ok: boolean, name: CheckName, id: string, level: Level, message: string): void {
+function check(ok: boolean, name: CheckName, id: string, level: AuditLevel, message: string): void {
   if (ok) return;
   failures.push({ check: name, kind: KIND_OF.get(name) ?? 'integrity', id, level, message });
 }
@@ -281,17 +283,13 @@ class Harmony {
     }
     this.active = this.active.filter((event) => event.endMs > fromMs);
 
-    const weights = new Array<number>(12).fill(0);
-    let total = 0;
-    let lowest: number | null = null;
-    for (const event of this.active) {
-      const overlap = Math.min(toMs, event.endMs) - Math.max(fromMs, event.startMs);
-      if (overlap <= 0) continue;
-      const pitchClass = ((event.midiNumber % 12) + 12) % 12;
-      weights[pitchClass] = weights[pitchClass]! + overlap;
-      total += overlap;
-      if (lowest === null || event.midiNumber < lowest) lowest = event.midiNumber;
-    }
+    const window = { fromMs, toMs };
+    const sounding = this.active.map((event) => ({
+      midiNumber: event.midiNumber, startTimeMs: event.startMs, durationMs: event.endMs - event.startMs,
+    }));
+    const { weights, total } = weighPitchClasses(sounding, { window });
+    const pitches = sounding.filter((note) => overlapMs(note, window) > 0).map((note) => note.midiNumber);
+    const lowest = pitches.length > 0 ? Math.min(...pitches) : null;
     return { weights, total, lowest, classes: weights.filter((weight) => weight > 0).length };
   }
 }
@@ -299,8 +297,8 @@ class Harmony {
 /**
  * Best-fitting triad for a weighted pitch-class table.
  *
- * Weighted as `inferChord` in `domain/backing` does — root ×1.6, third ×1.2,
- * fifth ×0.6 — **but without its lowest-note bonus.** That bonus was measured
+ * The same `bestTriad` fit the accompaniment uses (`domain/harmony`) — root
+ * ×1.6, third ×1.2, fifth ×0.6 — **but without its lowest-note bonus.** That bonus was measured
  * to dominate every window, which made "the chord root" mean "the bass note";
  * and since the Beginner and Intermediate lines are derived from the source
  * bass, the check then closed a loop and confirmed itself. Without it the
@@ -309,15 +307,8 @@ class Harmony {
  */
 function chordOf(sample: HarmonyWindow): { root: number; minor: boolean } | null {
   if (sample.total <= 0) return null;
-  const weight = (pitchClass: number) => sample.weights[((pitchClass % 12) + 12) % 12] ?? 0;
-  let best = { root: 0, minor: false, score: -1 };
-  for (let root = 0; root < 12; root++) {
-    for (const minor of [false, true]) {
-      const value = weight(root) * 1.6 + weight(root + (minor ? 3 : 4)) * 1.2 + weight(root + 7) * 0.6;
-      if (value > best.score) best = { root, minor, score: value };
-    }
-  }
-  return { root: best.root, minor: best.minor };
+  const { root, minor } = bestTriad(sample);
+  return { root, minor };
 }
 
 // ─── What the song does, independent of any level ────────────────────────────
@@ -398,7 +389,7 @@ function musicOf(score: CelloSongScore, parts: readonly BackingPart[]): SongMusi
 
 interface Metrics {
   id: string;
-  level: Level;
+  level: ArrangementLevel;
   role: string;
   notes: number;
   lowMidi: number;
@@ -440,6 +431,15 @@ interface Metrics {
 
 const metrics: Metrics[] = [];
 
+/** The harmony sounding at a note's attack, or across the whole note when nothing sounds at the attack. */
+function harmonyUnder(note: { startTimeMs: number; durationMs: number }, music: SongMusic) {
+  const attackMs = Math.max(1, Math.min(note.durationMs, music.beatMs));
+  const sample = music.harmony.window(note.startTimeMs, note.startTimeMs + attackMs);
+  return sample.total === 0
+    ? music.harmony.window(note.startTimeMs, note.startTimeMs + Math.max(1, note.durationMs))
+    : sample;
+}
+
 /** Share of a line's notes that are the root (or root/fifth, or any chord tone) of the sounding chord. */
 function harmonyAgreement(
   notes: readonly { midiNumber: number; startTimeMs: number; durationMs: number }[],
@@ -452,23 +452,32 @@ function harmonyAgreement(
   let bass = 0;
   const sorted = [...notes].sort((a, b) => a.startTimeMs - b.startTimeMs);
   for (const note of sorted) {
-    const attackMs = Math.max(1, Math.min(note.durationMs, music.beatMs));
-    let sample = music.harmony.window(note.startTimeMs, note.startTimeMs + attackMs);
-    if (sample.total === 0) {
-      sample = music.harmony.window(note.startTimeMs, note.startTimeMs + Math.max(1, note.durationMs));
-    }
+    const sample = harmonyUnder(note, music);
     const chord = chordOf(sample);
     if (!chord) continue;
     judged++;
-    const pitchClass = (((note.midiNumber + transpose) % 12) + 12) % 12;
+    const pitchClass = toPitchClass(note.midiNumber + transpose);
     const third = (chord.root + (chord.minor ? 3 : 4)) % 12;
     const fifth = (chord.root + 7) % 12;
     if (pitchClass === chord.root) root++;
     if (pitchClass === chord.root || pitchClass === fifth) rootFifth++;
     if (pitchClass === chord.root || pitchClass === third || pitchClass === fifth) chordTone++;
-    if (sample.lowest !== null && pitchClass === ((sample.lowest % 12) + 12) % 12) bass++;
+    if (sample.lowest !== null && pitchClass === toPitchClass(sample.lowest)) bass++;
   }
   return { judged, root, rootFifth, chordTone, bass };
+}
+
+/** Largest leap, how many leaps pass a fifth, how many notes repeat, and the closest two attacks. */
+function intervalStats(notes: readonly { midiNumber: number; startTimeMs: number }[]) {
+  const stats = { maxLeap: 0, wide: 0, repeated: 0, shortestMs: Infinity };
+  for (let i = 1; i < notes.length; i++) {
+    const interval = Math.abs(notes[i]!.midiNumber - notes[i - 1]!.midiNumber);
+    stats.maxLeap = Math.max(stats.maxLeap, interval);
+    if (interval > 7) stats.wide++;
+    if (interval === 0) stats.repeated++;
+    stats.shortestMs = Math.min(stats.shortestMs, notes[i]!.startTimeMs - notes[i - 1]!.startTimeMs);
+  }
+  return stats;
 }
 
 function measureLevel(score: CelloSongScore, music: SongMusic): Omit<Metrics, 'id' | 'level' | 'failures'> {
@@ -490,17 +499,7 @@ function measureLevel(score: CelloSongScore, music: SongMusic): Omit<Metrics, 'i
 
   const pitches = notes.map((note) => note.midiNumber);
   const opens = new Set(Object.values(OPEN_STRING_MIDI));
-  let maxLeap = 0;
-  let wide = 0;
-  let repeated = 0;
-  let shortestMs = Infinity;
-  for (let i = 1; i < notes.length; i++) {
-    const interval = Math.abs(notes[i]!.midiNumber - notes[i - 1]!.midiNumber);
-    maxLeap = Math.max(maxLeap, interval);
-    if (interval > 7) wide++;
-    if (interval === 0) repeated++;
-    shortestMs = Math.min(shortestMs, notes[i]!.startTimeMs - notes[i - 1]!.startTimeMs);
-  }
+  const { maxLeap, wide, repeated, shortestMs } = intervalStats(notes);
 
   const line = spansOf(notes);
   const firstMs = line.reduce((min, span) => Math.min(min, span.startMs), Infinity);
@@ -530,14 +529,14 @@ function measureLevel(score: CelloSongScore, music: SongMusic): Omit<Metrics, 'i
     attacksPer4Beats: notes.length / (music.songBeats / 4),
     repeated: notes.length > 1 ? repeated / (notes.length - 1) : 0,
     distinctPitches: new Set(pitches).size,
-    pitchClasses: new Set(pitches.map((midi) => ((midi % 12) + 12) % 12)).size,
-    accidentals: notes.filter((note) => !music.declared.scale.has(((note.midiNumber % 12) + 12) % 12)).length,
+    pitchClasses: new Set(pitches.map((midi) => toPitchClass(midi))).size,
+    accidentals: notes.filter((note) => !music.declared.scale.has(toPitchClass(note.midiNumber))).length,
     accidentalsEitherMode: notes.filter((note) => {
-      const pitchClass = ((note.midiNumber % 12) + 12) % 12;
+      const pitchClass = toPitchClass(note.midiNumber);
       return !music.declared.scale.has(pitchClass) && !music.declared.parallel.has(pitchClass);
     }).length,
     inKeyDetected: notes.filter((note) =>
-      music.key.scale.includes(((note.midiNumber % 12) + 12) % 12)).length / notes.length,
+      music.key.scale.includes(toPitchClass(note.midiNumber))).length / notes.length,
     extensions: notes.filter((note) => note.extension !== 'none').length,
     openShare: notes.filter((note) => opens.has(note.midiNumber)).length / notes.length,
     entryBeats: (firstMs - music.startMs) / music.beatMs,
@@ -555,11 +554,150 @@ function measureLevel(score: CelloSongScore, music: SongMusic): Omit<Metrics, 'i
   };
 }
 
+
+/** What every group of checks reads about one arranged level. */
+interface CheckContext {
+  id: string;
+  level: ArrangementLevel;
+  label: string;
+  m: ReturnType<typeof measureLevel>;
+  music: SongMusic;
+  notes: CelloSongScore['notes'];
+  score: CelloSongScore;
+  beginner: boolean;
+  drone: boolean;
+  upper: number;
+  maximumStop: number;
+  missedOpens: number;
+  pitches: number[];
+}
+
+/** Doctrine: the published standard, with its own constants. */
+function doctrineChecks(c: CheckContext): void {
+  const { id, level, label, m, music, notes, beginner } = c;
+  const { drone, upper, maximumStop, missedOpens, score } = c;
+  const ceiling = DOCTRINE.ceiling[level] ?? D4;
+  check(m.highMidi <= ceiling, 'ceiling', id, level,
+    `${label}: tops out at ${midiToPitchName(m.highMidi)}, above ${midiToPitchName(ceiling)}`);
+  check(m.lowMidi >= DOCTRINE.floor, 'floor', id, level,
+    `${label}: bottoms at ${midiToPitchName(m.lowMidi)}, below ${midiToPitchName(DOCTRINE.floor)}`);
+  // §1/#2 puts the Grade-1 floor at G2, and §3's measured published beginner
+  // *bass* part runs D2–B2 with stopped notes all over the C string. The two
+  // sources only agree about a melody, so only a melody is gated; for a
+  // roots/bass part the share below the open G is reported instead.
+  if (beginner && m.role === 'melody') {
+    check(m.stoppedBelowOpenG === 0, 'stopped below open G', id, level,
+      `${label}: ${m.stoppedBelowOpenG} stopped notes below the open G`);
+  }
+  check(upper === 0 && maximumStop <= 6, 'first position', id, level, `${label}: left first position`);
+  check(missedOpens === 0, 'open strings taken', id, level, `${label}: bypassed an open string`);
+  if (beginner) {
+    // Beginner only: §6's checklist is "for a Beginner line", and S10 prints
+    // two extensions in an arrangement its publisher calls level 3 of 5.
+    // Reported for the other levels rather than failed.
+    check(m.extensions === DOCTRINE.extensions, 'extensions', id, level,
+      `${label}: ${m.extensions} extended-position notes`);
+  }
+  const leapCeiling = DOCTRINE.maxLeap[level] ?? 16;
+  check(m.maxLeap <= leapCeiling, 'leap', id, level,
+    `${label}: leaps ${m.maxLeap} semitones, over the published ${leapCeiling}`);
+  if (beginner) {
+    check(m.wideLeaps <= DOCTRINE.wideLeapShare, 'wide leaps', id, level,
+      `${label}: ${pct(m.wideLeaps)} of intervals exceed a perfect 5th`);
+    check(m.openShare >= DOCTRINE.openStringShare, 'open-string share', id, level,
+      `${label}: ${pct(m.openShare)} open-string pitches, under the published 27–40% band`);
+    check(m.pitchClasses <= DOCTRINE.pitchClasses, 'pitch classes', id, level,
+      `${label}: ${m.pitchClasses} distinct pitch classes`);
+    check(m.accidentals <= DOCTRINE.accidentals, 'accidentals', id, level,
+      `${label}: ${m.accidentals}/${notes.length} notes outside ${score.metadata.keySignature}`
+      + ` (${m.accidentalsEitherMode} outside both parallel modes)`);
+  }
+  const attackFloor = DOCTRINE.shortestAttackBeats[level] ?? 0;
+  check(m.shortestAttackBeats + SLACK_MS / music.beatMs >= attackFloor, 'note values', id, level,
+    `${label}: attacks ${m.shortestAttackBeats.toFixed(2)} beats apart, under ${attackFloor}`);
+  if (beginner) {
+    check(m.longestNoteBeats <= DOCTRINE.longestNoteBeats + SLACK_MS / music.beatMs, 'longest note', id, level,
+      `${label}: holds ${m.longestNoteBeats.toFixed(1)} beats, over a dotted minim`);
+  }
+  if (drone && beginner) {
+    check(m.distinctPitches <= DOCTRINE.dronePitches, 'drone pitches', id, level,
+      `${label}: ${m.distinctPitches} distinct pitches, over the published 5–6`);
+  }
+
+}
+
+/** Game: coverage and silence, which no syllabus covers. */
+function gameChecks(c: CheckContext): void {
+  const { id, level, label, m, music, beginner } = c;
+  if (ACCOMPANIMENT.includes(level)) {
+    const entryBudget = Math.max(GAME.entryBeats, GAME.entryShare * music.songBeats);
+    check(m.entryBeats <= entryBudget + SLACK_MS / music.beatMs, 'entry latency', id, level,
+      `${label}: enters ${m.entryBeats.toFixed(1)} beats in, past a budget of ${entryBudget.toFixed(1)}`);
+    check(m.entryMs <= GAME.entryMs + SLACK_MS, 'entry seconds', id, level,
+      `${label}: ${(m.entryMs / 1000).toFixed(1)}s of empty highway before the first note`);
+    const tailBudget = Math.max(GAME.tailBeats, GAME.tailShare * music.songBeats);
+    check(m.tailBeats <= tailBudget + SLACK_MS / music.beatMs, 'tail silence', id, level,
+      `${label}: stops ${m.tailBeats.toFixed(1)} beats early, past a budget of ${tailBudget.toFixed(1)}`);
+    check(m.liveGapBeats <= GAME.liveGapBeats, 'live gap', id, level,
+      `${label}: rests ${m.liveGapBeats.toFixed(1)} beats while the backing plays`);
+  }
+  if (beginner) {
+    check(m.fill >= GAME.fillShare, 'fill ratio', id, level, `${label}: sounds for ${pct(m.fill)} of the song`);
+    check(m.rootFifth === null || m.rootFifth >= GAME.rootFifthShare, 'root agreement', id, level,
+      `${label}: ${m.rootFifth === null ? 'not measurable' : pct(m.rootFifth)} on the root or fifth`
+      + ` of the sounding chord (${m.bassDoubling === null ? '—' : pct(m.bassDoubling)} simply double the bass)`);
+    // Never a silent pass: an unmeasurable score is a defect of its own, and
+    // a score a wrong line can match means nothing.
+    check(m.rootFifth !== null, 'root validity', id, level,
+      `${label}: no pitched backing sounds under any note, so chord agreement cannot be measured`);
+    check(m.discriminating !== false, 'root validity', id, level,
+      `${label}: a +1/+5/+7 transposition of this line scores as well as the line itself`);
+  }
+
+}
+
+/** Profile: the arranger against its own configuration. */
+function profileChecks(c: CheckContext): void {
+  const { id, level, label, m, music } = c;
+  const { pitches } = c;
+  const profile = ARRANGEMENT_PROFILES[level];
+  check(pitches[0]! >= profile.range.low && pitches.at(-1)! <= profile.range.high, 'profile range', id, level,
+    `${label}: outside the profile's ${profile.range.low}–${profile.range.high}`);
+  check(m.maxLeap <= profile.maxLeapSemitones, 'profile leap', id, level,
+    `${label}: leap ${m.maxLeap} over the profile's ${profile.maxLeapSemitones}`);
+  check(m.shortestAttackBeats * music.beatMs + 1 >= 1000 / profile.maxNotesPerSecond, 'profile attacks', id, level,
+    `${label}: attacks ${Math.round(m.shortestAttackBeats * music.beatMs)} ms apart`);
+
+}
+
+/**
+ * Octave placement may change, but a bass anchor must still be supported at
+ * that time by the source bass. Allow at most 30 ms articulation gaps and 2 ms
+ * of MIDI-to-JSON rounding, not a held note over another chord.
+ */
+function supportedUntilMs(note: CelloSongScore['notes'][number], source: readonly RawNoteEvent[]): number {
+  let supportedUntil = note.startTimeMs;
+  for (const original of source) {
+    if (original.startTimeMs > note.startTimeMs + note.durationMs + 32) break;
+    if (original.midiNumber % 12 !== note.midiNumber % 12) continue;
+    if (original.startTimeMs > supportedUntil + 32) continue;
+    supportedUntil = Math.max(supportedUntil, original.startTimeMs + original.durationMs);
+  }
+  return supportedUntil;
+}
+
+function bassSupportChecks(c: CheckContext, source: readonly RawNoteEvent[]): void {
+  for (const note of c.notes) {
+    check(supportedUntilMs(note, source) + 2 >= note.startTimeMs + note.durationMs, 'bass support', c.id, c.level,
+      `${c.label}: unsupported bass hold at ${note.startTimeMs} ms`);
+  }
+}
+
 // ─── The audit ───────────────────────────────────────────────────────────────
 
 interface AuditOptions {
   score: CelloSongScore;
-  level: Level;
+  level: ArrangementLevel;
   adaptive: boolean;
   music: SongMusic;
   declared: DifficultyTier;
@@ -567,7 +705,7 @@ interface AuditOptions {
   source?: readonly RawNoteEvent[];
 }
 
-const ACCOMPANIMENT: readonly Level[] = ['Beginner', 'Intermediate'];
+const ACCOMPANIMENT: readonly ArrangementLevel[] = ['Beginner', 'Intermediate'];
 
 function audit({ score, level, adaptive, music, declared, storedTier, source }: AuditOptions): void {
   const notes = score.notes;
@@ -591,106 +729,12 @@ function audit({ score, level, adaptive, music, declared, storedTier, source }: 
     && note.finger !== '0').length;
   const upper = notes.filter((note) => !['Half', '1st'].includes(note.position)).length;
 
+  const context: CheckContext = { id, level, label, m, music, notes, score, beginner, drone, upper, maximumStop, missedOpens, pitches };
   if (adaptive) {
-    const profile = ARRANGEMENT_PROFILES[level as keyof typeof ARRANGEMENT_PROFILES];
-
-    // ── Doctrine: the published standard, with its own constants ────────────
-    const ceiling = DOCTRINE.ceiling[level] ?? D4;
-    check(m.highMidi <= ceiling, 'ceiling', id, level,
-      `${label}: tops out at ${midiToPitchName(m.highMidi)}, above ${midiToPitchName(ceiling)}`);
-    check(m.lowMidi >= DOCTRINE.floor, 'floor', id, level,
-      `${label}: bottoms at ${midiToPitchName(m.lowMidi)}, below ${midiToPitchName(DOCTRINE.floor)}`);
-    // §1/#2 puts the Grade-1 floor at G2, and §3's measured published beginner
-    // *bass* part runs D2–B2 with stopped notes all over the C string. The two
-    // sources only agree about a melody, so only a melody is gated; for a
-    // roots/bass part the share below the open G is reported instead.
-    if (beginner && m.role === 'melody') {
-      check(m.stoppedBelowOpenG === 0, 'stopped below open G', id, level,
-        `${label}: ${m.stoppedBelowOpenG} stopped notes below the open G`);
-    }
-    check(upper === 0 && maximumStop <= 6, 'first position', id, level, `${label}: left first position`);
-    check(missedOpens === 0, 'open strings taken', id, level, `${label}: bypassed an open string`);
-    if (beginner) {
-      // Beginner only: §6's checklist is "for a Beginner line", and S10 prints
-      // two extensions in an arrangement its publisher calls level 3 of 5.
-      // Reported for the other levels rather than failed.
-      check(m.extensions === DOCTRINE.extensions, 'extensions', id, level,
-        `${label}: ${m.extensions} extended-position notes`);
-    }
-    const leapCeiling = DOCTRINE.maxLeap[level] ?? 16;
-    check(m.maxLeap <= leapCeiling, 'leap', id, level,
-      `${label}: leaps ${m.maxLeap} semitones, over the published ${leapCeiling}`);
-    if (beginner) {
-      check(m.wideLeaps <= DOCTRINE.wideLeapShare, 'wide leaps', id, level,
-        `${label}: ${pct(m.wideLeaps)} of intervals exceed a perfect 5th`);
-      check(m.openShare >= DOCTRINE.openStringShare, 'open-string share', id, level,
-        `${label}: ${pct(m.openShare)} open-string pitches, under the published 27–40% band`);
-      check(m.pitchClasses <= DOCTRINE.pitchClasses, 'pitch classes', id, level,
-        `${label}: ${m.pitchClasses} distinct pitch classes`);
-      check(m.accidentals <= DOCTRINE.accidentals, 'accidentals', id, level,
-        `${label}: ${m.accidentals}/${notes.length} notes outside ${score.metadata.keySignature}`
-        + ` (${m.accidentalsEitherMode} outside both parallel modes)`);
-    }
-    const attackFloor = DOCTRINE.shortestAttackBeats[level] ?? 0;
-    check(m.shortestAttackBeats + SLACK_MS / music.beatMs >= attackFloor, 'note values', id, level,
-      `${label}: attacks ${m.shortestAttackBeats.toFixed(2)} beats apart, under ${attackFloor}`);
-    if (beginner) {
-      check(m.longestNoteBeats <= DOCTRINE.longestNoteBeats + SLACK_MS / music.beatMs, 'longest note', id, level,
-        `${label}: holds ${m.longestNoteBeats.toFixed(1)} beats, over a dotted minim`);
-    }
-    if (drone && beginner) {
-      check(m.distinctPitches <= DOCTRINE.dronePitches, 'drone pitches', id, level,
-        `${label}: ${m.distinctPitches} distinct pitches, over the published 5–6`);
-    }
-
-    // ── Game: coverage and silence, which no syllabus covers ────────────────
-    if (ACCOMPANIMENT.includes(level)) {
-      const entryBudget = Math.max(GAME.entryBeats, GAME.entryShare * music.songBeats);
-      check(m.entryBeats <= entryBudget + SLACK_MS / music.beatMs, 'entry latency', id, level,
-        `${label}: enters ${m.entryBeats.toFixed(1)} beats in, past a budget of ${entryBudget.toFixed(1)}`);
-      check(m.entryMs <= GAME.entryMs + SLACK_MS, 'entry seconds', id, level,
-        `${label}: ${(m.entryMs / 1000).toFixed(1)}s of empty highway before the first note`);
-      const tailBudget = Math.max(GAME.tailBeats, GAME.tailShare * music.songBeats);
-      check(m.tailBeats <= tailBudget + SLACK_MS / music.beatMs, 'tail silence', id, level,
-        `${label}: stops ${m.tailBeats.toFixed(1)} beats early, past a budget of ${tailBudget.toFixed(1)}`);
-      check(m.liveGapBeats <= GAME.liveGapBeats, 'live gap', id, level,
-        `${label}: rests ${m.liveGapBeats.toFixed(1)} beats while the backing plays`);
-    }
-    if (beginner) {
-      check(m.fill >= GAME.fillShare, 'fill ratio', id, level, `${label}: sounds for ${pct(m.fill)} of the song`);
-      check(m.rootFifth === null || m.rootFifth >= GAME.rootFifthShare, 'root agreement', id, level,
-        `${label}: ${m.rootFifth === null ? 'not measurable' : pct(m.rootFifth)} on the root or fifth`
-        + ` of the sounding chord (${m.bassDoubling === null ? '—' : pct(m.bassDoubling)} simply double the bass)`);
-      // Never a silent pass: an unmeasurable score is a defect of its own, and
-      // a score a wrong line can match means nothing.
-      check(m.rootFifth !== null, 'root validity', id, level,
-        `${label}: no pitched backing sounds under any note, so chord agreement cannot be measured`);
-      check(m.discriminating !== false, 'root validity', id, level,
-        `${label}: a +1/+5/+7 transposition of this line scores as well as the line itself`);
-    }
-
-    // ── Profile: the arranger against its own configuration ────────────────
-    check(pitches[0]! >= profile.range.low && pitches.at(-1)! <= profile.range.high, 'profile range', id, level,
-      `${label}: outside the profile's ${profile.range.low}–${profile.range.high}`);
-    check(m.maxLeap <= profile.maxLeapSemitones, 'profile leap', id, level,
-      `${label}: leap ${m.maxLeap} over the profile's ${profile.maxLeapSemitones}`);
-    check(m.shortestAttackBeats * music.beatMs + 1 >= 1000 / profile.maxNotesPerSecond, 'profile attacks', id, level,
-      `${label}: attacks ${Math.round(m.shortestAttackBeats * music.beatMs)} ms apart`);
-
-    // Octave placement may change, but a bass anchor must still be supported
-    // at that time by the source bass. Allow at most 30 ms articulation gaps
-    // and 2 ms of MIDI-to-JSON rounding, not a held note over another chord.
-    if (source) for (const note of notes) {
-      let supportedUntil = note.startTimeMs;
-      for (const original of source) {
-        if (original.startTimeMs > note.startTimeMs + note.durationMs + 32) break;
-        if (original.midiNumber % 12 !== note.midiNumber % 12) continue;
-        if (original.startTimeMs > supportedUntil + 32) continue;
-        supportedUntil = Math.max(supportedUntil, original.startTimeMs + original.durationMs);
-      }
-      check(supportedUntil + 2 >= note.startTimeMs + note.durationMs, 'bass support', id, level,
-        `${label}: unsupported bass hold at ${note.startTimeMs} ms`);
-    }
+    doctrineChecks(context);
+    gameChecks(context);
+    profileChecks(context);
+    if (source) bassSupportChecks(context, source);
   }
 
   const states = adaptive ? notes.map((note) => firstPositionFingering(note.midiNumber)) : notes;
@@ -735,13 +779,18 @@ function audit({ score, level, adaptive, music, declared, storedTier, source }: 
     inKeyDetectedPct: share(m.inKeyDetected),
     rootPct: share(m.root), rootFifthPct: share(m.rootFifth), chordTonePct: share(m.chordTone),
     bassDoublingPct: share(m.bassDoubling), rootNullBestPct: share(m.nullBest),
-    rootDiscriminating: m.discriminating === null ? '' : m.discriminating ? 'yes' : 'no',
+    rootDiscriminating: yesNoBlank(m.discriminating),
     openStringPct: share(m.openShare), belowOpenGPct: share(m.belowOpenG),
     stoppedBelowOpenG: m.stoppedBelowOpenG,
     extensions: m.extensions,
     declaredDifficulty: declared, storedLineTier: storedTier,
     difficultyMislabelled: declared === storedTier ? '' : `${declared}→${storedTier}`,
   });
+}
+
+function yesNoBlank(value: boolean | null): string {
+  if (value === null) return '';
+  return value ? 'yes' : 'no';
 }
 
 // ─── Run ─────────────────────────────────────────────────────────────────────
@@ -781,7 +830,7 @@ const provenance = {
   songs: COMPACT_SCORES.length,
   parts: COMPACT_SCORES.length * ARRANGEMENT_LEVELS.length,
   library: md5('src/scores/bundledSongs.json'),
-  arranger: md5('src/domain/arrangement.ts'),
+  arranger: md5('src/domain/arranger/pipeline.ts'),
   gate: md5('tools/audit-arrangements.ts'),
 };
 
@@ -803,21 +852,21 @@ const median = (values: readonly number[]): number => {
 };
 const fixed = (value: number, places = 1) => Number.isFinite(value) ? value.toFixed(places) : '—';
 
-const levelGroup = (level: Level) => songMetrics.filter((row) => row.level === level);
-const pick = (level: Level, get: (row: Metrics) => number | null) =>
+const levelGroup = (level: ArrangementLevel) => songMetrics.filter((row) => row.level === level);
+const pick = (level: ArrangementLevel, get: (row: Metrics) => number | null) =>
   levelGroup(level).map(get).filter((value): value is number => value !== null && Number.isFinite(value));
 
 /** `median / worst`, where worst follows the metric's own direction. */
-const cell = (level: Level, get: (row: Metrics) => number | null, worst: 'high' | 'low', places = 1, scale = 1) => {
+const cell = (level: ArrangementLevel, get: (row: Metrics) => number | null, worst: 'high' | 'low', places = 1, scale = 1) => {
   const values = pick(level, get);
   if (values.length === 0) return '— / —';
   const extreme = worst === 'high' ? Math.max(...values) : Math.min(...values);
   return `${fixed(median(values) * scale, places)} / ${fixed(extreme * scale, places)}`;
 };
-const count = (level: Level, test: (row: Metrics) => boolean) => levelGroup(level).filter(test).length;
+const count = (level: ArrangementLevel, test: (row: Metrics) => boolean) => levelGroup(level).filter(test).length;
 
 /** Median / worst as pitch names — "57 / 62" tells a cellist nothing. */
-const noteCell = (level: Level, get: (row: Metrics) => number, worst: 'high' | 'low') => {
+const noteCell = (level: ArrangementLevel, get: (row: Metrics) => number, worst: 'high' | 'low') => {
   const values = pick(level, get);
   if (values.length === 0) return '— / —';
   const extreme = worst === 'high' ? Math.max(...values) : Math.min(...values);
@@ -887,7 +936,7 @@ const text = `# Cello arrangement audit
 | Measured | ${provenance.measuredAt} |
 | Songs × levels | ${provenance.songs} × ${ARRANGEMENT_LEVELS.length} = ${provenance.parts} parts, plus ${CORE_SCORES.length} authored studies |
 | \`src/scores/bundledSongs.json\` | md5 \`${provenance.library}\` |
-| \`src/domain/arrangement.ts\` | md5 \`${provenance.arranger}\` |
+| \`src/domain/arranger/pipeline.ts\` | md5 \`${provenance.arranger}\` |
 | \`tools/audit-arrangements.ts\` | md5 \`${provenance.gate}\` |
 
 Reproduce with \`npm run audit:arrangements\`. **The three md5s above are part of
@@ -923,7 +972,7 @@ leap ceiling (9 st at "Beginners", 12–16 at "Beginners with some playing
 experience"). Attack the mapping if you disagree with it — it is stated here so
 it can be attacked, rather than left implicit in a threshold.
 
-| Level | Parts | Top note | Bottom note | Max leap | > P5 % | Open string % | Below open G % | Stopped below G | Distinct pitches | Pitch classes |
+| ArrangementLevel | Parts | Top note | Bottom note | Max leap | > P5 % | Open string % | Below open G % | Stopped below G | Distinct pitches | Pitch classes |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 ${physical.join('\n')}
 
@@ -935,7 +984,7 @@ degenerate \`1/4\` the build emits when meter detection fails), so a
 bar-denominated budget silently converts a meter-detection bug into a musical
 verdict. \`meter\` and \`barBeats\` stay in the CSV for reference.
 
-| Level | Entry (beats) | Tail (beats) | Live gap (beats) | Fill % | Attacks / 4 beats | Longest note (beats) | Repeated pitch % | Root+5th % | Root % | Doubles the bass % |
+| ArrangementLevel | Entry (beats) | Tail (beats) | Live gap (beats) | Fill % | Attacks / 4 beats | Longest note (beats) | Repeated pitch % | Root+5th % | Root % | Doubles the bass % |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 ${musical.join('\n')}
 

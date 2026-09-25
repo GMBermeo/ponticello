@@ -3,11 +3,9 @@ import { describe, expect, it } from 'vitest';
 import {
   buildMeasures, decomposeDuration, detectRepeats, engrave, locateMeasure, quantiseScore,
   SIXTEENTHS_PER_BEAT,
-} from '@/domain/engrave';
-import { CelloNote, CelloSongScore } from '@/domain/schema';
-import { COMPACT_SCORES } from '@/scores';
-import { inflateScore } from '@/scores/bundledSongs';
-import { BWV1007_PRELUDE } from '@/scores/bach';
+} from '../engrave';
+import { CelloNote, CelloSongScore } from '../schema';
+import { COMPACT_SCORES, inflateScore, BWV1007_PRELUDE } from '@scores';
 
 /** A 4/4 score at 60 bpm, so one beat is 1000 ms and a sixteenth is 250 ms. */
 function scoreOf(notes: { midi: number; startMs: number; durMs: number }[]): CelloSongScore {
@@ -100,7 +98,7 @@ describe('quantiseScore', () => {
 
   it('gives a note that quantises to nothing a single sixteenth', () => {
     const q = quantiseScore(scoreOf([{ midi: 48, startMs: 0, durMs: 5 }]));
-    expect(q[0].length).toBe(1);
+    expect(q[0]).toHaveLength(1);
   });
 });
 

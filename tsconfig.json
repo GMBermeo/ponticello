@@ -3,6 +3,24 @@
   "compilerOptions": {
     "strict": true,
     "paths": {
+      "@audio": [
+        "./src/audio/index.ts"
+      ],
+      "@components": [
+        "./src/components/index.ts"
+      ],
+      "@domain": [
+        "./src/domain/index.ts"
+      ],
+      "@scores": [
+        "./src/scores/index.ts"
+      ],
+      "@state": [
+        "./src/state/index.ts"
+      ],
+      "@theme": [
+        "./src/theme/index.ts"
+      ],
       "@/*": [
         "./src/*"
       ],

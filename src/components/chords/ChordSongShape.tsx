@@ -1,10 +1,18 @@
-import { CelloChordDiagram } from "@/components/CelloChordDiagram";
-import { Body, Label, Title } from "@/components/ui/primitives";
-import { useMeasuredSize } from "@/components/useMeasuredSize";
-import type { CelloChordStudy } from "@/domain/celloChords";
-import { CHORD_ATLAS_DIAGRAM_SIZE } from "@/domain/chords/diagram";
-import { useTheme } from "@/theme/ThemeProvider";
+import { CelloChordDiagram } from "../CelloChordDiagram";
+import { Body, Label, Title } from "../ui";
+import { useMeasuredSize } from "../useMeasuredSize";
+import { type CelloChordStudy, CHORD_ATLAS_DIAGRAM_SIZE } from "@domain";
+import { useTheme } from "@theme";
 import { View } from "react-native";
+
+type ChordToneName = { name: string };
+
+/** Caption under a shape: which tones it leaves out, or which chord it is really fingered as. */
+function shapeNote(omitted: readonly ChordToneName[], study: CelloChordStudy | null | undefined, symbol: string | undefined): string {
+  if (omitted.length) return `Omit ${omitted.map((tone) => tone.name).join(", ")}`;
+  if (study && study.symbol !== symbol) return `Played as ${study.symbol}`;
+  return " ";
+}
 
 /** Same first voicing in the preview, inline chart, and transition overlay. */
 export function ChordSongShape({
@@ -13,6 +21,7 @@ export function ChordSongShape({
   label,
   nextChord,
   scaleKey,
+  allPositions = false,
   width = 128,
   maxHeight = Infinity,
   titleSize,
@@ -22,6 +31,8 @@ export function ChordSongShape({
   label?: string;
   nextChord?: CelloChordStudy;
   scaleKey?: string;
+  /** Mark every position of the chord's notes — the improvising map. */
+  allPositions?: boolean;
   width?: number;
   /** Measured device-pixel height available for the diagram. */
   maxHeight?: number;
@@ -52,6 +63,7 @@ export function ChordSongShape({
           tapeColors
           nextChord={nextChord}
           scaleKey={scaleKey}
+          allPositions={allPositions}
         />
       ) : (
         <View
@@ -76,11 +88,7 @@ export function ChordSongShape({
           numberOfLines={2}
           style={{ minHeight: theme.s(24), textAlign: "center" }}
         >
-          {omitted.length
-            ? `Omit ${omitted.map((tone) => tone.name).join(", ")}`
-            : study && study.symbol !== symbol
-              ? `Played as ${study.symbol}`
-              : " "}
+          {shapeNote(omitted, study, symbol)}
         </Body>
       ) : null}
     </View>

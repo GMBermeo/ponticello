@@ -21,8 +21,8 @@
  * Pure: no React, no React Native. See AGENTS.md.
  */
 
-import { CelloString, DISPLAY_STRING_ORDER } from '@/domain/cello';
-import type { FlowAxis } from '@/state/settings';
+import { CelloString, DISPLAY_STRING_ORDER } from '@domain';
+import type { FlowAxis } from '@state';
 
 export interface TimeWindow {
   fromMs: number;

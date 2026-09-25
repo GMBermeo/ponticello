@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { validateScore } from '@/domain/schema';
+import { validateScore } from '@domain';
 import {
   CompactVariantBackingPart, CompactVariantDef, inflateVariantBacking, inflateVariantLevel,
-} from '@/scores/benchmarkVariants';
+} from '../benchmarkVariants';
 
 const variant: CompactVariantDef = {
   id: 'song--gpt-oss-20b',
@@ -47,9 +47,9 @@ describe('benchmark variants', () => {
   it('size every level to the same bars, covering the backing', () => {
     const beginner = inflateVariantLevel(variant, 'Beginner', backing);
     const expert = inflateVariantLevel(variant, 'Expert', backing);
-    expect(beginner.measures.length).toBe(expert.measures.length);
+    expect(beginner.measures).toHaveLength(expert.measures.length);
     // 5 s of piano at 120 BPM in 4/4 is three bars.
-    expect(expert.measures.length).toBe(3);
+    expect(expert.measures).toHaveLength(3);
   });
 
   it('inflate a backing whose melody track is marked as the solo part', () => {

@@ -1,20 +1,15 @@
 /**
  * Design tokens.
  *
- * A cool, matte practice surface, quiet separators, readable type, and one
- * blue accent family reserved for actions and selection. Musical string and
- * tape colours retain their established meaning. Nothing here knows about
+ * 1.8 re-grounds the interface on the phone it now lives on: iOS's grouped
+ * surfaces — cards on a soft grey ground in light, near-black in dark —
+ * continuous corners, capsule controls and one indigo accent reserved for
+ * actions and selection. Musical string, note and tape colours keep their
+ * established meaning and are never used for chrome. Nothing here knows about
  * screen size — see `scale.ts` for that.
- *
- * The blues are the brand set — #165788, #274490, #1D2D5C, #1E3765 — used
- * where they hold contrast: the deep pair as the dark practice grounds, the
- * mid pair as the accent on paper. On a navy ground the accent has to be a
- * lighter tint of the same hue, or it disappears into the background.
  */
 
-import { CelloString } from '@/domain/cello';
-import { NoteColorName, STRING_NOTE_COLOR } from '@/domain/noteColors';
-import { TapeColor } from '@/domain/tapes';
+import { CelloString, NoteColorName, STRING_NOTE_COLOR, TapeColor } from '@domain';
 
 // ─── Base palette ────────────────────────────────────────────────────────────
 
@@ -36,23 +31,34 @@ export const APPLE_HIG = {
   cyan: { light: '#32ADE6', accessibleLight: '#007AA6', dark: '#64D2FF' },
 } as const;
 
-/** The brand blues, by role. */
-export const BLUE = {
-  ocean: '#0066CC',
-  cobalt: '#0A84FF',
-  navy: '#0B1220',
-  deep: '#141E34',
+/**
+ * The brand, by role.
+ *
+ * 1.8 moves the accent off system blue and onto an indigo of its own. Blue is
+ * a *note* colour here — the D string, every D on the chart — so an accent in
+ * the same hue made "selected" and "D" look alike. Indigo is still one of
+ * Apple's system hues, so it sits naturally beside Liquid Glass, but nothing
+ * musical is drawn in it.
+ */
+export const BRAND = {
+  /** The accent on light grounds: 7.5:1 on white. */
+  indigo: '#4638D6',
+  /** The accent lifted for dark grounds: 7.6:1 on the Dark chrome. */
+  indigoLight: '#9C95FF',
+  /** The icon ground, top to bottom. */
+  glow: '#7A6CFF',
+  deep: '#2A1C9E',
+  /** The splash ground and the Dark chrome's floor. */
+  midnight: '#0B0A14',
 } as const;
 
-export const PAPER = '#f8f9fa';
-export const INK = '#0f172a';
-export const SURFACE = '#edf1f7';
-/** 7.4:1 on paper — body-text contrast, so it is safe as a text colour too. */
-export const ACCENT = APPLE_HIG.blue.accessibleLight;
-export const ACCENT_DARK = BLUE.navy;
-export const ACCENT_WASH = '#e1ebf7';
-/** Accent tint for navy grounds: the electric blue hue, lifted to 8:1 on dark grounds. */
-const ACCENT_ON_NAVY = APPLE_HIG.blue.dark;
+/** The light chrome's grounds — iOS grouped background and card. */
+export const PAPER = '#F2F2F7';
+export const INK = '#111114';
+export const SURFACE = '#FFFFFF';
+export const ACCENT = BRAND.indigo;
+export const ACCENT_WASH = 'rgba(70, 56, 214, 0.10)';
+const ACCENT_ON_DARK = BRAND.indigoLight;
 
 /**
  * Note hues — the palette behind `domain/noteColors`.
@@ -140,14 +146,21 @@ export type ChromeName = 'paper' | 'quiet' | 'neon';
 export interface Chrome {
   name: ChromeName;
   dark: boolean;
+  /** The screen's ground — iOS's grouped background. */
   bg: string;
+  /** Cards and grouped rows sitting on `bg`. */
   surface: string;
+  /** The selected thumb of a segmented control, a popover, a sheet. */
   surfaceElevated: string;
+  /** Translucent control fill: segment tracks, grey buttons, toggle tracks. */
+  fill: string;
   ink: string;
   dim: string;
   line: string;
   lineSoft: string;
   accent: string;
+  /** Text and glyphs drawn on a solid `accent` fill. */
+  onAccent: string;
   accentWash: string;
   /** Non-empty enables the glow treatment on active elements. */
   glow: boolean;
@@ -164,11 +177,13 @@ export const CHROMES: Record<ChromeName, Chrome> = {
     bg: PAPER,
     surface: SURFACE,
     surfaceElevated: '#ffffff',
+    fill: 'rgba(118, 118, 128, 0.12)',
     ink: INK,
-    dim: '#5b677a',
-    line: '#7a8699',
-    lineSoft: '#d3d9e2',
+    dim: '#636369',
+    line: 'rgba(60, 60, 67, 0.36)',
+    lineSoft: 'rgba(60, 60, 67, 0.14)',
     accent: ACCENT,
+    onAccent: '#ffffff',
     accentWash: ACCENT_WASH,
     glow: false,
     strings: STRING_COLOR_MUTED,
@@ -178,15 +193,17 @@ export const CHROMES: Record<ChromeName, Chrome> = {
   quiet: {
     name: 'quiet',
     dark: true,
-    bg: BLUE.navy,
-    surface: BLUE.deep,
-    surfaceElevated: '#1c2b4b',
-    ink: '#f8fafc',
-    dim: '#94a3b8',
-    line: 'rgba(248,250,252,0.36)',
-    lineSoft: 'rgba(248,250,252,0.22)',
-    accent: ACCENT_ON_NAVY,
-    accentWash: 'rgba(10, 132, 255, 0.16)',
+    bg: BRAND.midnight,
+    surface: '#18171F',
+    surfaceElevated: '#25242E',
+    fill: 'rgba(120, 120, 136, 0.24)',
+    ink: '#f5f5f7',
+    dim: '#9d9ca8',
+    line: 'rgba(235, 235, 245, 0.30)',
+    lineSoft: 'rgba(235, 235, 245, 0.12)',
+    accent: ACCENT_ON_DARK,
+    onAccent: BRAND.midnight,
+    accentWash: 'rgba(156, 149, 255, 0.16)',
     glow: false,
     strings: STRING_COLOR_HOT,
     tapes: TAPE_COLOR_ON_DARK,
@@ -195,15 +212,17 @@ export const CHROMES: Record<ChromeName, Chrome> = {
   neon: {
     name: 'neon',
     dark: true,
-    bg: '#060913',
-    surface: '#0f172a',
-    surfaceElevated: '#1e293b',
-    ink: '#f8fafc',
-    dim: '#94a3b8',
-    line: 'rgba(248,250,252,0.34)',
-    lineSoft: 'rgba(248,250,252,0.20)',
-    accent: '#38bdf8',
-    accentWash: 'rgba(56, 189, 248, 0.16)',
+    bg: '#000000',
+    surface: '#0E1016',
+    surfaceElevated: '#1A1D26',
+    fill: 'rgba(120, 130, 150, 0.22)',
+    ink: '#f5f5f7',
+    dim: '#98a0ae',
+    line: 'rgba(235, 240, 255, 0.30)',
+    lineSoft: 'rgba(235, 240, 255, 0.12)',
+    accent: '#5EE3FF',
+    onAccent: '#000000',
+    accentWash: 'rgba(94, 227, 255, 0.14)',
     glow: true,
     strings: STRING_COLOR_HOT,
     tapes: TAPE_COLOR_ON_DARK,
@@ -217,8 +236,7 @@ export const MENU_CHROME = CHROMES.paper;
 // ─── Type ────────────────────────────────────────────────────────────────────
 
 /**
- * Font sizes in design units — see `scale.ts`. Archivo carries the whole
- * interface: 800 for anything structural, 400 for prose.
+ * Font sizes in design units — see `scale.ts`.
  */
 export const TYPE = {
   micro: 12,      // uppercase tracked labels
@@ -229,18 +247,6 @@ export const TYPE = {
   heading: 30,
   display: 42,
   hero: 88,       // the tuner's note name
-} as const;
-
-export const WEIGHT = {
-  regular: '400',
-  semibold: '600',
-  heavy: '800',
-} as const;
-
-export const FONT = {
-  regular: 'Archivo_400Regular',
-  semibold: 'Archivo_600SemiBold',
-  heavy: 'Archivo_800ExtraBold',
 } as const;
 
 /** Tracking for the uppercase micro-labels that structure every screen. */
@@ -257,6 +263,17 @@ export const SPACE = {
 
 /** Rule weights. `major` divides regions; `soft` separates rows. */
 export const RULE = { major: 2, minor: 1 } as const;
+
+/**
+ * Corner radii in design units. Drawn with continuous (squircle) corners on
+ * iOS — see `corners()` in ThemeProvider — so a card's curve matches the
+ * phone's own display corners rather than a plain circular arc.
+ */
+export const RADIUS = {
+  xs: 6, sm: 10, md: 14, lg: 20, xl: 28,
+  /** Large enough to make any control a capsule. */
+  pill: 999,
+} as const;
 
 /**
  * Minimum interactive size in design units. Google's 48dp guidance in canvas

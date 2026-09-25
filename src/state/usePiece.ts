@@ -1,14 +1,12 @@
 import { useMemo } from 'react';
 
-import { ArrangementLevel } from '@/domain/arrangement';
 import {
-  celloPartOptions, CelloPartOption, DEFAULT_TRACK_CHOICE, TrackChoice,
-} from '@/domain/trackPicker';
+  ArrangementLevel, celloPartOptions, CelloPartOption, DEFAULT_TRACK_CHOICE, TrackChoice,
+} from '@domain';
 import {
-  NO_LINE, resolvePiece, ResolvedCelloLine, ResolvedPiece, rowForImported,
-  rowForArrangement,
-} from '@/domain/pieceResolver';
-import { LibraryRow } from '@/scores';
+  NO_LINE, resolvePiece, ResolvedCelloLine, ResolvedPiece, rowForImported, rowForArrangement,
+  LibraryRow,
+} from '@scores';
 import { useImportedLibrary } from './library';
 
 export type { ResolvedPiece, ResolvedCelloLine };

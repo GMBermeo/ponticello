@@ -1,4 +1,4 @@
-import type { ChordSheet } from '../../src/domain/chordSheet';
+import type { ChordSheet } from '@domain';
 import { applyTiming } from './cifra';
 
 /** Positive durations are easier for small models than consistent start/end math. */

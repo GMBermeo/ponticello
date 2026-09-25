@@ -1,36 +1,30 @@
 import { memo } from 'react';
 import { ScrollView } from 'react-native';
 
-import { ListenMode } from '@/audio/backing/types';
-import { Segmented } from '@/components/ui/controls';
-import { Label, Row } from '@/components/ui/primitives';
+import type { ListenMode } from '@domain';
+import { Segmented, Label, Row, type Segment } from '../ui';
 import {
-  NoteOverlayMode,
-  ScoreColorMode,
-  useAudioPreferences,
-  useSettingsActions,
-  useSettingsSelector,
-  useVisionPreferences,
-  VisionName,
-} from '@/state/settings';
-import { useTheme } from '@/theme/ThemeProvider';
+  NoteOverlayMode, ScoreColorMode, useAudioPreferences, useSettingsActions, useSettingsSelector,
+  useVisionPreferences, VisionName,
+} from '@state';
+import { useTheme } from '@theme';
 
-const VISION_SEGMENTS = [
-  { value: 'tab' as const, label: 'Tab' },
-  { value: 'score' as const, label: 'Score' },
-  { value: 'highway' as const, label: 'Highway', hint: 'Highway' },
+const VISION_SEGMENTS: readonly Segment<VisionName>[] = [
+  { value: 'tab', label: 'Tab' },
+  { value: 'score', label: 'Score' },
+  { value: 'highway', label: 'Highway', hint: 'Highway' },
 ];
 
-const LISTEN_SEGMENTS = [
-  { value: 'off' as const, label: 'Off', hint: 'Listen: off' },
-  { value: 'backing' as const, label: 'Backing', hint: 'Listen: backing only' },
-  { value: 'solo' as const, label: 'Cello', hint: 'Listen: written cello part' },
-  { value: 'both' as const, label: 'Both', hint: 'Listen: backing and cello' },
+const LISTEN_SEGMENTS: readonly Segment<ListenMode>[] = [
+  { value: 'off', label: 'Off', hint: 'Listen: off' },
+  { value: 'backing', label: 'Backing', hint: 'Listen: backing only' },
+  { value: 'solo', label: 'Cello', hint: 'Listen: written cello part' },
+  { value: 'both', label: 'Both', hint: 'Listen: backing and cello' },
 ];
 
-const OVERLAY_SEGMENTS = [
-  { value: 'key' as const, label: 'Key', hint: 'Show key notes for improvising' },
-  { value: 'song' as const, label: 'Song', hint: 'Show all notes in song' },
+const OVERLAY_SEGMENTS: readonly Segment<Exclude<NoteOverlayMode, 'off'>>[] = [
+  { value: 'key', label: 'Key', hint: 'Show key notes for improvising' },
+  { value: 'song', label: 'Song', hint: 'Show all notes in song' },
 ];
 
 /**
@@ -41,10 +35,10 @@ const OVERLAY_SEGMENTS = [
  * letter constant the fingerboard chart prints. They are different questions,
  * so they are different modes rather than one switch.
  */
-const SCORE_COLOR_SEGMENTS = [
-  { value: 'off' as const, label: 'Ink', hint: 'Plain engraved noteheads' },
-  { value: 'string' as const, label: 'String', hint: 'Colour each note by its string' },
-  { value: 'note' as const, label: 'Note', hint: 'Colour each note by its name' },
+const SCORE_COLOR_SEGMENTS: readonly Segment<ScoreColorMode>[] = [
+  { value: 'off', label: 'Ink', hint: 'Plain engraved noteheads' },
+  { value: 'string', label: 'String', hint: 'Colour each note by its string' },
+  { value: 'note', label: 'Note', hint: 'Colour each note by its name' },
 ];
 
 const CONTROL_BAR_HEIGHT = 60;

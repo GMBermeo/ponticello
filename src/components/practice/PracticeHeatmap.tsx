@@ -1,10 +1,9 @@
 import { useCallback, useRef } from 'react';
 import { ScrollView, View } from 'react-native';
 
-import { formatDuration, HeatCell, heatGrid, PracticeLog } from '@/domain/practice';
-import { useTheme } from '@/theme/ThemeProvider';
-import { alpha } from '@/theme/tokens';
-import { Label, Row } from '../ui/primitives';
+import { formatDuration, HeatCell, heatGrid, PracticeLog } from '@domain';
+import { useTheme, alpha } from '@theme';
+import { Label, Row } from '../ui';
 
 /**
  * The practice grid.

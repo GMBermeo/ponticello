@@ -1,17 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { ArrangementLevel, ARRANGEMENT_LEVELS, ARRANGEMENT_PROFILES } from '@/domain/arrangement';
-import { BackingNote, BackingPart, InstrumentName, PartRole } from '@/domain/backing';
-import { firstPositionFingering } from '@/domain/fingering';
-import { CelloSongScore, scoreDurationMs } from '@/domain/schema';
-import { getBundledBacking, getScore } from '@/scores';
-import { COMPACT_SCORES } from '@/scores/bundledSongs';
-import { LIBRARY_EDITION } from '@/scores/libraryEdition';
+import { ArrangementLevel, ARRANGEMENT_LEVELS, ARRANGEMENT_PROFILES } from '../arranger';
+import { BackingNote, BackingPart, InstrumentName, PartRole } from '../backing';
+import { firstPositionFingering } from '../fingering';
+import { CelloNote, CelloSongScore, scoreDurationMs } from '../schema';
+import { getBundledBacking, getScore, COMPACT_SCORES, LIBRARY_EDITION } from '@scores';
 import {
   celloLineFromPart, celloPartOptions, describeOctaveFit, findCelloPart,
   FIRST_POSITION_FLOOR, FIRST_POSITION_ROOF, nearestWorkableOctave, octaveChoices,
-  partKind, partLabel, scoreFromPart, suggestedOctaves, writtenForCello,
-} from '@/domain/trackPicker';
+  partKind, partLabel, scoreFromPart, suggestedOctaves, writtenForCello, type CelloPartOption,
+} from '../trackPicker';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -485,7 +483,7 @@ describe('every offerable choice in the real library is playable', () => {
 
   it('has a library to test', () => {
     expect(songs.length).toBeGreaterThan(FULL_LIBRARY ? 100 : 0);
-    expect(busiest.length).toBe(6);
+    expect(busiest).toHaveLength(6);
   });
 
   it('offers exactly the choices that build, for every part of every song', () => {
@@ -545,34 +543,44 @@ describe('every offerable choice in the real library is playable', () => {
     if (FULL_LIBRARY) expect(refused).toBeGreaterThan(50);
   }, 300_000);
 
+  /** Every note inside the level's range, closed-frame where the level demands it, and fingerable. */
+  function expectPlayableAtLevel(notes: readonly CelloNote[], level: ArrangementLevel, where: string): void {
+    const { range, closedFrameOnly } = ARRANGEMENT_PROFILES[level];
+    for (const note of notes) {
+      expect(note.midiNumber, where).toBeGreaterThanOrEqual(range.low);
+      expect(note.midiNumber, where).toBeLessThanOrEqual(range.high);
+      // Read from the profile rather than from a list of level names:
+      // which levels forbid the stretch is arrangement policy, and it has
+      // changed under this test once already.
+      if (closedFrameOnly) expect(note.extension, where).toBe('none');
+      expect(() => firstPositionFingering(note.midiNumber), where).not.toThrow();
+    }
+  }
+
+  /** Builds every workable octave of one part at one level; returns how many it built. */
+  function buildPart(score: CelloSongScore, part: BackingPart, option: CelloPartOption, level: ArrangementLevel, id: string): number {
+    let built = 0;
+    for (const fit of option.octaves.filter((candidate) => candidate.verdict !== 'refused')) {
+      const where = `${id} / ${option.label} / ${fit.octaves} / ${level}`;
+      const result = scoreFromPart(score, part, { partId: option.id, octaves: fit.octaves }, level);
+      expect(result, where).not.toBeNull();
+      built++;
+      expectPlayableAtLevel(result?.score.notes ?? [], level, where);
+    }
+    return built;
+  }
+
   /** Builds every workable octave of every part and fingers what comes out. */
   function build(id: string, levels: readonly ArrangementLevel[]): number {
     const score = getScore(id);
     const backing = getBundledBacking(id);
     if (!score || !backing) return 0;
     let built = 0;
-
     for (const level of levels) {
-      const { range, closedFrameOnly } = ARRANGEMENT_PROFILES[level];
       for (const option of celloPartOptions(backing.parts, level)) {
-        if (option.id === null || option.unplayable) continue;
-        const part = backing.parts.find((candidate) => candidate.id === option.id)!;
-        for (const fit of option.octaves) {
-          if (fit.verdict === 'refused') continue;
-          const where = `${id} / ${option.label} / ${fit.octaves} / ${level}`;
-          const result = scoreFromPart(score, part, { partId: option.id, octaves: fit.octaves }, level);
-          expect(result, where).not.toBeNull();
-          built++;
-          for (const note of result!.score.notes) {
-            expect(note.midiNumber, where).toBeGreaterThanOrEqual(range.low);
-            expect(note.midiNumber, where).toBeLessThanOrEqual(range.high);
-            // Read from the profile rather than from a list of level names:
-            // which levels forbid the stretch is arrangement policy, and it has
-            // changed under this test once already.
-            if (closedFrameOnly) expect(note.extension, where).toBe('none');
-            expect(() => firstPositionFingering(note.midiNumber), where).not.toThrow();
-          }
-        }
+        const part = backing.parts.find((candidate) => candidate.id === option.id);
+        if (option.id === null || option.unplayable || !part) continue;
+        built += buildPart(score, part, option, level, id);
       }
     }
     return built;

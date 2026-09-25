@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Ponticello — practise the cello, not points</title>
+  <meta name="description" content="Ponticello is a free, open-source cello practice app, redesigned for the iPhone Duo: your own fingerboard tapes on screen, tab, score or highway reading, a tuner, cello chord shapes and scrolling chord charts. No account, no scores, nothing leaves your phone.">
+  <meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0B0A14" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="assets/brand/favicon.png">
+  <link rel="icon" href="assets/brand/ponticello-icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/brand/apple-touch-icon.png">
+  <meta property="og:title" content="Ponticello 1.8 — practise the cello, not points">
+  <meta property="og:description" content="Redesigned for the iPhone Duo. Your tapes on screen, three ways to read, a tuner, and chords for the cello. Free and open source.">
+  <meta property="og:image" content="assets/brand/og-image.png">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="nav">
+    <a class="brand" href="#top" aria-label="Ponticello home">
+      <img src="assets/brand/ponticello-icon-512.png" alt="" width="34" height="34">
+      <span>Ponticello</span>
+    </a>
+    <nav aria-label="Sections">
+      <a href="#features">Features</a>
+      <a href="#chords">Chords</a>
+      <a href="#design">Design</a>
+      <a href="#open-source">Open source</a>
+      <a class="button small" href="https://github.com/GMBermeo/ponticello/releases">Download</a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="pill"><span class="dot" aria-hidden="true"></span>New in 1.8 · Redesigned for iPhone Duo</p>
+        <h1>Practise the cello,<br><span class="accent">not points.</span></h1>
+        <p class="lede">
+          Ponticello puts <strong>your own fingerboard tapes</strong> on the screen, lets you read the music as
+          tab, score or a falling highway, and slows it, loops it and arranges it down to where you are.
+          No account, no scoreboard, and nothing leaves your phone.
+        </p>
+        <div class="actions">
+          <a class="button" href="https://github.com/GMBermeo/ponticello/releases">Get Ponticello</a>
+          <a class="button ghost" href="https://github.com/GMBermeo/ponticello">View the source</a>
+        </div>
+        <ul class="facts" aria-label="At a glance">
+          <li><strong>1,272</strong><span>cello chord voicings</span></li>
+          <li><strong>4</strong><span>arrangement levels</span></li>
+          <li><strong>0</strong><span>accounts or uploads</span></li>
+        </ul>
+      </div>
+      <figure class="hero-device">
+        <div class="device">
+          <video autoplay muted loop playsinline preload="metadata"
+            poster="assets/screenshots/play-highway.webp"
+            aria-label="Screen recording on the iPhone Duo: Bach's Prélude playing, switching between the highway, tab and score views.">
+            <source src="assets/video/tour.mp4" type="video/mp4">
+          </video>
+        </div>
+        <figcaption>Bach’s Prélude, recorded on the iPhone Duo simulator (iOS 27).</figcaption>
+      </figure>
+    </section>
+
+    <section class="idea">
+      <img class="mark" src="assets/screenshots/icon-home.webp" alt="The Ponticello icon on the iPhone Duo home screen: a glassy cello bridge with four coloured strings on an indigo ground." width="170" height="170">
+      <div>
+        <p class="kicker">The new mark</p>
+        <h2>A little bridge, with four strings on it</h2>
+        <p>
+          <em>Ponticello</em> is Italian for “little bridge”, and that is the mark: a cello bridge seen from the
+          player’s side — the arched crown, the waist, the feet and the heart — with the four strings resting on it
+          in the colour of the note each one sounds open. C green, G red, D blue, A yellow: the same colours the
+          fingerboard, the chart and the play screen use for the same strings.
+        </p>
+      </div>
+    </section>
+
+    <section id="features" class="features">
+      <header class="section-head">
+        <p class="kicker">Everything a practice session needs</p>
+        <h2>Read it your way. Play it at your pace.</h2>
+      </header>
+
+      <article class="feature">
+        <div class="copy">
+          <p class="kicker">Three ways to read</p>
+          <h3>Tab, score or highway — same music, your choice</h3>
+          <p>Finger numbers on four string lines, engraved bass-clef notation with fingerings, or a highway of notes
+            falling towards the hit line in four string-coloured lanes. The fingerboard beside it lights the note you
+            are playing, on <em>your</em> tapes.</p>
+        </div>
+        <div class="devices trio">
+          <div class="device"><img loading="lazy" src="assets/screenshots/play-tab.webp" alt="Tab view: Bach's Prélude as finger numbers on four coloured string lines, with the fingerboard beside it." width="720" height="1048"></div>
+          <div class="device"><img loading="lazy" src="assets/screenshots/play-score.webp" alt="Score view: engraved bass clef with finger numbers above each note." width="720" height="1048"></div>
+          <div class="device"><img loading="lazy" src="assets/screenshots/play-highway.webp" alt="Highway view: notes falling in four coloured string lanes towards the hit line." width="720" height="1048"></div>
+        </div>
+      </article>
+
+      <article class="feature reverse">
+        <div class="copy">
+          <p class="kicker">Make it your practice</p>
+          <h3>Arranged down to where you are</h3>
+          <p>Every song comes in four levels, from held bass notes a beginner can reach to the full melody. Pick the
+            bars to loop, slow the tempo, choose which part of the original to play, and start from a Liquid Glass
+            bar that stays under your thumb.</p>
+        </div>
+        <div class="devices single">
+          <div class="device"><img loading="lazy" src="assets/screenshots/practice-setup.webp" alt="Practice setup: the piece, tempo and loop steppers, and a floating Start practice button." width="720" height="1048"></div>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="copy">
+          <p class="kicker">Tuner</p>
+          <h3>One pitch engine, one answer</h3>
+          <p>The tuner uses the same analysis as the play screen, built for the cello’s low register — so it never
+            confuses a low C for the C an octave up. It is a tab of its own now, and the microphone runs only while
+            you are on it.</p>
+        </div>
+        <div class="devices single">
+          <div class="device"><img loading="lazy" src="assets/screenshots/tuner.webp" alt="The tuner tab: a cents dial and the four open strings C, G, D and A." width="720" height="1048"></div>
+        </div>
+      </article>
+
+      <article class="feature reverse">
+        <div class="copy">
+          <p class="kicker">Your practice</p>
+          <h3>Time actually played, kept on the phone</h3>
+          <p>How long the music really ran, per day — totals, streaks and six months at a glance. No upload and no
+            score out of ten: twenty minutes played badly is twenty minutes practised.</p>
+        </div>
+        <div class="devices single">
+          <div class="device"><img loading="lazy" src="assets/screenshots/practice-record.webp" alt="The Practice tab: tiles for total time, this week and streaks, above a six-month calendar." width="720" height="1048"></div>
+        </div>
+      </article>
+    </section>
+
+    <section id="chords" class="features">
+      <header class="section-head">
+        <p class="kicker">Chords, worked out for the cello</p>
+        <h2>Shapes for C–G–D–A, not a guitar</h2>
+      </header>
+
+      <article class="feature">
+        <div class="copy">
+          <p class="kicker">Chord atlas</p>
+          <h3>Every chord in your key, on your fingerboard</h3>
+          <p>Pick a tonic and a scale and see every chord in it — triads, sevenths and extensions — drawn on the
+            cello’s fingerboard in your tape colours, with roots as squares. Where no comfortable grip exists,
+            Ponticello says so and gives you the arpeggio instead.</p>
+        </div>
+        <div class="devices single">
+          <div class="device"><img loading="lazy" src="assets/screenshots/chords.webp" alt="The Chords tab: scale tonic, scale mode and chord family filters." width="720" height="1048"></div>
+        </div>
+      </article>
+
+      <article class="feature reverse">
+        <div class="copy">
+          <p class="kicker">Chord charts and progressions</p>
+          <h3>Charts that scroll, progressions you write</h3>
+          <p>Read a song as chord names or as cello shapes, rolling along at your tempo with the next fingering
+            previewed. Or build your own progression from a preset or from nothing, and play it back.</p>
+        </div>
+        <div class="devices duo-pair">
+          <div class="device"><img loading="lazy" src="assets/screenshots/chord-chart.webp" alt="A chord chart showing the current and next chord shapes, with auto-scroll controls." width="720" height="1048"></div>
+          <div class="device"><img loading="lazy" src="assets/screenshots/chord-progression.webp" alt="The chord progression builder: key, scale mode, preview toggles and a floating transport." width="720" height="1048"></div>
+        </div>
+      </article>
+    </section>
+
+    <section id="design" class="design">
+      <header class="section-head">
+        <p class="kicker">Ponticello 1.8</p>
+        <h2>Made to feel at home on the iPhone Duo</h2>
+        <p class="section-lede">The whole interface was rebuilt on the phone it now lives on — and it still runs on Android and the web.</p>
+      </header>
+      <ul class="design-points">
+        <li>
+          <h3>Liquid Glass where it floats</h3>
+          <p>The tab rail, the back button, the play transport and the tuner over the score are system glass. The
+            music itself sits on plain cards.</p>
+        </li>
+        <li>
+          <h3>The system’s own type</h3>
+          <p>SF Pro for text and SF Pro Rounded for numbers, at native sizes — a design unit is never smaller than a
+            point any more.</p>
+        </li>
+        <li>
+          <h3>A native tab bar</h3>
+          <p>Library, Practice, Tuner and Chords are one tap away from anywhere, in the Duo’s own side rail.</p>
+        </li>
+        <li>
+          <h3>An accent of its own</h3>
+          <p>Indigo for actions and selection, so “selected” never looks like the blue of a D string. Every colour
+            pair is tested for contrast.</p>
+        </li>
+      </ul>
+      <div class="design-video">
+        <div class="device">
+          <video autoplay muted loop playsinline preload="none" poster="assets/screenshots/library.webp"
+            aria-label="Screen recording: moving between the Library, Practice, Tuner and Chords tabs, and switching from Light to Dark to Neon.">
+            <source src="assets/video/themes.mp4" type="video/mp4">
+          </video>
+        </div>
+        <div class="design-video-copy">
+          <p class="kicker">Tabs and themes</p>
+          <h3>Four tabs, three looks, one tap each</h3>
+          <p>The tab rail on the Duo’s edge is the system’s own. The theme button beside the title cycles Light,
+            Dark and Neon — and the tab bar, the glass and the status bar follow the theme you picked, not the phone’s.</p>
+        </div>
+      </div>
+      <div class="themes" role="group" aria-label="The three themes">
+        <figure>
+          <div class="device"><img loading="lazy" src="assets/screenshots/library.webp" alt="The library in the Light theme: grouped cards on a soft grey ground." width="720" height="1048"></div>
+          <figcaption>Light</figcaption>
+        </figure>
+        <figure>
+          <div class="device"><img loading="lazy" src="assets/screenshots/library-dark.webp" alt="The library in the Dark theme: near-black ground with indigo accents." width="720" height="1048"></div>
+          <figcaption>Dark</figcaption>
+        </figure>
+        <figure>
+          <div class="device"><img loading="lazy" src="assets/screenshots/play-highway-neon.webp" alt="The highway in the Neon theme on a true-black ground." width="720" height="1048"></div>
+          <figcaption>Neon</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="more">
+      <header class="section-head">
+        <p class="kicker">And the rest of the kit</p>
+        <h2>Reference pages, one tap from the library</h2>
+      </header>
+      <div class="strip" tabindex="0" aria-label="More screens, scrollable">
+        <figure>
+          <div class="device"><img loading="lazy" src="assets/screenshots/fingerboard-chart.webp" alt="Fingerboard chart showing every note, coloured by its letter name." width="720" height="1048"></div>
+          <figcaption><strong>Fingerboard chart.</strong> Every note, coloured by its name.</figcaption>
+        </figure>
+        <figure>
+          <div class="device"><img loading="lazy" src="assets/screenshots/scales.webp" alt="Scales by key, ordered by how many songs in your library use each key." width="720" height="1048"></div>
+          <figcaption><strong>Scales by key.</strong> Drills for the keys your music uses.</figcaption>
+        </figure>
+        <figure>
+          <div class="device"><img loading="lazy" src="assets/screenshots/reading-guide.webp" alt="The reading guide explaining the nut, finger numbers and tapes." width="720" height="1048"></div>
+          <figcaption><strong>Reading guide.</strong> The nut is zero; the numbers are fingers.</figcaption>
+        </figure>
+        <figure>
+          <div class="device"><img loading="lazy" src="assets/screenshots/tapes.webp" alt="My tapes: each fingerboard tape with its colour, position and the notes it marks." width="720" height="1048"></div>
+          <figcaption><strong>My tapes.</strong> Match the colours on your own cello.</figcaption>
+        </figure>
+        <figure>
+          <div class="device"><img loading="lazy" src="assets/screenshots/tuner-dark.webp" alt="The tuner in the Dark theme." width="720" height="1048"></div>
+          <figcaption><strong>Tuner, dark.</strong> Every screen in every theme.</figcaption>
+        </figure>
+        <figure>
+          <div class="device"><img loading="lazy" src="assets/screenshots/play-highway-dark.webp" alt="The highway in the Dark theme, mid-play." width="720" height="1048"></div>
+          <figcaption><strong>Highway, dark.</strong> Mid-play, microphone off.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="principles">
+      <header class="section-head">
+        <p class="kicker">Promises</p>
+        <h2>What it will not do</h2>
+      </header>
+      <ul>
+        <li><strong>No points, streak-shaming or leaderboards.</strong> Twenty minutes played badly is twenty minutes practised.</li>
+        <li><strong>No account and no upload.</strong> The microphone is a tuner; nothing is recorded and nothing leaves the device.</li>
+        <li><strong>No transposition behind your back.</strong> Arrangements move octaves, never keys, so the backing always agrees with you.</li>
+      </ul>
+    </section>
+
+    <section id="open-source" class="open-source">
+      <div>
+        <p class="kicker">Free and open source</p>
+        <h2>Build it, fix it, make it yours</h2>
+        <p>
+          Ponticello is built with Expo and React Native, with a pure-TypeScript core — the fingering solver,
+          the MIDI arranger, the pitch detector and the chord catalogue — covered by over a thousand tests.
+          Build your own library from your own MIDI files, fix a fingering, or add a feature.
+        </p>
+        <div class="actions">
+          <a class="button" href="https://github.com/GMBermeo/ponticello">Star it on GitHub</a>
+          <a class="button ghost" href="https://github.com/GMBermeo/ponticello#contributing">How to contribute</a>
+        </div>
+      </div>
+      <pre class="code" aria-label="Getting started"><code>git clone https://github.com/GMBermeo/ponticello
+cd ponticello
+npm install
+npm run ios          # iPhone Duo simulator
+npm run web          # or try it in the browser
+npm run build:library:free
+npm test</code></pre>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <img src="assets/brand/ponticello-wordmark.png" alt="Ponticello" class="wordmark light-only" width="200" height="50">
+    <img src="assets/brand/ponticello-wordmark-light.png" alt="Ponticello" class="wordmark dark-only" width="200" height="50">
+    <p>
+      App development by <a href="https://gm.bermeo.dev">Guilherme Yuri Bermeo</a> ·
+      <a href="https://gm.bermeo.dev">gm.bermeo.dev</a>
+    </p>
+    <p class="fine">
+      Released under the MIT License. Screens shown are the free edition, with public-domain works and original
+      etudes only. Arranged songs in the full library are study reductions for personal practice and are not
+      distributed.
+    </p>
+  </footer>
+</body>
+</html>

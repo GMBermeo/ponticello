@@ -4,70 +4,88 @@ import { monophonic, parseMidi } from '../midi';
 
 interface WriteNote { midi: number; startTicks: number; durationTicks: number; track?: number }
 
-/** Minimal SMF writer, so the parser is tested against bytes rather than mocks. */
-function writeMidi(
-  notes: WriteNote[],
-  {
-    ticksPerQuarter = 480, microsecondsPerQuarter = 500000, runningStatus = false,
-    trackNames = {} as Record<number, string>, programs = {} as Record<number, number>,
-    channels = {} as Record<number, number>, timeSignature = null as [number, number] | null,
-  } = {},
-): Uint8Array {
-  const varInt = (value: number) => {
-    const buffer = [value & 0x7f];
-    let v = value >> 7;
-    while (v > 0) { buffer.unshift((v & 0x7f) | 0x80); v >>= 7; }
-    return buffer;
-  };
+interface WriteOptions {
+  ticksPerQuarter?: number;
+  microsecondsPerQuarter?: number;
+  runningStatus?: boolean;
+  trackNames?: Record<number, string>;
+  programs?: Record<number, number>;
+  channels?: Record<number, number>;
+  timeSignature?: [number, number] | null;
+}
 
-  const trackCount = Math.max(1, ...notes.map((n) => (n.track ?? 0) + 1));
-  const bytes: number[] = [0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, trackCount > 1 ? 1 : 0];
-  bytes.push(0, trackCount, (ticksPerQuarter >> 8) & 0xff, ticksPerQuarter & 0xff);
-
-  for (let t = 0; t < trackCount; t++) {
-    const track: number[] = [];
-    if (t === 0) {
-      track.push(...varInt(0), 0xff, 0x51, 0x03,
-        (microsecondsPerQuarter >> 16) & 0xff,
-        (microsecondsPerQuarter >> 8) & 0xff,
-        microsecondsPerQuarter & 0xff);
-      if (timeSignature) {
-        track.push(...varInt(0), 0xff, 0x58, 0x04,
-          timeSignature[0], Math.log2(timeSignature[1]), 24, 8);
-      }
-    }
-    if (trackNames[t]) {
-      const text = [...trackNames[t]].map((c) => c.charCodeAt(0));
-      track.push(...varInt(0), 0xff, 0x03, ...varInt(text.length), ...text);
-    }
-    const channel = channels[t] ?? 0;
-    if (programs[t] !== undefined) {
-      track.push(...varInt(0), 0xc0 | channel, programs[t]);
-    }
-
-    const events = notes.filter((n) => (n.track ?? 0) === t)
-      .flatMap((n) => [
-        { tick: n.startTicks, on: true, midi: n.midi },
-        { tick: n.startTicks + n.durationTicks, on: false, midi: n.midi },
-      ])
-      .sort((a, b) => a.tick - b.tick || (a.on ? 1 : -1));
-
-    let lastTick = 0;
-    let lastStatus = -1;
-    for (const event of events) {
-      track.push(...varInt(event.tick - lastTick));
-      lastTick = event.tick;
-      const status = (runningStatus ? 0x90 : (event.on ? 0x90 : 0x80)) | channel;
-      if (!runningStatus || status !== lastStatus) { track.push(status); lastStatus = status; }
-      track.push(event.midi, event.on ? 0x64 : 0x00);
-    }
-    track.push(...varInt(0), 0xff, 0x2f, 0x00);
-
-    bytes.push(0x4d, 0x54, 0x72, 0x6b,
-      (track.length >> 24) & 0xff, (track.length >> 16) & 0xff,
-      (track.length >> 8) & 0xff, track.length & 0xff, ...track);
+/** MIDI's 7-bits-per-byte variable-length quantity. */
+function varInt(value: number): number[] {
+  const buffer = [value & 0x7f];
+  let v = value >> 7;
+  while (v > 0) {
+    buffer.unshift((v & 0x7f) | 0x80);
+    v >>= 7;
   }
+  return buffer;
+}
 
+const bigEndian32 = (n: number) => [(n >> 24) & 0xff, (n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+
+/** Tempo, and optionally a time signature, as delta-zero meta events. */
+function conductorEvents(microsecondsPerQuarter: number, timeSignature: [number, number] | null): number[] {
+  const tempo = [...varInt(0), 0xff, 0x51, 0x03, (microsecondsPerQuarter >> 16) & 0xff, (microsecondsPerQuarter >> 8) & 0xff, microsecondsPerQuarter & 0xff];
+  if (!timeSignature) return tempo;
+  return [...tempo, ...varInt(0), 0xff, 0x58, 0x04, timeSignature[0], Math.log2(timeSignature[1]), 24, 8];
+}
+
+function noteEvents(notes: readonly WriteNote[], channel: number, runningStatus: boolean): number[] {
+  const events = notes.flatMap((n) => [
+    { tick: n.startTicks, on: true, midi: n.midi },
+    { tick: n.startTicks + n.durationTicks, on: false, midi: n.midi },
+  ]).sort((a, b) => a.tick - b.tick || (a.on ? 1 : -1));
+
+  const out: number[] = [];
+  let lastTick = 0;
+  let lastStatus = -1;
+  for (const event of events) {
+    out.push(...varInt(event.tick - lastTick));
+    lastTick = event.tick;
+    // With running status, note-offs are sent as zero-velocity note-ons.
+    const command = runningStatus || event.on ? 0x90 : 0x80;
+    const status = command | channel;
+    if (!runningStatus || status !== lastStatus) {
+      out.push(status);
+      lastStatus = status;
+    }
+    out.push(event.midi, event.on ? 0x64 : 0x00);
+  }
+  return out;
+}
+
+function trackChunk(t: number, notes: readonly WriteNote[], options: Required<WriteOptions>): number[] {
+  const track: number[] = t === 0 ? conductorEvents(options.microsecondsPerQuarter, options.timeSignature) : [];
+  const name = options.trackNames[t];
+  if (name) {
+    const text = [...name].map((c) => c.charCodeAt(0));
+    track.push(...varInt(0), 0xff, 0x03, ...varInt(text.length), ...text);
+  }
+  const channel = options.channels[t] ?? 0;
+  const program = options.programs[t];
+  if (program !== undefined) track.push(...varInt(0), 0xc0 | channel, program);
+  track.push(...noteEvents(notes.filter((n) => (n.track ?? 0) === t), channel, options.runningStatus));
+  track.push(...varInt(0), 0xff, 0x2f, 0x00);
+  return [0x4d, 0x54, 0x72, 0x6b, ...bigEndian32(track.length), ...track];
+}
+
+/** Minimal SMF writer, so the parser is tested against bytes rather than mocks. */
+function writeMidi(notes: WriteNote[], options: WriteOptions = {}): Uint8Array {
+  const settings: Required<WriteOptions> = {
+    ticksPerQuarter: 480, microsecondsPerQuarter: 500000, runningStatus: false,
+    trackNames: {}, programs: {}, channels: {}, timeSignature: null, ...options,
+  };
+  const trackCount = Math.max(1, ...notes.map((n) => (n.track ?? 0) + 1));
+  const { ticksPerQuarter } = settings;
+  const bytes: number[] = [
+    0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, trackCount > 1 ? 1 : 0,
+    0, trackCount, (ticksPerQuarter >> 8) & 0xff, ticksPerQuarter & 0xff,
+  ];
+  for (let t = 0; t < trackCount; t++) bytes.push(...trackChunk(t, notes, settings));
   return new Uint8Array(bytes);
 }
 

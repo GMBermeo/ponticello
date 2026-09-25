@@ -19,6 +19,13 @@ import {
 } from './cello';
 import { CelloExtension } from './schema';
 
+/** Highest pitch each string covers in first position, fourth finger included. */
+const FIRST_POSITION_TOP: readonly [CelloString, number][] = [['C', 42], ['G', 49], ['D', 56]];
+
+function firstPositionString(midi: number): CelloString {
+  return FIRST_POSITION_TOP.find(([, top]) => midi <= top)?.[0] ?? 'A';
+}
+
 export interface RawNoteEvent {
   startTimeMs: number;
   durationMs: number;
@@ -98,57 +105,67 @@ const OPEN_STRING_ANCHORS: readonly number[] = [...new Set([
   ...Array.from({ length: MAX_SEMITONES_ON_STRING - 11 }, (_, i) => 12 + i),
 ])].sort((a, b) => a - b);
 
-export function candidateStates(midi: number): CelloState[] {
+/**
+ * Written as first position throughout, because that is how an open string is
+ * notated and read; `baseSemitones` is the part that varies, and it is the only
+ * part the shift model looks at.
+ */
+function openStringStates(string: CelloString): CelloState[] {
+  return OPEN_STRING_ANCHORS.map((base) => ({ string, position: '1st', finger: '0', extension: 'none', baseSemitones: base }));
+}
+
+/** Seats in the neck positions: closed hand, forward extension, and backward extension. */
+function neckStates(string: CelloString, semitones: number): CelloState[] {
   const out: CelloState[] = [];
-  const key = new Set<string>();
-  const add = (s: CelloState) => {
-    const k = `${s.string}|${s.position}|${s.finger}|${s.extension}|${s.baseSemitones}`;
-    if (!key.has(k)) { key.add(k); out.push(s); }
-  };
-
-  for (const string of STRING_ORDER) {
-    const semitones = midi - OPEN_STRING_MIDI[string];
-
-    if (semitones === 0) {
-      // Written as first position throughout, because that is how an open
-      // string is notated and read; `baseSemitones` is the part that varies,
-      // and it is the only part the shift model looks at.
-      for (const base of OPEN_STRING_ANCHORS) {
-        add({ string, position: '1st', finger: '0', extension: 'none', baseSemitones: base });
-      }
-      continue;
+  for (const position of NECK_POSITIONS) {
+    const base = POSITION_BASE_SEMITONES[position];
+    const diff = semitones - base;
+    const closed = CLOSED_FRAME[diff];
+    if (closed) out.push({ string, position, finger: closed, extension: 'none', baseSemitones: base });
+    const forward = FORWARD_FRAME[diff];
+    if (forward && POSITIONS_ALLOWING_FORWARD.includes(position)) {
+      out.push({ string, position, finger: forward, extension: 'forward', baseSemitones: base });
     }
-    if (semitones < 0 || semitones > MAX_SEMITONES_ON_STRING) continue;
-
-    for (const position of NECK_POSITIONS) {
-      const diff = semitones - POSITION_BASE_SEMITONES[position];
-
-      const base = POSITION_BASE_SEMITONES[position];
-
-      const closed = CLOSED_FRAME[diff];
-      if (closed) add({ string, position, finger: closed, extension: 'none', baseSemitones: base });
-
-      const forward = FORWARD_FRAME[diff];
-      if (forward && POSITIONS_ALLOWING_FORWARD.includes(position)) {
-        add({ string, position, finger: forward, extension: 'forward', baseSemitones: base });
-      }
-
-      if (diff === -1 && POSITIONS_ALLOWING_BACKWARD.includes(position)) {
-        add({ string, position, finger: '1', extension: 'backward', baseSemitones: base });
-      }
-    }
-
-    // Thumb position: the thumb can park anywhere from the octave harmonic up,
-    // so every base from 12 semitones to the note itself is a candidate.
-    if (semitones >= 12 && midi >= THUMB_FLOOR_MIDI) {
-      for (let base = 12; base <= semitones; base++) {
-        const finger = THUMB_FRAME[semitones - base];
-        if (finger) add({ string, position: 'Thumb', finger, extension: 'none', baseSemitones: base });
-      }
+    if (diff === -1 && POSITIONS_ALLOWING_BACKWARD.includes(position)) {
+      out.push({ string, position, finger: '1', extension: 'backward', baseSemitones: base });
     }
   }
-
   return out;
+}
+
+/**
+ * Thumb position: the thumb can park anywhere from the octave harmonic up, so
+ * every base from 12 semitones to the note itself is a candidate.
+ */
+function thumbStates(string: CelloString, semitones: number, midi: number): CelloState[] {
+  if (semitones < 12 || midi < THUMB_FLOOR_MIDI) return [];
+  const out: CelloState[] = [];
+  for (let base = 12; base <= semitones; base++) {
+    const finger = THUMB_FRAME[semitones - base];
+    if (finger) out.push({ string, position: 'Thumb', finger, extension: 'none', baseSemitones: base });
+  }
+  return out;
+}
+
+function statesOnString(string: CelloString, midi: number): CelloState[] {
+  const semitones = midi - OPEN_STRING_MIDI[string];
+  if (semitones === 0) return openStringStates(string);
+  if (semitones < 0 || semitones > MAX_SEMITONES_ON_STRING) return [];
+  return [...neckStates(string, semitones), ...thumbStates(string, semitones, midi)];
+}
+
+const stateKey = (state: CelloState) =>
+  `${state.string}|${state.position}|${state.finger}|${state.extension}|${state.baseSemitones}`;
+
+/** Every way to seat `midi` on the cello, each distinct seat once. */
+export function candidateStates(midi: number): CelloState[] {
+  const unique = new Map<string, CelloState>();
+  for (const string of STRING_ORDER) {
+    for (const state of statesOnString(string, midi)) {
+      if (!unique.has(stateKey(state))) unique.set(stateKey(state), state);
+    }
+  }
+  return [...unique.values()];
 }
 
 // ─── Cost model ──────────────────────────────────────────────────────────────
@@ -407,43 +424,58 @@ export function solveFingering(
     const column = trellis[t];
     const previousColumn = trellis[t - 1];
     if (!note || !previousNote || !column || !previousColumn) continue;
-
-    const deltaT = note.startTimeMs - previousNote.startTimeMs;
-    const next = new Array<number>(column.length);
-    const back = new Array<number>(column.length);
-
-    for (let j = 0; j < column.length; j++) {
-      const to = column[j];
-      if (!to) continue;
-      const emit = emissionCost(to, note, w);
-      let best = Infinity;
-      let bestIndex = -1;
-      for (let i = 0; i < previousColumn.length; i++) {
-        const from = previousColumn[i];
-        if (!from) continue;
-        const total = (costs[i] ?? Infinity) + transitionCost(from, to, deltaT, w) + emit;
-        if (total < best) { best = total; bestIndex = i; }
-      }
-      next[j] = best;
-      back[j] = bestIndex;
-    }
-
-    costs = next;
-    backpointers.push(back);
+    const step = viterbiStep({
+      costs, previousColumn, column, note, deltaT: note.startTimeMs - previousNote.startTimeMs, weights: w,
+    });
+    costs = step.costs;
+    backpointers.push(step.backpointers);
   }
 
-  let index = costs.reduce((best, c, i) => (c < (costs[best] ?? Infinity) ? i : best), 0);
-  const totalCost = costs[index] ?? 0;
+  const lastIndex = costs.reduce((best, c, i) => (c < (costs[best] ?? Infinity) ? i : best), 0);
+  return { states: backtrace(trellis, backpointers, lastIndex), totalCost: costs[lastIndex] ?? 0 };
+}
 
-  const states: CelloState[] = new Array(notes.length);
-  for (let t = notes.length - 1; t >= 0; t--) {
+type ViterbiStepInput = {
+  costs: readonly number[];
+  previousColumn: readonly CelloState[];
+  column: readonly CelloState[];
+  note: RawNoteEvent;
+  deltaT: number;
+  weights: CostWeights;
+};
+
+/** The cheapest way into each seat of `column`, and which previous seat it came from. */
+function viterbiStep({ costs, previousColumn, column, note, deltaT, weights }: ViterbiStepInput) {
+  const next = new Array<number>(column.length);
+  const back = new Array<number>(column.length);
+  column.forEach((to, j) => {
+    const emit = emissionCost(to, note, weights);
+    let best = Infinity;
+    let bestIndex = -1;
+    previousColumn.forEach((from, i) => {
+      const total = (costs[i] ?? Infinity) + transitionCost(from, to, deltaT, weights) + emit;
+      if (total < best) {
+        best = total;
+        bestIndex = i;
+      }
+    });
+    next[j] = best;
+    back[j] = bestIndex;
+  });
+  return { costs: next, backpointers: back };
+}
+
+/** Walks the backpointers from the cheapest final seat to recover the whole path. */
+function backtrace(trellis: readonly CelloState[][], backpointers: readonly number[][], lastIndex: number): CelloState[] {
+  const states: CelloState[] = new Array(trellis.length);
+  let index = lastIndex;
+  for (let t = trellis.length - 1; t >= 0; t--) {
     const chosen = trellis[t]?.[index];
     if (!chosen) break;
     states[t] = chosen;
     index = backpointers[t]?.[index] ?? 0;
   }
-
-  return { states, totalCost };
+  return states;
 }
 
 /**
@@ -592,7 +624,7 @@ export function firstPositionFingering(midi: number): CelloState {
     5: { finger: '4', position: '1st', base: 2 },
   };
 
-  const string: CelloString = midi <= 42 ? 'C' : midi <= 49 ? 'G' : midi <= 56 ? 'D' : 'A';
+  const string = firstPositionString(midi);
   const semitones = midi - OPEN_STRING_MIDI[string];
 
   const seat = closed[semitones];

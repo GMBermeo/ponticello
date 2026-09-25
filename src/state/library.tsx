@@ -3,9 +3,7 @@ import React, {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
 } from 'react';
 
-import { fromBase64, toBase64 } from '@/domain/base64';
-import { ImportedPiece, importScore } from '@/domain/importScore';
-import { parseMidi } from '@/domain/midi';
+import { fromBase64, toBase64, ImportedPiece, importScore, parseMidi } from '@domain';
 
 /**
  * Pieces the player imported themselves.

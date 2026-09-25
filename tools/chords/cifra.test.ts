@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyTiming, guitarUrl, keyboardUrl, matchSongId, parseCifraHtml, parseUrlList, translateCredits } from './cifra';
 import { applyDurationTiming } from './timing';
-import { parseChordPro } from '../../src/domain/chordPro';
-import { sheetLineSegments } from '../../src/domain/chordSheet';
+import { parseChordPro, sheetLineSegments } from '@domain';
 
 // Original text, representative current Cifra DOM. No fetched song lyrics.
 const fixture = `<html><body><div><h1>Original Study</h1><h2>Test Artist</h2></div>
@@ -21,6 +20,8 @@ describe('Cifra keyboard importer', () => {
     expect(keyboardUrl(`${url}?instrument=guitar&version=2#notes`)).toBe(`${url}?instrument=keyboard&version=2`);
     expect(guitarUrl(`${url}?instrument=keyboard&version=2#notes`)).toBe(`${url}?version=2`);
     expect(parseUrlList(`# input\r\n${url}\n\n${url}?instrument=keyboard`)).toEqual([`${url}?instrument=keyboard`]);
+    // Plain HTTP is one of the inputs that must be refused.
+    // eslint-disable-next-line sonarjs/no-clear-text-protocols
     for (const bad of ['http://www.cifraclub.com.br/a/b/', 'https://evil.test/a/b/', 'https://cifraclub.com.br.evil.test/a/b/', 'https://user@www.cifraclub.com.br/a/b/']) {
       expect(() => keyboardUrl(bad)).toThrow();
       expect(() => guitarUrl(bad)).toThrow();

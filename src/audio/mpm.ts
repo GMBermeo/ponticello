@@ -103,37 +103,8 @@ export class McLeodPitchDetector {
     const rms = Math.sqrt(sumSquares / w);
     if (rms < this.silenceThreshold) return UNVOICED;
 
-    autocorrelate(frame, w, this.acf, this.maxLag + 1, this.scratch);
-
-    // m(τ) falls out of a running subtraction rather than a second O(W²) pass:
-    // widening the lag by one drops exactly one sample from each end.
-    let m = 2 * sumSquares;
-    this.nsdf[0] = 1;
-    for (let tau = 1; tau <= this.maxLag + 1; tau++) {
-      m -= frame[w - tau] * frame[w - tau] + frame[tau - 1] * frame[tau - 1];
-      this.nsdf[tau] = m > 0 ? (2 * this.acf[tau]) / m : 0;
-    }
-
-    const count = this.collectKeyMaxima();
-    if (count === 0) return { frequency: 0, clarity: 0, rms, voiced: false };
-
-    // Only lags inside the configured band are candidates. The lobe walk above
-    // deliberately starts at τ=0 — starting it at minLag would step *into* the
-    // first period's lobe on a high note and skip the true peak, reporting an
-    // octave down.
-    let highest = 0;
-    for (let i = 0; i < count; i++) {
-      const tau = this.maxima[i];
-      if (tau >= this.minLag && this.nsdf[tau] > highest) highest = this.nsdf[tau];
-    }
-    if (highest <= 0) return { frequency: 0, clarity: 0, rms, voiced: false };
-
-    const threshold = this.peakThreshold * highest;
-    let chosen = -1;
-    for (let i = 0; i < count; i++) {
-      const tau = this.maxima[i];
-      if (tau >= this.minLag && this.nsdf[tau] >= threshold) { chosen = tau; break; }
-    }
+    this.computeNsdf(frame, sumSquares);
+    const chosen = this.choosePeriod(this.collectKeyMaxima());
     if (chosen < 0) return { frequency: 0, clarity: 0, rms, voiced: false };
 
     const { lag, value } = this.refine(chosen);
@@ -146,6 +117,66 @@ export class McLeodPitchDetector {
   }
 
   /**
+   * The normalised square difference function, into `this.nsdf`.
+   *
+   * m(τ) falls out of a running subtraction rather than a second O(W²) pass:
+   * widening the lag by one drops exactly one sample from each end.
+   */
+  private computeNsdf(frame: Float32Array, sumSquares: number): void {
+    const w = this.windowSize;
+    autocorrelate(frame, w, this.acf, this.maxLag + 1, this.scratch);
+    let m = 2 * sumSquares;
+    this.nsdf[0] = 1;
+    for (let tau = 1; tau <= this.maxLag + 1; tau++) {
+      m -= frame[w - tau] * frame[w - tau] + frame[tau - 1] * frame[tau - 1];
+      this.nsdf[tau] = m > 0 ? (2 * this.acf[tau]) / m : 0;
+    }
+  }
+
+  /**
+   * The first key maximum within `peakThreshold` of the tallest, or −1.
+   *
+   * Only lags inside the configured band are candidates. The lobe walk
+   * deliberately starts at τ=0 — starting it at minLag would step *into* the
+   * first period's lobe on a high note and skip the true peak, reporting an
+   * octave down.
+   */
+  private choosePeriod(count: number): number {
+    let highest = 0;
+    for (let i = 0; i < count; i++) {
+      const tau = this.maxima[i];
+      if (tau >= this.minLag && this.nsdf[tau] > highest) highest = this.nsdf[tau];
+    }
+    if (highest <= 0) return -1;
+
+    const threshold = this.peakThreshold * highest;
+    for (let i = 0; i < count; i++) {
+      const tau = this.maxima[i];
+      if (tau >= this.minLag && this.nsdf[tau] >= threshold) return tau;
+    }
+    return -1;
+  }
+
+  /** First lag past the τ=0 lobe, which is always 1 and always tallest, and the gap after it. */
+  private firstLagAfterPrimaryLobe(): number {
+    const nsdf = this.nsdf;
+    let pos = 1;
+    while (pos < this.maxLag && nsdf[pos] > 0) pos++;
+    return this.skipNonPositive(pos);
+  }
+
+  private skipNonPositive(from: number): number {
+    let pos = from;
+    while (pos < this.maxLag && this.nsdf[pos] <= 0) pos++;
+    return pos;
+  }
+
+  private isLocalPeak(pos: number): boolean {
+    const nsdf = this.nsdf;
+    return nsdf[pos] > nsdf[pos - 1] && nsdf[pos] >= nsdf[pos + 1];
+  }
+
+  /**
    * The highest point of each positive lobe of the NSDF. Working lobe by lobe
    * — rather than taking every local maximum — keeps ripple on the flanks of a
    * genuine peak from being mistaken for a candidate period.
@@ -154,22 +185,17 @@ export class McLeodPitchDetector {
     const nsdf = this.nsdf;
     const end = this.maxLag;
     let count = 0;
-
-    let pos = 1;
-    // Step off the τ=0 lobe: it is always 1 and always tallest.
-    while (pos < end && nsdf[pos] > 0) pos++;
-    while (pos < end && nsdf[pos] <= 0) pos++;
-
     let lobeMax = 0;
+    let pos = this.firstLagAfterPrimaryLobe();
     while (pos < end) {
-      if (nsdf[pos] > nsdf[pos - 1] && nsdf[pos] >= nsdf[pos + 1]) {
-        if (lobeMax === 0 || nsdf[pos] > nsdf[lobeMax]) lobeMax = pos;
-      }
+      if (this.isLocalPeak(pos) && (lobeMax === 0 || nsdf[pos] > nsdf[lobeMax])) lobeMax = pos;
       pos++;
-      if (pos < end && nsdf[pos] <= 0) {
-        if (lobeMax > 0) { this.maxima[count++] = lobeMax; lobeMax = 0; }
-        while (pos < end && nsdf[pos] <= 0) pos++;
+      const lobeEnded = pos < end && nsdf[pos] <= 0;
+      if (lobeEnded && lobeMax > 0) {
+        this.maxima[count++] = lobeMax;
+        lobeMax = 0;
       }
+      if (lobeEnded) pos = this.skipNonPositive(pos);
     }
     if (lobeMax > 0) this.maxima[count++] = lobeMax;
 

@@ -19,11 +19,12 @@
  */
 
 import {
-  CelloString, OPEN_STRING_MIDI, STRING_ORDER, midiToPitchName, stopDistanceMm,
+  CelloString, OPEN_STRING_MIDI, STRING_ORDER, midiToPitchName, stopDistanceMm, toPitchClass,
 } from './cello';
 import { CelloSongScore } from './schema';
 
-/** 0 = C, 1 = C♯/D♭, … 11 = B. */
+/** 0 = C, 1 = C♯/D♭, … 11 = B. Named for what it means; arithmetic on it stays plain `number`. */
+// eslint-disable-next-line sonarjs/redundant-type-aliases -- the name documents intent at every use site
 export type PitchClass = number;
 
 export type KeyMode = 'major' | 'minor';
@@ -101,7 +102,7 @@ export function pitchClassHistogram(midis: readonly { midiNumber: number; durati
   const histogram = new Array(12).fill(0) as number[];
   for (const note of midis) {
     const weight = Math.max(1, note.durationMs);
-    const bin = ((note.midiNumber % 12) + 12) % 12;
+    const bin = toPitchClass(note.midiNumber);
     histogram[bin] = (histogram[bin] ?? 0) + weight;
   }
   return histogram;
@@ -152,7 +153,7 @@ export function detectSongKey(score: CelloSongScore): DetectedKey {
 /** Distinct pitch classes actually used in a song, ascending. */
 export function songPitchClasses(score: CelloSongScore): PitchClass[] {
   const present = new Set<PitchClass>();
-  for (const note of score.notes) present.add(((note.midiNumber % 12) + 12) % 12);
+  for (const note of score.notes) present.add(toPitchClass(note.midiNumber));
   return [...present].sort((a, b) => a - b);
 }
 
@@ -177,14 +178,14 @@ export function songPlayedNotes(
     if (seen.has(key)) continue;
     seen.add(key);
 
-    const pitchClass = ((note.midiNumber % 12) + 12) % 12;
+    const pitchClass = toPitchClass(note.midiNumber);
     markers.push({
       string: note.string,
       semitones,
       midiNumber: note.midiNumber,
       pitchName: midiToPitchName(note.midiNumber, preferFlats),
       pitchClass,
-      isTonic: tonic !== undefined && pitchClass === ((tonic % 12) + 12) % 12,
+      isTonic: tonic !== undefined && pitchClass === toPitchClass(tonic),
     });
   }
 
@@ -216,7 +217,7 @@ export function fingerboardMarkers(
   options: { maxSemitones?: number; tonic?: PitchClass; preferFlats?: boolean } = {},
 ): FingerboardMarker[] {
   const { maxSemitones = 26, tonic, preferFlats = false } = options;
-  const wanted = new Set(pitchClasses.map((pc) => ((pc % 12) + 12) % 12));
+  const wanted = new Set(pitchClasses.map((pc) => toPitchClass(pc)));
   const markers: FingerboardMarker[] = [];
 
   for (const string of STRING_ORDER) {
@@ -231,7 +232,7 @@ export function fingerboardMarkers(
         midiNumber,
         pitchName: midiToPitchName(midiNumber, preferFlats),
         pitchClass,
-        isTonic: tonic !== undefined && pitchClass === ((tonic % 12) + 12) % 12,
+        isTonic: tonic !== undefined && pitchClass === toPitchClass(tonic),
       });
     }
   }

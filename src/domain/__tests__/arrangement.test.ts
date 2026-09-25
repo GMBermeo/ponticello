@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   arrangeMidi, arrangeScoreForLevel, ARRANGEMENT_LEVELS, ARRANGEMENT_PROFILES,
   FULL_CELLO_RANGE, fitLineToRange, bassLine, harmonicGuide, midiContentEndMs, rebaseLine, smoothLeaps,
-} from '../arrangement';
+} from '../arranger';
 import { firstPositionFingering } from '../fingering';
 import { MidiNote, MidiTrack } from '../midi';
 import { CelloSongScore } from '../schema';
@@ -158,7 +158,7 @@ describe('leap smoothing', () => {
     // What `monophonic` leaves behind when one track carries a melody and its
     // own bass notes: the tune, a root two octaves down, the tune again.
     const jumpy = line(0, [55, 31 + 12, 57, 33 + 12, 59], 250)
-      .map((n, i) => ({ ...n, midiNumber: [55, 31, 57, 33, 59][i]! + (i % 2 ? 0 : 0) }));
+      .map((n, i) => ({ ...n, midiNumber: [55, 31, 57, 33, 59][i]! }));
     const smoothed = smoothLeaps(jumpy, { low: 36, high: 63 }, 12);
     for (let i = 1; i < smoothed.length; i++) {
       expect(Math.abs(smoothed[i]!.midiNumber - smoothed[i - 1]!.midiNumber))

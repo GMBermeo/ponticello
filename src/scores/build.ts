@@ -10,12 +10,10 @@
  */
 
 import {
-  CelloFinger, CelloPosition, CelloString, midiAt, midiToFrequency, midiToPitchName,
-} from '@/domain/cello';
-import {
-  BowDirection, CelloArticulation, CelloExtension, CelloMeasure, CelloNote,
-  CelloSongMetadata, CelloSongScore, measureDurationMs,
-} from '@/domain/schema';
+  CelloFinger, CelloPosition, CelloString, midiAt, midiToFrequency, midiToPitchName, BowDirection,
+  CelloArticulation, CelloExtension, CelloMeasure, CelloNote, CelloSongMetadata, CelloSongScore,
+  measureDurationMs,
+} from '@domain';
 
 export interface Event {
   /** Which string. */

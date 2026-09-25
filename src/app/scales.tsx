@@ -2,20 +2,22 @@ import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { FlatList, View } from 'react-native';
 
-import { KeyDemandBar } from '@/components/practice/KeyCensus';
-import { Button, PressableRow, Segmented } from '@/components/ui/controls';
-import { Body, Label, Num, Row, Rule, Stack, Title } from '@/components/ui/primitives';
-import { Screen, ScreenHeader } from '@/components/ui/Screen';
-import { KEY_PRACTICE_ROWS, KeyPracticeRow, LIBRARY_KEY_CENSUS } from '@/scores';
-import { firstPositionVerdict } from '@/scores/scaleDrills';
-import { useTheme } from '@/theme/ThemeProvider';
+import {
+  KeyDemandBar, Button, PressableRow, Segmented, Body, Label, Num, Row, Rule, Stack, Title,
+  Screen, ScreenHeader,
+  type Segment,
+} from '@components';
+import {
+  KEY_PRACTICE_ROWS, KeyPracticeRow, LIBRARY_KEY_CENSUS, firstPositionVerdict,
+} from '@scores';
+import { useTheme } from '@theme';
 
 type Filter = 'ALL' | 'DRILLED' | 'OPEN';
 
-const FILTERS = [
-  { value: 'ALL' as const, label: 'Every key' },
-  { value: 'DRILLED' as const, label: 'Has drills' },
-  { value: 'OPEN' as const, label: 'Open-string tonic' },
+const FILTERS: readonly Segment<Filter>[] = [
+  { value: 'ALL', label: 'Every key' },
+  { value: 'DRILLED', label: 'Has drills' },
+  { value: 'OPEN', label: 'Open-string tonic' },
 ];
 
 /**

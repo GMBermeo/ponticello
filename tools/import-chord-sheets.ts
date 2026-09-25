@@ -20,9 +20,8 @@
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
-import { BUNDLED_CATALOG_ROWS } from '../src/scores/catalogIndex';
-import { validateChordSheet, type ChordSheet } from '../src/domain/chordSheet';
-import { parseChordPro } from '../src/domain/chordPro';
+import { BUNDLED_CATALOG_ROWS } from '@scores';
+import { validateChordSheet, type ChordSheet, parseChordPro } from '@domain';
 import { applyTiming, matchSongId, normalizeIdentity, parseCifraHtml, parseUrlList, keyboardUrl, guitarUrl } from './chords/cifra';
 import { DEFAULT_OLLAMA_HOST, DEFAULT_OLLAMA_MODEL } from './ollama/config';
 import { applyDurationTiming } from './chords/timing';
@@ -65,9 +64,7 @@ function parseCliOptions(argv: string[]): CliOptions {
   };
   const hasFlag = (name: string): boolean => argv.includes(`--${name}`);
 
-  const defaultInput = existsSync('_CHORDS/songs.txt')
-    ? '_CHORDS/songs.txt'
-    : (existsSync('songs.txt') ? 'songs.txt' : null);
+  const defaultInput = ['_CHORDS/songs.txt', 'songs.txt'].find((candidate) => existsSync(candidate)) ?? null;
 
   return {
     input: flag('input') ?? defaultInput,
@@ -261,11 +258,7 @@ function syncToDevBundle(sheet: ChordSheet): void {
   } catch {}
 }
 
-async function main() {
-  const options = parseCliOptions(process.argv.slice(2));
-
-  if (process.argv.includes('--help')) {
-    console.log(`npm run import:chords -- [options]
+const HELP_TEXT = `npm run import:chords -- [options]
   Consumes CifraClub chord sheets and saves them into _CHORDS/ (kept out of git).
 
 Options:
@@ -284,188 +277,175 @@ Options:
   --no-ollama         Bypass Ollama duration timing
   --chords-only       Omit lyric text
   --no-sync-bundle    Do not update src/scores/chordSheets.generated.json for local dev
-`);
-    return;
-  }
+`;
 
-  mkdirSync(options.chartsDir, { recursive: true });
+const FETCH_TIMEOUT_MS = 30000;
+const REQUEST_HEADERS = { 'User-Agent': 'Ponticello chord importer' };
 
-  const idMap: Record<string, string> = options.ids ? JSON.parse(readFileSync(resolve(options.ids), 'utf8')) : {};
-  const cache = loadCache(options.cacheFile);
-  const charts = loadAllCharts(options);
-
+function printSetup(options: CliOptions, cache: ChordsCache, charts: ReadonlyMap<string, ChordSheet>): void {
   console.log('--- Ponticello Chord Sheet Importer ---');
   console.log(`Storage: ${options.chartsDir}`);
   console.log(`Cache:   ${options.cacheFile} (${Object.keys(cache).length} entries)`);
   console.log(`Loaded:  ${charts.size} existing charts`);
   console.log(`Mode:    Resume is ${options.resume ? 'ENABLED (default)' : 'DISABLED'}`);
-  if (!options.noOllama) {
-    console.log(`Ollama:  ${options.host} | Model: ${options.model}`);
-  } else {
-    console.log('Ollama:  Disabled (--no-ollama)');
-  }
+  console.log(options.noOllama ? 'Ollama:  Disabled (--no-ollama)' : `Ollama:  ${options.host} | Model: ${options.model}`);
+}
 
-  // Handle local ChordPro
-  if (options.chordpro) {
-    const text = readFileSync(resolve(options.chordpro), 'utf8');
-    const parsed = parseChordPro(text, 'local-chord-chart');
-    parsed.id =
-      idMap[normalizeIdentity(`${parsed.artist}-${parsed.title}`)] ??
-      matchSongId(parsed.title, parsed.artist, BUNDLED_CATALOG_ROWS, normalizeIdentity(`${parsed.artist}-${parsed.title}`));
-    const timed = await estimate(parsed, options);
-    validateChordSheet(timed);
-    charts.set(timed.id, timed);
-    writeFileSync(join(options.chartsDir, `${timed.id}.json`), `${JSON.stringify(timed, null, 2)}\n`);
-    saveMergedCharts(options.out, charts);
-    if (options.syncBundle) syncToDevBundle(timed);
-    console.log(`Imported ChordPro: ${timed.title} -> ${timed.id}`);
+/** The id a chart takes: an explicit mapping, else the library song it matches, else `fallback`. */
+function chartId(sheet: ChordSheet, idMap: Readonly<Record<string, string>>, fallback: string): string {
+  return idMap[normalizeIdentity(`${sheet.artist}-${sheet.title}`)]
+    ?? matchSongId(sheet.title, sheet.artist, BUNDLED_CATALOG_ROWS, fallback);
+}
+
+type ImportContext = {
+  options: CliOptions;
+  idMap: Readonly<Record<string, string>>;
+  cache: ChordsCache;
+  charts: Map<string, ChordSheet>;
+};
+
+/** Writes the chart on its own and into the merged file, and into the dev bundle when asked. */
+function storeChart(context: ImportContext, sheet: ChordSheet): void {
+  const { options, charts } = context;
+  writeFileSync(join(options.chartsDir, `${sheet.id}.json`), `${JSON.stringify(sheet, null, 2)}\n`);
+  charts.set(sheet.id, sheet);
+  saveMergedCharts(options.out, charts);
+  if (options.syncBundle) syncToDevBundle(sheet);
+}
+
+async function importChordPro(context: ImportContext, file: string): Promise<void> {
+  const parsed = parseChordPro(readFileSync(resolve(file), 'utf8'), 'local-chord-chart');
+  parsed.id = chartId(parsed, context.idMap, normalizeIdentity(`${parsed.artist}-${parsed.title}`));
+  const timed = await estimate(parsed, context.options);
+  validateChordSheet(timed);
+  storeChart(context, timed);
+  console.log(`Imported ChordPro: ${timed.title} -> ${timed.id}`);
+}
+
+function urlsToImport(options: CliOptions): string[] {
+  if (options.url) return [keyboardUrl(options.url)];
+  if (!options.input) throw new Error('No input provided. Specify --input <file> or --url <url>.');
+  if (!existsSync(options.input)) throw new Error(`Input file not found: ${options.input}`);
+  return parseUrlList(readFileSync(resolve(options.input), 'utf8'));
+}
+
+/** Why a URL can be skipped on resume, or null when it should be imported. */
+function skipReason(context: ImportContext, url: string): string | null {
+  const { options, cache, charts } = context;
+  if (!options.resume || options.force) return null;
+  const entry = cache[url];
+  if (entry?.status === 'completed') {
+    const id = entry.id;
+    const present = !!id && (existsSync(join(options.chartsDir, `${id}.json`)) || charts.has(id));
+    return present ? `already completed: ${entry.title ?? id}` : null;
+  }
+  if (entry?.status === 'failed' && !options.retryFailed) return `previously failed: ${entry.error ?? 'unknown error'}`;
+  return null;
+}
+
+async function fetchPage(url: string, failure: (status: number) => string): Promise<string> {
+  const response = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), headers: REQUEST_HEADERS });
+  if (!response.ok) throw new Error(failure(response.status));
+  return response.text();
+}
+
+/** The keyboard chart, or the guitar chart when the keyboard one cannot be read. */
+async function fetchSheet(url: string): Promise<ChordSheet> {
+  try {
+    return parseCifraHtml(await fetchPage(url, (status) => `Cifra Club HTTP ${status}`), url);
+  } catch (primary: unknown) {
+    const reason = primary instanceof Error ? primary.message : String(primary);
+    const guitar = guitarUrl(url);
+    if (guitar === url) throw primary;
+    console.log(`  [INFO] Keyboard chart failed (${reason}), falling back to guitar version: ${guitar}`);
+    const html = await fetchPage(guitar, (status) => `Guitar fallback HTTP ${status} (keyboard error: ${reason})`);
+    return parseCifraHtml(html, guitar, { allowGuitar: true });
+  }
+}
+
+function withoutLyrics(sheet: ChordSheet): ChordSheet {
+  return { ...sheet, lyrics: 'omitted', lines: sheet.lines.map((l) => ({ ...l, text: l.kind === 'section' ? l.text : '' })) };
+}
+
+function reportImported(sheet: ChordSheet): void {
+  const maxChanges = Math.max(...sheet.lines.map((l) => l.changes.length));
+  console.log(`  ✓ ${sheet.title}: key ${sheet.key ?? 'unknown'}, BPM ${sheet.bpm ?? 'not supplied'}, ${sheet.chords.length} symbols, max ${maxChanges} changes/line`);
+  const lyricLines = sheet.lines.filter((line) => line.kind === 'lyric' && line.text.trim()).length;
+  const included = sheet.lyrics === 'included';
+  console.log(included
+    ? `  Lyrics included: ${lyricLines} text line(s), with original chord-column anchors.`
+    : '  Lyrics omitted because --chords-only was supplied.');
+  if (included && !lyricLines) console.warn('  No lyric text found on this page; check the source if this is not an instrumental chart.');
+  const unresolved = sheet.chords.filter((c) => !c.canonical).map((c) => c.symbol);
+  if (unresolved.length) console.warn(`  Retained without diagram: ${unresolved.join(', ')}`);
+}
+
+/** Fetches, times, validates and stores one chart; records the outcome in the cache either way. */
+async function importUrl(context: ImportContext, url: string): Promise<boolean> {
+  const { options, cache } = context;
+  try {
+    let sheet = await fetchSheet(url);
+    sheet.id = chartId(sheet, context.idMap, sheet.id);
+    if (options.chordsOnly) sheet = withoutLyrics(sheet);
+    sheet = await estimate(sheet, options);
+    validateChordSheet(sheet);
+    storeChart(context, sheet);
+    cache[url] = { status: 'completed', id: sheet.id, title: sheet.title, artist: sheet.artist, timestamp: new Date().toISOString() };
+    saveCache(options.cacheFile, cache);
+    reportImported(sheet);
+    return true;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`  [WARN] Failed to import ${url}: ${message}`);
+    cache[url] = { status: 'failed', error: message, timestamp: new Date().toISOString() };
+    saveCache(options.cacheFile, cache);
+    return false;
+  }
+}
+
+async function main() {
+  const options = parseCliOptions(process.argv.slice(2));
+  if (process.argv.includes('--help')) {
+    console.log(HELP_TEXT);
     return;
   }
 
-  // Handle URL list
-  const urls: string[] = [];
-  if (options.url) {
-    urls.push(keyboardUrl(options.url));
-  } else if (options.input) {
-    if (!existsSync(options.input)) {
-      throw new Error(`Input file not found: ${options.input}`);
-    }
-    const content = readFileSync(resolve(options.input), 'utf8');
-    urls.push(...parseUrlList(content));
-  } else {
-    throw new Error('No input provided. Specify --input <file> or --url <url>.');
+  mkdirSync(options.chartsDir, { recursive: true });
+  const context: ImportContext = {
+    options,
+    idMap: options.ids ? JSON.parse(readFileSync(resolve(options.ids), 'utf8')) : {},
+    cache: loadCache(options.cacheFile),
+    charts: loadAllCharts(options),
+  };
+  printSetup(options, context.cache, context.charts);
+
+  if (options.chordpro) {
+    await importChordPro(context, options.chordpro);
+    return;
   }
 
+  const urls = urlsToImport(options);
   console.log(`Total URLs to process: ${urls.length}\n`);
-
-  let processedCount = 0;
-  let skippedCount = 0;
-  let failedCount = 0;
-
-  for (let i = 0; i < urls.length; i++) {
-    const url = urls[i]!;
-    const entry = cache[url];
-
-    // Resume checking
-    if (options.resume && !options.force) {
-      if (entry?.status === 'completed') {
-        const expectedId = entry.id;
-        const existsOnDisk = expectedId && existsSync(join(options.chartsDir, `${expectedId}.json`));
-        if (existsOnDisk || (expectedId && charts.has(expectedId))) {
-          console.log(`[${i + 1}/${urls.length}] [SKIP] ${url} (already completed: ${entry.title ?? expectedId})`);
-          skippedCount++;
-          continue;
-        }
-      } else if (entry?.status === 'failed' && !options.retryFailed) {
-        console.log(`[${i + 1}/${urls.length}] [SKIP] ${url} (previously failed: ${entry.error ?? 'unknown error'})`);
-        skippedCount++;
-        continue;
-      }
+  const counts = { processed: 0, skipped: 0, failed: 0 };
+  for (const [i, url] of urls.entries()) {
+    const tag = `[${i + 1}/${urls.length}]`;
+    const skip = skipReason(context, url);
+    if (skip) {
+      console.log(`${tag} [SKIP] ${url} (${skip})`);
+      counts.skipped++;
+      continue;
     }
-
-    if (options.max !== null && processedCount >= options.max) {
+    if (options.max !== null && counts.processed >= options.max) {
       console.log(`\nReached batch limit of ${options.max} processed songs.`);
       break;
     }
-
-    console.log(`[${i + 1}/${urls.length}] Fetching chart: ${url}`);
-    try {
-      let sheet: ChordSheet;
-      try {
-        const response = await fetch(url, {
-          signal: AbortSignal.timeout(30000),
-          headers: { 'User-Agent': 'Ponticello chord importer' },
-        });
-        if (!response.ok) throw new Error(`Cifra Club HTTP ${response.status}`);
-        sheet = parseCifraHtml(await response.text(), url);
-      } catch (primaryErr: any) {
-        const altGuitarUrl = guitarUrl(url);
-        if (altGuitarUrl !== url) {
-          console.log(`  [INFO] Keyboard chart failed (${primaryErr.message}), falling back to guitar version: ${altGuitarUrl}`);
-          const altResponse = await fetch(altGuitarUrl, {
-            signal: AbortSignal.timeout(30000),
-            headers: { 'User-Agent': 'Ponticello chord importer' },
-          });
-          if (!altResponse.ok) throw new Error(`Guitar fallback HTTP ${altResponse.status} (keyboard error: ${primaryErr.message})`);
-          sheet = parseCifraHtml(await altResponse.text(), altGuitarUrl, { allowGuitar: true });
-        } else {
-          throw primaryErr;
-        }
-      }
-
-      sheet.id =
-        idMap[normalizeIdentity(`${sheet.artist}-${sheet.title}`)] ??
-        matchSongId(sheet.title, sheet.artist, BUNDLED_CATALOG_ROWS, sheet.id);
-
-      if (options.chordsOnly) {
-        sheet = {
-          ...sheet,
-          lyrics: 'omitted',
-          lines: sheet.lines.map((l) => ({ ...l, text: l.kind === 'section' ? l.text : '' })),
-        };
-      }
-
-      sheet = await estimate(sheet, options);
-      validateChordSheet(sheet);
-
-      // 1. Save single chart
-      const chartFile = join(options.chartsDir, `${sheet.id}.json`);
-      writeFileSync(chartFile, `${JSON.stringify(sheet, null, 2)}\n`);
-
-      // 2. Update memory and merged file
-      charts.set(sheet.id, sheet);
-      saveMergedCharts(options.out, charts);
-
-      // 3. Mark cache completed
-      cache[url] = {
-        status: 'completed',
-        id: sheet.id,
-        title: sheet.title,
-        artist: sheet.artist,
-        timestamp: new Date().toISOString(),
-      };
-      saveCache(options.cacheFile, cache);
-
-      // 4. Update dev bundle
-      if (options.syncBundle) {
-        syncToDevBundle(sheet);
-      }
-
-      processedCount++;
-
-      console.log(
-        `  ✓ ${sheet.title}: key ${sheet.key ?? 'unknown'}, BPM ${sheet.bpm ?? 'not supplied'}, ${sheet.chords.length} symbols, max ${Math.max(...sheet.lines.map((l) => l.changes.length))} changes/line`,
-      );
-      const lyricLines = sheet.lines.filter((line) => line.kind === 'lyric' && line.text.trim()).length;
-      console.log(
-        sheet.lyrics === 'included'
-          ? `  Lyrics included: ${lyricLines} text line(s), with original chord-column anchors.`
-          : '  Lyrics omitted because --chords-only was supplied.',
-      );
-      if (sheet.lyrics === 'included' && !lyricLines) {
-        console.warn('  No lyric text found on this page; check the source if this is not an instrumental chart.');
-      }
-      const unresolved = sheet.chords.filter((c) => !c.canonical).map((c) => c.symbol);
-      if (unresolved.length) {
-        console.warn(`  Retained without diagram: ${unresolved.join(', ')}`);
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.warn(`  [WARN] Failed to import ${url}: ${message}`);
-      cache[url] = {
-        status: 'failed',
-        error: message,
-        timestamp: new Date().toISOString(),
-      };
-      saveCache(options.cacheFile, cache);
-      failedCount++;
-    }
+    console.log(`${tag} Fetching chart: ${url}`);
+    if (await importUrl(context, url)) counts.processed++;
+    else counts.failed++;
   }
 
   console.log(`\n================================================================`);
-  console.log(
-    `Batch completed: ${processedCount} newly imported, ${skippedCount} skipped, ${failedCount} failed (${charts.size} total active in ${options.out}).`,
-  );
+  console.log(`Batch completed: ${counts.processed} newly imported, ${counts.skipped} skipped, ${counts.failed} failed (${context.charts.size} total active in ${options.out}).`);
   console.log(`================================================================`);
 }
 

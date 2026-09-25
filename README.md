@@ -1,14 +1,27 @@
-# Ponticello
+<p align="center">
+  <img src="assets/logo/ponticello-icon-512.png" alt="" width="104" height="104">
+</p>
 
-_Practice, not points._
+<h1 align="center">Ponticello</h1>
+
+<p align="center"><em>Practice, not points.</em></p>
+
+<p align="center">
+  <a href="docs/index.html">Product site</a> ·
+  <a href="#contributing">Contributing</a> ·
+  <a href="#build-your-own-library">Build your own library</a> ·
+  <a href="#rights">Rights</a>
+</p>
 
 Offline intonation practice for acoustic cello. Listens to the instrument
 through the device microphone, shows what you are supposed to play three
 different ways, and tells you how far off the note you are — in cents, in real
 time. No accounts, no scores, no streaks, no network.
 
-Laid out for the **Galaxy Z Fold 5 inner display (2176 × 1812)**, and scales
-from there to the cover screen, a phone, or a browser window.
+Designed for the **iPhone Duo** — Liquid Glass, SF type and the system tab
+bar since 1.8 — and laid out on the **Galaxy Z Fold 5 inner display
+(2176 × 1812)** canvas, from which it reflows to any phone, tablet or browser
+window.
 
 ```bash
 npm install
@@ -19,13 +32,20 @@ npm test           # pure TypeScript unit + exhaustive catalogue playback tests
 npm run typecheck
 ```
 
+<p align="center">
+  <img src="docs/assets/screenshots/library.webp" alt="The library on the iPhone Duo: grouped cards with key tiles, and the glass tab rail" width="200">
+  <img src="docs/assets/screenshots/play-highway.webp" alt="The highway view of Bach's Prélude, with the fingerboard panel" width="200">
+  <img src="docs/assets/screenshots/tuner.webp" alt="The tuner tab" width="200">
+  <img src="docs/assets/screenshots/library-dark.webp" alt="The library in the Dark theme" width="200">
+</p>
+
 ---
 
 ## What is here
 
 | Screen             | What it does                                                                                                               |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| **Library**        | 264 playable rows: six hand-authored/core scores plus 258 compact MIDI-derived cello arrangements.                         |
+| **Library**        | Everything you can play: the authored studies and public-domain works, your MIDI imports, and any chord charts.            |
 | **Tutorial**       | Static. Explains the nut, the finger numbers, your own tape colours, and how to read each vision.                          |
 | **Practice sheet** | A/B loop by bar, tempo 40–120 %, fingering blackout, tape overlay, cue density.                                            |
 | **Play**           | Three visions — Tab, Score, Highway — over a fixed fingerboard panel and cents rail, with the backing sounding underneath. |
@@ -74,8 +94,11 @@ src/theme/scale.ts    CANVAS = FOLD5_PX / FOLD5_DENSITY
 ```
 
 On the unfolded inner display that scale is exactly 1.0 and the layout lands
-pixel-exact. Everywhere else the same canvas scales to fit, so there is only
-ever one layout to reason about. `useTheme()` exposes `s(units)` for sizes,
+pixel-exact. A larger screen scales up to a ceiling; a smaller one never
+scales below 1.0 — a design unit is at least a point — and reflows to the
+compact layout instead. That is what the iPhone Duo's 466 × 678 pt inner
+display gets: native iOS type sizes, one column, and the system tab bar in its
+right-hand rail. `useTheme()` exposes `s(units)` for sizes,
 `font(units)` with a legibility floor, and `rule(units)` clamped to the device
 hairline. Tap targets never scale below 44 dp.
 
@@ -196,7 +219,7 @@ add up.
 npm run convert -- path/to/piece.mid --title "Piece" --composer "Someone" --bpm 84
 ```
 
-`tools/convert-score.ts` uses the same pure arranger as on-device import and the bundled-library build. Beginner selects held bass anchors; Intermediate selects a bass part or the lowest voice of a keyboard texture. Advanced and Full rank recurring themes/riffs, weighting how much of the song a track covers. Octave displacement seats the line in a low register before first-position fingerings are assigned. Open-string pitches always use their open string. Add the emitted module to the `SCORES` array in `src/scores/index.ts` to show it in the library.
+`tools/convert-score.ts` uses the same pure arranger as on-device import and the bundled-library build. Beginner selects held bass anchors; Intermediate selects a bass part or the lowest voice of a keyboard texture. Advanced and Full rank recurring themes/riffs, weighting how much of the song a track covers. Octave displacement seats the line in a low register before first-position fingerings are assigned. Open-string pitches always use their open string. Add the emitted module to `CORE_SCORES` in `src/scores/library.ts` to show it in the library.
 
 ### Arrangement levels
 
@@ -278,6 +301,53 @@ Results land in
 rebuilt so each result is a `<title> [<model>]` row in the app, its arrangement
 levels being that model's tiers. Finished song/model pairs are skipped on the
 next run; `--force` repeats them. See the file header for every option.
+
+## Build your own library
+
+The repository ships the **free** library: the public-domain pieces and the
+original etudes, plus one original chord chart. Everything else is built on
+your own machine from your own files, and none of it is committed.
+
+### 1. Put the sources where the build looks for them
+
+```
+_MIDIS/
+  public-domain/   public-domain works — safe to keep and to share
+  etudes/          original studies written for this repo
+  downloaded/      MIDI files you fetched yourself
+  arranged/<id>/   one folder per song you want in the full edition
+_CHORDS/
+  songs.txt        one chord-sheet URL per line
+  charts/          imported charts, one JSON per song
+```
+
+Both folders are gitignored. `_MIDIS/arranged` is the curated list: a MIDI in
+`downloaded/` with no folder of the same id is not shipped, which is how the
+full edition stays a deliberate choice rather than everything you ever
+downloaded.
+
+### 2. Run the generators
+
+| Command | What it writes |
+| --- | --- |
+| `npm run build:library:free` | `bundledSongs.json`, `catalogIndex.ts`, `libraryEdition.ts` and `chordSheets.generated.json` from the public-domain pieces and etudes |
+| `npm run build:library` | the same, plus every song with a folder in `_MIDIS/arranged` |
+| `npm run convert -- path/to/piece.mid --title "…" --composer "…"` | one authored score module, for `CORE_SCORES` |
+| `npm run import:chords -- --url "<chord sheet URL>"` | a chord chart into `_CHORDS/charts/`, timed with a local Ollama model unless you pass `--no-ollama` |
+| `npm run build:chords` | the cello chord-shape catalogue (`src/domain/chords/catalog.generated.json`) |
+| `npm run audit:arrangements` | `docs/cello-arrangement-audit.md` — every level of every song measured against the doctrine |
+
+The arranger is deterministic: the same MIDI in gives the same fingering out,
+on your machine and on mine.
+
+### 3. Check and package it
+
+```
+npm run typecheck
+npm test                 # library-size checks follow the edition you built
+npm run release:free     # shareable APK into releases/
+npm run release:full     # personal-use APK, never to be distributed
+```
 
 ### Two editions
 
@@ -361,6 +431,22 @@ None of this is required by the app. If `java` regains network access, drop the
 infrastructure and hands back a download link, which avoids the toolchain
 entirely. It needs an Expo account (`eas login`) and `eas.json`.
 
+### iOS and the iPhone Duo
+
+```
+npx expo run:ios --device "iPhone Duo"
+```
+
+needs a full Xcode (27 or later) and CocoaPods (`brew install cocoapods`); if
+`xcode-select -p` points at the Command Line Tools, prefix the command with
+`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`. iOS 27 refuses to
+launch an app that has not adopted the UIScene life cycle, and Expo's prebuild
+template does not declare it yet — `plugins/withSceneLifecycle.js` adds the
+scene manifest and hands window creation to Expo's `ExpoAppSceneDelegate`, so
+`expo prebuild --clean` stays reproducible. The app icon is an Icon Composer
+document (`assets/expo.icon`) whose bridge and strings are separate glass
+layers; regenerate it with `python3 tools/make-icons.py`.
+
 ---
 
 ## Backing tracks
@@ -432,17 +518,89 @@ it carries all six Bach cello suites among about a hundred cello works.
 
 ## Layout
 
+Next.js-style: routes stay thin, and each screen's pieces live in a feature
+folder under `src/components/`. Every top-level folder has an `index.ts`
+barrel, importable through a path alias.
+
 ```
 src/
-  app/            expo-router screens
-  audio/          FFT, MPM, decimation, onset gate, engine, mic sources
-  components/     Fingerboard, play visions, UI primitives
-  domain/         cello geometry, tapes, score schema, fingering solver, MIDI arranger
-  scores/         authored scores and the catalogue
-  state/          persisted settings, per-session practice setup
-  theme/          tokens, the Fold 5 scale model, ThemeProvider
-tools/            MIDI reader and the offline score converter
+  app/                  expo-router routes — composition only, no business logic
+  audio/        @audio  FFT, MPM, decimation, pitch engine + PitchTracker, mic sources, backing players
+  components/   @components
+    ui/                 primitives and controls (Button, Segmented, Screen, …)
+    library/            library screen: header, song rows, filters, practice rail
+    practice-setup/     song sheet: piece summary, loop/tempo, display and sound preferences
+    play/               play screen: visions, top/status bars, transport hooks
+    chords/             chord reader and chord-song shapes
+    progression/        chord-progression builder
+    tuner/              tuner dial and open-string list
+    practice/ tutorial/ key census, heatmap, tutorial diagrams
+  domain/       @domain cello geometry, harmony, tapes, schema, fingering solver, MIDI parser, arranger
+    arranger/           source selection, range fitting, rhythm reduction, harmonic guide
+    chords/             cello chord shapes and diagrams
+  scores/       @scores authored scores, bundled library, piece resolver
+  state/        @state  persisted settings, session setup, practice log
+  theme/        @theme  tokens, faces, the scale model, ThemeProvider, brand
+tools/                  library builder, converters, importers, audits, Ollama benchmarks
 ```
+
+### Imports
+
+```ts
+import { Button, Screen, ScreenHeader, Segmented } from '@components';
+import { practiceLoop, type ArrangementLevel } from '@domain';
+import { useTheme } from '@theme';
+```
+
+Across top-level folders, import through the alias. Inside a folder, import
+the sibling file (or sibling sub-folder barrel) relatively — never your own
+folder's barrel, which would create an import cycle. Dependencies point one
+way: `domain → scores → audio → state → components → app`, with `theme`
+below `state`.
+
+## Contributing
+
+Ponticello is open source, MIT-licensed, and built by one cellist-in-progress —
+corrections from people who actually play are the most valuable thing it can
+get.
+
+**Good first contributions**
+
+- A fingering the solver gets wrong. Open an issue with the piece, the bar and
+  what a teacher would do instead; the cost weights live in
+  `src/domain/fingering.ts` and are deliberately readable.
+- A tape layout the app does not handle. `src/domain/tapes.ts`.
+- An arrangement that fails the audit (`npm run audit:arrangements`).
+- Anything in the interface that is unclear at arm's length from a music stand.
+
+**Ground rules**
+
+1. `npm run typecheck`, `npm test` and `npx eslint .` must all pass with
+   nothing reported. The lint config includes SonarJS.
+2. Keep `src/domain`, `src/audio` (except the mic sources) and `tools` free of
+   React Native imports — that is what keeps the test suite pure TypeScript.
+3. Read `AGENTS.md` first: it holds the rules that are easy to break by
+   accident (Reanimated shared values under the React Compiler, design units
+   versus device pixels, the folder barrels and import direction).
+4. Never commit anything from `_MIDIS/` or `_CHORDS/`. Copyrighted music stays
+   on your own machine; see [Rights](#rights).
+5. One change per pull request, with a note saying what you played to check it.
+
+Issues and pull requests: <https://github.com/GMBermeo/ponticello>.
+
+## Credits
+
+App development by **Guilherme Yuri Bermeo** — [gm.bermeo.dev](https://gm.bermeo.dev).
+
+Built with [Expo](https://expo.dev) and React Native. The pitch detector uses
+the McLeod Pitch Method; the chord catalogue is generated with
+[tonal](https://github.com/tonaljs/tonal). On iOS the interface is set in the
+system face (SF Pro and SF Pro Rounded); on Android, the web and in the brand
+it is [Archivo](https://fonts.google.com/specimen/Archivo) by Omnibus-Type.
+Licensed under the MIT License — see [`LICENSE`](LICENSE).
+
+The product site in [`docs/`](docs/) is a static page ready to deploy on
+Vercel; set the root directory to `docs`.
 
 ## Tests
 
