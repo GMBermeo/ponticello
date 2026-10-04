@@ -1,0 +1,116 @@
+# Continuous integration for Ponticello.
+#
+# Runs on every push to main and release branches and on every pull request.
+# Each job answers one question a contributor would otherwise have to ask a
+# maintainer: does it still type-check, lint and pass its tests; does the app
+# still bundle for every platform; do the generated native projects still carry
+# the fixes the app depends on; are the brand assets in step with the master
+# icon; and is the repository still safe to publish.
+#
+# Everything here also runs locally — see "Continuous integration" in README.md.
+
+name: CI
+
+on:
+  push:
+    branches: [main, "release/**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CI: "1"
+  EXPO_NO_TELEMETRY: "1"
+
+jobs:
+  checks:
+    name: Types, lint and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Repository is shareable (free library, no personal sources)
+        run: node tools/ci/check-shareable.mjs
+      - name: Type-check
+        run: npm run typecheck
+      - name: Lint (Expo config + SonarJS, must report nothing)
+        run: npx eslint . --max-warnings=0
+      - name: Unit and catalogue tests
+        run: npm test
+
+  bundle:
+    name: Bundles for web, iOS and Android
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # The web export renders every route to static HTML, so a screen that
+      # throws while rendering fails here, not just one that fails to import.
+      - name: Export web (renders every route)
+        run: npx expo export --platform web --output-dir dist/web
+      - name: Bundle iOS and Android JavaScript
+        run: npx expo export --platform ios --platform android --output-dir dist/native
+      - name: Product site references resolve
+        run: node tools/ci/check-site.mjs
+
+  native-config:
+    name: Native projects (expo prebuild)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Generate the iOS and Android projects
+        run: npx expo prebuild --no-install --platform all
+      - name: Scene lifecycle, icon and permissions are in place
+        run: node tools/ci/check-native-config.mjs
+
+  brand:
+    name: Brand assets match the master icon
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: npm ci
+      - run: python -m pip install --quiet "Pillow>=11"
+      # Rebuilds every icon from assets/logo/ponticello-icon.svg and runs its
+      # own checks (circular mask, one-colour themed icon, open heart).
+      - name: Derive every asset from the master
+        run: python tools/make-icons.py
+      # Raster encoders differ between machines, so only the vector and JSON
+      # outputs are compared byte for byte: if these moved, someone edited the
+      # master without regenerating, or edited a derived file by hand.
+      - name: Derived vector files are committed and current
+        run: |
+          git diff --exit-code -- \
+            assets/expo.icon \
+            assets/logo/ponticello-mark.svg \
+            docs/assets/brand/ponticello-icon.svg \
+            docs/assets/brand/ponticello-mark.svg

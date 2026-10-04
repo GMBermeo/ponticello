@@ -7,6 +7,10 @@
 <p align="center"><em>Practice, not points.</em></p>
 
 <p align="center">
+  <a href="https://github.com/GMBermeo/ponticello/actions/workflows/ci.yml"><img src="https://github.com/GMBermeo/ponticello/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+</p>
+
+<p align="center">
   <a href="docs/index.html">Product site</a> ·
   <a href="#contributing">Contributing</a> ·
   <a href="#build-your-own-library">Build your own library</a> ·
@@ -45,7 +49,8 @@ npm run typecheck
 
 | Screen             | What it does                                                                                                               |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| **Library**        | Everything you can play: the authored studies and public-domain works, your MIDI imports, and any chord charts.            |
+| **Library**        | Everything you can play: the authored studies and public-domain works, your MIDI imports, and every harmony map.           |
+| **Harmony map**    | Where each chord's notes fall on the cello — a shape to hold, or every position — so a melody can stay inside the harmony. |
 | **Tutorial**       | Static. Explains the nut, the finger numbers, your own tape colours, and how to read each vision.                          |
 | **Practice sheet** | A/B loop by bar, tempo 40–120 %, fingering blackout, tape overlay, cue density.                                            |
 | **Play**           | Three visions — Tab, Score, Highway — over a fixed fingerboard panel and cents rail, with the backing sounding underneath. |
@@ -304,9 +309,10 @@ next run; `--force` repeats them. See the file header for every option.
 
 ## Build your own library
 
-The repository ships the **free** library: the public-domain pieces and the
-original etudes, plus one original chord chart. Everything else is built on
-your own machine from your own files, and none of it is committed.
+The **free** library is the public-domain pieces and the original etudes, and
+every harmony map (chord chart) in `_CHORDS/`. The arranged songs are the only
+thing left out of it. All of it is built on your own machine from your own
+files; the full edition adds the songs in `_MIDIS/arranged`.
 
 ### 1. Put the sources where the build looks for them
 
@@ -330,10 +336,10 @@ downloaded.
 
 | Command | What it writes |
 | --- | --- |
-| `npm run build:library:free` | `bundledSongs.json`, `catalogIndex.ts`, `libraryEdition.ts` and `chordSheets.generated.json` from the public-domain pieces and etudes |
-| `npm run build:library` | the same, plus every song with a folder in `_MIDIS/arranged` |
+| `npm run build:library:free` | `catalogIndex.ts`, `libraryEdition.ts`, one JSON file per piece in `src/scores/songs/` and one per harmony map in `src/scores/chords/`, from the public-domain pieces, etudes and every chord chart |
+| `npm run build:library` | the same, plus every arranged song with a folder in `_MIDIS/arranged` |
 | `npm run convert -- path/to/piece.mid --title "…" --composer "…"` | one authored score module, for `CORE_SCORES` |
-| `npm run import:chords -- --url "<chord sheet URL>"` | a chord chart into `_CHORDS/charts/`, timed with a local Ollama model unless you pass `--no-ollama` |
+| `npm run import:chords -- --url "<chord sheet URL>"` | a chord chart into `_CHORDS/charts/`, timed with a local Ollama model unless you pass `--no-ollama`; run `npm run build:library:free` afterwards to bundle it |
 | `npm run build:chords` | the cello chord-shape catalogue (`src/domain/chords/catalog.generated.json`) |
 | `npm run audit:arrangements` | `docs/cello-arrangement-audit.md` — every level of every song measured against the doctrine |
 
@@ -487,7 +493,15 @@ There is no platform MIDI synthesizer API in Expo, so MIDI events are converted 
 - **Web** schedules band-limited General MIDI-style voices on the Web Audio clock with a 1.6-second lookahead. A safety compressor catches coherent peaks that content-aware gain staging cannot predict.
 - **iOS / Android** renders the same voices at 22.05 kHz in two-second slices, yields to the UI between slices, writes a bounded PCM WAV, then loops it through `expo-audio`.
 
-Piano, mallet, organ, guitar, bass, strings, brass, reed, synth, cello, drone, and percussion families share one harmonic/envelope table across both adapters. Release begins from the exact attack/decay/sustain level reached at note-off, removing the regular per-note click. Program identity hashes pitch, timing, hold, instrument, amplitude, and duration, so changing the music reloads it while equivalent content does not restart mid-phrase.
+Piano, mallet, organ, guitar, bass, strings, brass, reed, synth, cello, drone, and percussion families share one voice definition (`src/audio/voices.ts`) across both adapters. What makes a voice sound like an instrument rather than a tone lives there too:
+
+- **A body.** Fixed resonances in Hz, laid over the harmonic series per half-octave of pitch, so a low cello note is woody and a high one is pure instead of every register sharing one spectrum.
+- **A spectrum that moves.** A struck or plucked note starts bright and rings down to a near-sine; a bowed note has a moment of bite as the bow catches. Louder notes are brighter as well as louder.
+- **A start that is not quite on pitch.** Bowed and blown notes scoop up into tune over a few tens of milliseconds, then vibrato arrives after the note is set down.
+- **Texture.** The bow's scrape at the attack, and the rosin or breath that stays under a sustained note, are smooth (not white) noise.
+- **A room.** A small damped reverb (`src/audio/room.ts`) with the low end kept out of it, so parts sound like they are in the same place. Native runs it as a feedback network carried through the slices; the browser convolves the same room's impulse response.
+
+`npm run audition:voices` renders every voice to `_AUDITION/<voice>.wav` so they can be listened to. Release begins from the exact attack/decay/sustain level reached at note-off, removing the regular per-note click. Program identity hashes pitch, timing, hold, instrument, amplitude, and duration, so changing the music reloads it while equivalent content does not restart mid-phrase.
 
 The playhead owns score time. A play or restart request freezes that clock while native finishes its seek or web schedules an absolute audio-clock boundary; the adapter then acknowledges the start (including web’s small remaining lead, counted on the Reanimated UI thread) before the visual clock advances. Loop, tempo, displayed notes, Cello audio, and accompaniment therefore use one `PracticeLoop` timeline without a fixed startup offset.
 
@@ -575,8 +589,10 @@ get.
 
 **Ground rules**
 
-1. `npm run typecheck`, `npm test` and `npx eslint .` must all pass with
-   nothing reported. The lint config includes SonarJS.
+1. `npm run verify` must pass: type-check, lint (Expo's config plus SonarJS,
+   with nothing reported), the test suite, and the shareability and site
+   checks. GitHub runs the same and more on every pull request — see
+   [Continuous integration](#continuous-integration).
 2. Keep `src/domain`, `src/audio` (except the mic sources) and `tools` free of
    React Native imports — that is what keeps the test suite pure TypeScript.
 3. Read `AGENTS.md` first: it holds the rules that are easy to break by
@@ -587,6 +603,26 @@ get.
 5. One change per pull request, with a note saying what you played to check it.
 
 Issues and pull requests: <https://github.com/GMBermeo/ponticello>.
+
+### Continuous integration
+
+Every push to `main` or a `release/**` branch, and every pull request, runs
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) — four jobs on a clean
+Ubuntu runner with nothing but what is committed, so a change that only works
+because of a file on your machine fails here first:
+
+| Job | What it proves | Run it locally |
+|---|---|---|
+| **Types, lint and tests** | The repository is shareable (free library, no `_MIDIS/`, `_CHORDS/` or release binaries tracked); it type-checks in both configs; lint reports nothing; all unit and catalogue tests pass | `npm run verify` |
+| **Bundles for web, iOS and Android** | Metro bundles every platform, and the web export renders every route to static HTML — so a screen that throws while rendering fails, not only one that fails to import; the product site's files and labels resolve | `npx expo export --platform web` · `npm run check:site` |
+| **Native projects** | `expo prebuild` generates both projects from scratch and the config plugins still apply: the UIScene adoption iOS 27 needs to launch the app, the Icon Composer icon and its layers, the microphone permission | `npx expo prebuild --no-install && npm run check:native` |
+| **Brand assets** | Every icon, splash and wordmark still derives from `assets/logo/ponticello-icon.svg` and passes its checks, and the derived vector files are committed and current | `python3 tools/make-icons.py && git status` |
+
+The guards are tested against the failures they exist for: removing the scene
+plugin fails the native job with the reason, and a missing site asset or image
+without alt text fails the site check. Native compilation (Xcode, Gradle) is
+not part of CI — it needs Xcode 27 and the Android toolchain, and is covered by
+building a release (`npm run release:free`, `npx expo run:ios`).
 
 ## Credits
 

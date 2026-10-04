@@ -5,7 +5,7 @@ import {
   midiToFrequency, midiToPitchName, OPEN_STRING_MIDI, difficultyOf, seatLine, scoreDurationMs,
   validateScore, type ArrangementLevel, type BackingTrack, type CelloNote, type CelloSongScore,
 } from '@domain';
-import { LIBRARY_ROWS, SCORES } from '@scores';
+import { COMPACT_SCORE_SUMMARIES, LIBRARY_ROWS, SCORES } from '@scores';
 import { LIBRARY_EDITION } from '../libraryEdition';
 
 /** Size thresholds describe the full library; the free edition ships a dozen pieces. */
@@ -183,7 +183,8 @@ describe('library rows', () => {
   });
 
   it('derives arrangement capability from score provenance, not category', async () => {
-    const { COMPACT_SCORES, CORE_SCORES, isAdaptiveBundledScore } = await import('@scores');
+    const { allCompactScores, CORE_SCORES, isAdaptiveBundledScore } = await import('@scores');
+    const COMPACT_SCORES = allCompactScores();
 
     expect(COMPACT_SCORES.every((score) => isAdaptiveBundledScore(score.id))).toBe(true);
     expect(CORE_SCORES.every((score) => !isAdaptiveBundledScore(score.id))).toBe(true);
@@ -194,40 +195,40 @@ describe('library rows', () => {
     expect(isAdaptiveBundledScore('bwv1007-prelude')).toBe(false);
   });
 
-  it('validates every compact song and every adaptive arrangement level', async () => {
-    const { COMPACT_SCORES, getScore, getBundledBacking, getGuideLine, getBassLine } = await import('@scores');
-    // Not a fixed number: `build:library` rewrites `bundledSongs.json` from
+  it('bundles songs', () => {
+    // Not a fixed number: `build:library` rewrites `src/scores/songs` from
     // whatever is in `_MIDIS/`, so the count moves when the user adds or
     // deletes a source file. What must hold is that the library is there and
-    // every song in it validates.
-    expect(COMPACT_SCORES.length).toBeGreaterThan(FULL_LIBRARY ? 200 : 0);
+    // every song in it validates, one test each below.
+    expect(COMPACT_SCORE_SUMMARIES.length).toBeGreaterThan(FULL_LIBRARY ? 200 : 0);
+  });
 
-    for (const item of COMPACT_SCORES) {
-      const full = getScore(item.id);
-      expect(full, item.id).toBeDefined();
-      if (!full) continue;
-      expect(validateScore(full), item.id).toEqual([]);
-      expect(full.notes.length, item.id).toBeGreaterThan(0);
-      expect(full.notes.every((note) => note.midiNumber >= 36 && note.midiNumber <= 81), item.id).toBe(true);
+  it.each(COMPACT_SCORE_SUMMARIES.map((summary) => summary.id))('%s validates at every arrangement level', async (id) => {
+    const { getScore, getBundledBacking, getGuideLine, getBassLine } = await import('@scores');
+    const full = getScore(id);
+    expect(full, id).toBeDefined();
+    if (!full) return;
+    expect(validateScore(full), id).toEqual([]);
+    expect(full.notes.length, id).toBeGreaterThan(0);
+    expect(full.notes.every((note) => note.midiNumber >= 36 && note.midiNumber <= 81), id).toBe(true);
 
-      const guide = getGuideLine(item.id);
-      const versions = ARRANGEMENT_LEVELS.map((level) =>
-        arrangeScoreForLevel(full, level, { guide, bass: getBassLine(item.id) }));
-      // Beginner is not on the melody's note-count ladder: it plays the
-      // harmonic guide, a different line whose notes are held roots rather
-      // than melody attacks, so counting them says nothing about which is
-      // easier. The three melody levels still have to be a ladder, and
-      // Beginner still has to be a beginner's line — asserted below.
-      const counts = versions.map((score) => score.notes.length);
-      expect(counts[2], item.id).toBeLessThanOrEqual(counts[3] ?? Infinity);
-      expect(counts[3], item.id).toBe(full.notes.length);
+    const guide = getGuideLine(id);
+    const versions = ARRANGEMENT_LEVELS.map((level) =>
+      arrangeScoreForLevel(full, level, { guide, bass: getBassLine(id) }));
+    // Beginner is not on the melody's note-count ladder: it plays the
+    // harmonic guide, a different line whose notes are held roots rather
+    // than melody attacks, so counting them says nothing about which is
+    // easier. The three melody levels still have to be a ladder, and
+    // Beginner still has to be a beginner's line — asserted below.
+    const counts = versions.map((score) => score.notes.length);
+    expect(counts[2], id).toBeLessThanOrEqual(counts[3] ?? Infinity);
+    expect(counts[3], id).toBe(full.notes.length);
 
-      expectBeginnerLine(item.id, versions[0]!);
-      versions.forEach((version, index) => expectLevelVersion(item.id, ARRANGEMENT_LEVELS[index]!, version));
+    expectBeginnerLine(id, versions[0]!);
+    versions.forEach((version, index) => expectLevelVersion(id, ARRANGEMENT_LEVELS[index]!, version));
 
-      expectPlayableBacking(item.id, getBundledBacking(item.id));
-    }
-  }, 120_000);
+    expectPlayableBacking(id, getBundledBacking(id));
+  });
 
   it('provides backing tracks for all 5 training study exercises', async () => {
     const { getBundledBacking } = await import('@scores');

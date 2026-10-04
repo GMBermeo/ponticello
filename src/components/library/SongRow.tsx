@@ -1,8 +1,8 @@
 import { memo } from 'react';
 import { View } from 'react-native';
 
-import { NOTE_COLOR, type ChordSheet, type DifficultyTier } from '@domain';
-import { getChordSheet, type LibraryRow } from '@scores';
+import { NOTE_COLOR, type DifficultyTier } from '@domain';
+import { getChordSummary, type LibraryRow } from '@scores';
 import { alpha, RADIUS, useTheme, type Chrome } from '@theme';
 
 import { Badge, Body, Icon, PressableRow, Row, Title, type IconName } from '../ui';
@@ -26,7 +26,7 @@ type BadgeStyle = { label: string; background: string; color: string };
 
 function badgeStyle(kind: RowKind, difficulty: DifficultyTier, chrome: Chrome): BadgeStyle {
   if (kind !== 'score') {
-    return { label: kind === 'builder' ? 'BUILDER' : 'CHORD', background: chrome.accentWash, color: chrome.accent };
+    return { label: kind === 'builder' ? 'BUILDER' : 'HARMONY', background: chrome.accentWash, color: chrome.accent };
   }
   const tone = chrome.dark ? 'dark' : 'light';
   const inkByDifficulty: Record<DifficultyTier, string> = {
@@ -38,17 +38,17 @@ function badgeStyle(kind: RowKind, difficulty: DifficultyTier, chrome: Chrome): 
   return { label: difficulty.toUpperCase(), background: DIFFICULTY_WASH[difficulty][tone], color: inkByDifficulty[difficulty] };
 }
 
-function rowDetail(kind: RowKind, row: LibraryRow, chart: ChordSheet | undefined): string {
+function rowDetail(kind: RowKind, row: LibraryRow, chartChords: number | undefined): string {
   if (kind === 'builder') return 'Interactive';
-  if (kind === 'chart') return `${chart?.chords.length ?? 0} chords`;
+  if (kind === 'chart') return `${chartChords ?? 0} chords`;
   if (row.bars === null) return 'No score';
-  const chordsSuffix = chart ? ' · Chords' : '';
+  const chordsSuffix = chartChords === undefined ? '' : ' · Harmony';
   return `${row.bars} bars${chordsSuffix}`;
 }
 
 const KIND_DESCRIPTION: Record<Exclude<RowKind, 'score'>, string> = {
   builder: 'Custom chord progression builder',
-  chart: 'Chord chart',
+  chart: 'Harmony map',
 };
 
 export type SongRowProps = {
@@ -59,10 +59,10 @@ export type SongRowProps = {
 export const SongRow = memo(function SongRow({ row, onSelect }: SongRowProps) {
   const theme = useTheme();
   const isBuilder = row.id === CUSTOM_PROGRESSION_ID;
-  const chart = isBuilder ? undefined : getChordSheet(row.id);
+  const chartChords = isBuilder ? undefined : getChordSummary(row.id)?.chordCount;
   let kind: RowKind = 'score';
   if (isBuilder) kind = 'builder';
-  else if (chart && !row.playable) kind = 'chart';
+  else if (chartChords !== undefined && !row.playable) kind = 'chart';
   const badge = badgeStyle(kind, row.difficulty, theme.chrome);
   const description = kind === 'score' ? row.difficulty : KIND_DESCRIPTION[kind];
 
@@ -77,7 +77,7 @@ export const SongRow = memo(function SongRow({ row, onSelect }: SongRowProps) {
         <View style={{ flex: 1, minWidth: 0, gap: theme.s(4) }}>
           <Title size={17} numberOfLines={2}>{row.title}</Title>
           <Body size={13} color={theme.chrome.dim} numberOfLines={1}>
-            {`${row.composer} · ${rowDetail(kind, row, chart)}`}
+            {`${row.composer} · ${rowDetail(kind, row, chartChords)}`}
           </Body>
           <Row gap={6}>
             <Badge label={badge.label} background={badge.background} color={badge.color} />

@@ -3,6 +3,7 @@ export * from './backing';
 export * from './base64';
 export * from './cello';
 export * from './celloChords';
+export * from './chordDialect';
 export * from './chordPro';
 export * from './chordScales';
 export * from './chordSheet';

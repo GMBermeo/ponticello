@@ -51,6 +51,9 @@ _MIDIS/
 # personal chord charts stash
 _CHORDS/
 
+# rendered voice previews - npm run audition:voices
+_AUDITION/
+
 # built APKs - see tools/build-release.sh
 releases/
 
@@ -64,3 +67,5 @@ releases/
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
+/src/scores/songs
+/src/scores/chords

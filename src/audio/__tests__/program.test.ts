@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { BackingPart, loopOffsetSeconds, practiceLoop, CelloSongScore } from '@domain';
 import { buildProgram, estimatePeak, notesActiveAtOffset, resolveAudibleProgram } from '../backing/program';
-import { renderProgramInto } from '../synth';
+import { renderProgramDry, renderProgramInto } from '../synth';
 
 function score(bars: number, bpm = 120): CelloSongScore {
   const barMs = (60000 / bpm) * 4;
@@ -111,7 +111,7 @@ describe('resolving parts into a program', () => {
     expect(peak).toBeLessThan(0.9);
   });
 
-  it('renders adjacent native slices identically to one continuous buffer', () => {
+  it('renders adjacent native slices of the voices identically to one continuous buffer', () => {
     const program = buildProgram({
       id: 'slices',
       parts: [part([[60, 900, 1500], [64, 1800, 900], [67, 2400, 700]])],
@@ -124,9 +124,9 @@ describe('resolving parts into a program', () => {
     const first = new Float32Array(split);
     const second = new Float32Array(length - split);
 
-    renderProgramInto(whole, program, 0, sampleRate);
-    renderProgramInto(first, program, 0, sampleRate);
-    renderProgramInto(second, program, split, sampleRate);
+    renderProgramDry(whole, program, 0, sampleRate);
+    renderProgramDry(first, program, 0, sampleRate);
+    renderProgramDry(second, program, split, sampleRate);
 
     let maxDifference = 0;
     for (let index = 0; index < length; index++) {
@@ -157,9 +157,9 @@ describe('resolving parts into a program', () => {
     const first = new Float32Array(split);
     const second = new Float32Array(length - split);
 
-    renderProgramInto(whole, program, 0, sampleRate);
-    renderProgramInto(first, program, 0, sampleRate);
-    renderProgramInto(second, program, split, sampleRate);
+    renderProgramDry(whole, program, 0, sampleRate);
+    renderProgramDry(first, program, 0, sampleRate);
+    renderProgramDry(second, program, split, sampleRate);
 
     let maxDifference = 0;
     for (let index = 0; index < length; index++) {

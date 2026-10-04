@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
   beatAtTime, eventAtBeat, interpretSheetChord, sheetLineSegments, sheetScrollY, sheetTimeline,
-  validateChordSheet, parseChordPro, chordsInScale, scaleNotes,
+  validateChordSheet, parseChordPro, chordsInScale, scaleNotes, summarizeChordSheet,
 } from '@domain';
-import { CHORD_SHEETS, mergeChordLibrary } from '../chordSheets';
+import { CHORD_SHEET_SUMMARIES, getChordSheet, getChordSummary, hasChordSheet, mergeChordLibrary } from '../chordSheets';
 import type { LibraryRow } from '..';
+
+/** The bundled charts in groups, so no one test reads them all. */
+const CHART_CHUNK_SIZE = 250;
+const CHART_CHUNKS = Array.from(
+  { length: Math.ceil(CHORD_SHEET_SUMMARIES.length / CHART_CHUNK_SIZE) },
+  (_, index) => CHORD_SHEET_SUMMARIES.slice(index * CHART_CHUNK_SIZE, (index + 1) * CHART_CHUNK_SIZE),
+);
 
 describe('scale chord membership', () => {
   it('labels scale degrees with chord quality and extensions, updating with the key', () => {
@@ -76,15 +83,42 @@ describe('chord sheets and scrolling', () => {
   });
   it('adds chart-only songs while keeping score/chart pairs under a single ID', () => {
     const scoreRow: LibraryRow = { id: 'study', title: 'Study', composer: 'Ponticello', origin: 'ARRANGED', category: 'song', playable: true, keySignature: 'C', range: 'C2', tempo: '90', difficulty: 'Beginner', bars: 4, distribution: [], note: '' };
-    const result = mergeChordLibrary([scoreRow], [sheet, { ...sheet, id: 'standalone' }]);
+    const result = mergeChordLibrary([scoreRow], [summarizeChordSheet(sheet), summarizeChordSheet({ ...sheet, id: 'standalone' })]);
     expect(result).toHaveLength(2);
     expect(result[0]).toBe(scoreRow);
     expect(result[1].id).toBe('standalone');
     expect(result[1].playable).toBe(false);
   });
-  it('validates imported charts and retains seven-change phrases', () => {
-    CHORD_SHEETS.forEach(validateChordSheet);
-    const fresno = CHORD_SHEETS.find((s) => s.id === 'fresno-sexto-andar');
+  it('lists every bundled chart without opening any of them', () => {
+    expect(CHORD_SHEET_SUMMARIES.length).toBeGreaterThan(0);
+    expect(new Set(CHORD_SHEET_SUMMARIES.map((summary) => summary.id)).size).toBe(CHORD_SHEET_SUMMARIES.length);
+    expect(hasChordSheet('ponticello-seven-changes')).toBe(true);
+    expect(hasChordSheet('no-such-chart')).toBe(false);
+    expect(hasChordSheet(undefined)).toBe(false);
+    expect(getChordSummary('ponticello-seven-changes')?.chordCount).toBe(getChordSheet('ponticello-seven-changes')?.chords.length);
+  });
+  it('opens a chart on demand, and the same chart every time', () => {
+    const first = getChordSheet(CHORD_SHEET_SUMMARIES[0]?.id);
+    expect(first).toBeDefined();
+    expect(getChordSheet(first?.id)).toBe(first);
+    expect(getChordSheet('no-such-chart')).toBeUndefined();
+  });
+  it.each(CHART_CHUNKS.map((chunk, index) => [index + 1, chunk] as const))(
+    'bundles valid charts whose cello readings match the current chord dictionary (part %i)',
+    (_part, chunk) => {
+      const stale: string[] = [];
+      for (const summary of chunk) {
+        const chart = getChordSheet(summary.id)!;
+        validateChordSheet(chart);
+        for (const chord of chart.chords) {
+          if (interpretSheetChord(chord.symbol, chord.keyboardPitchClasses).canonical !== chord.canonical) stale.push(`${summary.id}: ${chord.symbol}`);
+        }
+      }
+      expect(stale, 'run npm run build:library:free to re-read the charts').toEqual([]);
+    },
+  );
+  it('retains seven-change phrases', () => {
+    const fresno = getChordSheet('fresno-sexto-andar');
     if (fresno) {
       expect(fresno.instrument).toBe('keyboard');
       expect(fresno.chords).toHaveLength(12);
@@ -98,7 +132,7 @@ describe('chord sheets and scrolling', () => {
       expect(fresno.bpm).toBeNull();
       expect(fresno.chords.every((c) => c.canonical !== null)).toBe(true);
     }
-    const study = CHORD_SHEETS.find((s) => s.id === 'ponticello-seven-changes');
+    const study = getChordSheet('ponticello-seven-changes');
     if (study) {
       expect(study.instrument).toBe('chordpro');
       expect(study.lines.some((l) => l.changes.length === 7)).toBe(true);

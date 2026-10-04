@@ -30,7 +30,7 @@ export default function TabsLayout() {
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="chords">
         <NativeTabs.Trigger.Icon sf={{ default: 'pianokeys', selected: 'pianokeys.inverse' }} md="piano" />
-        <NativeTabs.Trigger.Label>Chords</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label>Harmony map</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
     </NativeTabs>
   );

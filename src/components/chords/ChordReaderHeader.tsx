@@ -56,7 +56,7 @@ export function ChordReaderHeader(props: ChordReaderHeaderProps) {
         {sheet.sourceUrl ? <Button label="Source" tone="ghost" onPress={() => open(sheet.sourceUrl)} /> : null}
       </Row>
       <Segmented
-        accessibilityLabel="Chord chart view"
+        accessibilityLabel="Harmony map view"
         segments={CHART_VIEWS}
         value={props.chartView}
         onChange={props.onChartViewChange}

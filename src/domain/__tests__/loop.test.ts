@@ -5,7 +5,9 @@ import {
   clipToLoop, loopBudget, loopOffsetSeconds, MAX_RENDER_SECONDS, practiceLoop,
 } from '../loop';
 import { CelloSongScore } from '../schema';
-import { inflateBacking, inflateScore, COMPACT_SCORES, LIBRARY_EDITION } from '@scores';
+import { inflateBacking, inflateScore, allCompactScores, LIBRARY_EDITION } from '@scores';
+
+const COMPACT_SCORES = allCompactScores();
 
 /** Size thresholds describe the full library; the free edition ships a dozen pieces. */
 const FULL_LIBRARY = LIBRARY_EDITION.id === 'full';

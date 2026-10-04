@@ -11,7 +11,7 @@ import {
   VISION_SEGMENTS, type SheetView, Card, Glass,
 } from '@components';
 import { practiceLoop } from '@domain';
-import { getChordSheet, type LibraryRow } from '@scores';
+import { hasChordSheet, type LibraryRow } from '@scores';
 import {
   useAudioPreferences, usePiece, useSession, useSettingsActions, useTrackChoice, useTrackOptions,
   useVisionPreferences,
@@ -19,7 +19,7 @@ import {
 import { RADIUS, useTheme } from '@theme';
 
 function startTarget(row: LibraryRow, chordsSelected: boolean): { label: string; href: Href } {
-  if (chordsSelected) return { label: 'Read chords', href: `/chord-song/${row.id}` };
+  if (chordsSelected) return { label: 'Open harmony map', href: `/chord-song/${row.id}` };
   if (row.playable) return { label: 'Start practice', href: `/play/${row.id}` };
   return { label: 'Import a score', href: '/settings/import' };
 }
@@ -37,9 +37,9 @@ export default function SongScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const chordSheet = getChordSheet(id);
+  const hasChords = hasChordSheet(id);
   const [chordsSelectedFor, setChordsSelectedFor] = useState<string | null>(null);
-  const chordsSelected = !!chordSheet && chordsSelectedFor === id;
+  const chordsSelected = hasChords && chordsSelectedFor === id;
   const { listenMode, accompaniment, backingVolume } = useAudioPreferences();
   const { vision } = useVisionPreferences();
   const { update, setTrackChoice } = useSettingsActions();
@@ -101,7 +101,7 @@ export default function SongScreen() {
   const wide = !theme.scale.compact;
   const bpm = effectiveBpm(score?.metadata.bpm, setup.tempoPercent);
   const arrangement = ARRANGEMENT_SEGMENTS.find((segment) => segment.value === setup.arrangementLevel);
-  const viewSegments = chordSheet ? [...VISION_SEGMENTS, CHORDS_SEGMENT] : VISION_SEGMENTS;
+  const viewSegments = hasChords ? [...VISION_SEGMENTS, CHORDS_SEGMENT] : VISION_SEGMENTS;
   const start = startTarget(row, chordsSelected);
   const footerDetail = [
     `${bpm} BPM`,

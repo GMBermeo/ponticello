@@ -1,7 +1,7 @@
 {
   "name": "ponticello",
   "main": "expo-router/entry",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",
     "@expo/ui": "~57.0.20",
@@ -61,6 +61,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.strict.json",
     "build:library": "vite-node --config vitest.config.ts tools/build-library.ts -- --edition=full",
+    "audition:voices": "vite-node --config vitest.config.ts tools/audition-voices.ts --",
+    "audit:chords": "vite-node --config vitest.config.ts tools/audit-chord-mapping.ts",
     "audit:arrangements": "vite-node --config vitest.config.ts tools/audit-arrangements.ts",
     "arrange:ollama": "vite-node --config vitest.config.ts tools/ollama-arranger.ts --",
     "ollama:benchmark": "vite-node --config vitest.config.ts tools/ollama-benchmark.ts --",
@@ -72,7 +74,11 @@
     "ipa:simulator": "eas build --platform ios --profile preview",
     "build:library:free": "vite-node --config vitest.config.ts tools/build-library.ts -- --edition=free",
     "release:full": "bash tools/build-release.sh full",
-    "release:free": "bash tools/build-release.sh free"
+    "release:free": "bash tools/build-release.sh free",
+    "check:shareable": "node tools/ci/check-shareable.mjs",
+    "check:site": "node tools/ci/check-site.mjs",
+    "check:native": "node tools/ci/check-native-config.mjs",
+    "verify": "npm run check:shareable && npm run typecheck && eslint . --max-warnings=0 && npm test && npm run check:site"
   },
   "private": true
 }

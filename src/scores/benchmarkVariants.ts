@@ -3,7 +3,7 @@
  *
  * `tools/ollama-benchmark.ts` writes `_MIDIS/arranged/<song>--<model>/`, and
  * `tools/build-library.ts` packs those folders into `benchmarkVariants.json`
- * (full edition only). They cannot ride in `bundledSongs.json`: that format
+ * (full edition only). They cannot ride in the bundled song files: that format
  * stores pitches and re-fingers them in first position on load, which would
  * erase the very choices the benchmark exists to compare. Here every note keeps
  * the string, finger and position the model gave it, and each arrangement level
