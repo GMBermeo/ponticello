@@ -22,7 +22,7 @@ import { BWV1007_PRELUDE } from './bach';
 import { LIBRARY_KEY_CENSUS } from './keyCensus';
 import { STUDIES, STUDIES_BACKINGS } from './studies';
 import { SCALE_DRILLS, SCALE_DRILL_BACKINGS, SCALE_DRILL_KEYS } from './scaleDrills';
-import { COMPACT_SCORES, inflateBacking, inflateScore, CompactScoreDef } from './bundledSongs';
+import { getCompactScore, hasCompactScore, inflateBacking, inflateScore, type CompactScoreDef } from './bundledSongs';
 import { BUNDLED_CATALOG_ROWS } from './catalogIndex';
 import { variantBacking, variantLevelScore } from './benchmarkVariants';
 
@@ -40,11 +40,6 @@ for (const s of CORE_SCORES) {
   SCORE_CACHE.set(s.id, s);
 }
 
-const COMPACT_MAP = new Map<string, CompactScoreDef>();
-for (const c of COMPACT_SCORES) {
-  COMPACT_MAP.set(c.id, c);
-}
-
 export const SCORES: CelloSongScore[] = CORE_SCORES;
 
 export const SCORES_BY_ID: Record<string, CelloSongScore> =
@@ -53,7 +48,7 @@ export const SCORES_BY_ID: Record<string, CelloSongScore> =
 export function getScore(id: string | undefined): CelloSongScore | undefined {
   if (!id) return undefined;
   if (SCORE_CACHE.has(id)) return SCORE_CACHE.get(id);
-  const compact = COMPACT_MAP.get(id);
+  const compact = getCompactScore(id);
   if (compact) {
     const score = inflateScore(compact);
     SCORE_CACHE.set(id, score);
@@ -66,7 +61,7 @@ export function getScore(id: string | undefined): CelloSongScore | undefined {
 
 /** True for MIDI-derived bundled scores that support runtime arrangement levels. */
 export function isAdaptiveBundledScore(id: string | undefined): boolean {
-  return id !== undefined && COMPACT_MAP.has(id);
+  return hasCompactScore(id);
 }
 
 /**
@@ -84,7 +79,7 @@ export function getAuthoredLevel(id: string | undefined, level: DifficultyTier):
  */
 export function getGuideLine(id: string | undefined): RawNoteEvent[] | undefined {
   if (!id) return undefined;
-  const compact = COMPACT_MAP.get(id);
+  const compact = getCompactScore(id);
   if (!compact?.guide?.length) return undefined;
   return compact.guide.map(([midiNumber, startTimeMs, durationMs]) =>
     ({ midiNumber, startTimeMs, durationMs }));
@@ -92,7 +87,7 @@ export function getGuideLine(id: string | undefined): RawNoteEvent[] | undefined
 
 /** The original bass/lower voice for a moving Intermediate accompaniment. */
 export function getBassLine(id: string | undefined): RawNoteEvent[] | undefined {
-  const compact = id ? COMPACT_MAP.get(id) : undefined;
+  const compact = getCompactScore(id);
   return compact?.bass?.map(([midiNumber, startTimeMs, durationMs]) =>
     ({ midiNumber, startTimeMs, durationMs }));
 }
@@ -103,7 +98,7 @@ export function getBundledBacking(id: string | undefined): BackingTrack | undefi
   if (SCALE_DRILL_BACKINGS[id]) return SCALE_DRILL_BACKINGS[id];
   const variant = variantBacking(id);
   if (variant) return variant;
-  const compact = COMPACT_MAP.get(id);
+  const compact = getCompactScore(id);
   if (compact) {
     return inflateBacking(compact);
   }

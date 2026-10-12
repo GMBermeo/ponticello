@@ -8,7 +8,7 @@
  * those two keys equal billing is lying to the player about where their
  * evenings will go.
  *
- * So the census is *measured*, never written down. `bundledSongs.json` is
+ * So the census is *measured*, never written down. The bundled song library is
  * rebuilt from `_MIDIS/` whenever the arranger changes, and every count here
  * moves with it. Nothing in this module or in `src/scores/scaleDrills.ts`
  * hard-codes a number of songs; the drills are authored per key and the census

@@ -7,7 +7,7 @@
  *   - Tracks completion in _CHORDS/chords_cache.json
  *   - Defaults to --resume: skips already completed songs unless --no-resume or --force is passed
  *   - Fault-tolerant: errors on individual songs (e.g. No chords extracted) are logged and skipped
- *   - Syncs into src/scores/chordSheets.generated.json for personal practice during development
+ *   - Run `npm run build:library` afterwards to bundle the charts into the app
  *
  * Usage:
  *   npm run import:chords                             # Resumes _CHORDS/songs.txt
@@ -53,7 +53,6 @@ interface CliOptions {
   noOllama: boolean;
   strictTiming: boolean;
   chordsOnly: boolean;
-  syncBundle: boolean;
   ids: string | null;
 }
 
@@ -82,7 +81,6 @@ function parseCliOptions(argv: string[]): CliOptions {
     noOllama: hasFlag('no-ollama'),
     strictTiming: hasFlag('strict-timing'),
     chordsOnly: hasFlag('chords-only'),
-    syncBundle: !hasFlag('no-sync-bundle'),
     ids: flag('ids') ?? null,
   };
 }
@@ -244,20 +242,6 @@ function saveMergedCharts(outPath: string, charts: Map<string, ChordSheet>): voi
   renameSync(tmp, outPath);
 }
 
-function syncToDevBundle(sheet: ChordSheet): void {
-  const bundlePath = resolve('src/scores/chordSheets.generated.json');
-  if (!existsSync(bundlePath)) return;
-  try {
-    const existing: ChordSheet[] = JSON.parse(readFileSync(bundlePath, 'utf8'));
-    const map = new Map(existing.map((s) => [s.id, s]));
-    map.set(sheet.id, sheet);
-    const sorted = [...map.values()].sort((a, b) => a.id.localeCompare(b.id));
-    const tmp = `${bundlePath}.tmp`;
-    writeFileSync(tmp, `${JSON.stringify(sorted, null, 2)}\n`);
-    renameSync(tmp, bundlePath);
-  } catch {}
-}
-
 const HELP_TEXT = `npm run import:chords -- [options]
   Consumes CifraClub chord sheets and saves them into _CHORDS/ (kept out of git).
 
@@ -276,7 +260,6 @@ Options:
   --model <name>      Ollama model name (default: env OLLAMA_MODEL or qwen3.5:4b)
   --no-ollama         Bypass Ollama duration timing
   --chords-only       Omit lyric text
-  --no-sync-bundle    Do not update src/scores/chordSheets.generated.json for local dev
 `;
 
 const FETCH_TIMEOUT_MS = 30000;
@@ -310,7 +293,6 @@ function storeChart(context: ImportContext, sheet: ChordSheet): void {
   writeFileSync(join(options.chartsDir, `${sheet.id}.json`), `${JSON.stringify(sheet, null, 2)}\n`);
   charts.set(sheet.id, sheet);
   saveMergedCharts(options.out, charts);
-  if (options.syncBundle) syncToDevBundle(sheet);
 }
 
 async function importChordPro(context: ImportContext, file: string): Promise<void> {
@@ -329,6 +311,11 @@ function urlsToImport(options: CliOptions): string[] {
   return parseUrlList(readFileSync(resolve(options.input), 'utf8'));
 }
 
+function isTransientError(error?: string): boolean {
+  if (!error) return false;
+  return /429|502|503|504|fetch failed|timeout|ECONNRESET|ETIMEDOUT/i.test(error);
+}
+
 /** Why a URL can be skipped on resume, or null when it should be imported. */
 function skipReason(context: ImportContext, url: string): string | null {
   const { options, cache, charts } = context;
@@ -339,14 +326,51 @@ function skipReason(context: ImportContext, url: string): string | null {
     const present = !!id && (existsSync(join(options.chartsDir, `${id}.json`)) || charts.has(id));
     return present ? `already completed: ${entry.title ?? id}` : null;
   }
-  if (entry?.status === 'failed' && !options.retryFailed) return `previously failed: ${entry.error ?? 'unknown error'}`;
+  if (entry?.status === 'failed') {
+    if (isTransientError(entry.error)) return null;
+    if (!options.retryFailed) return `previously failed: ${entry.error ?? 'unknown error'}`;
+  }
   return null;
 }
 
-async function fetchPage(url: string, failure: (status: number) => string): Promise<string> {
-  const response = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), headers: REQUEST_HEADERS });
-  if (!response.ok) throw new Error(failure(response.status));
-  return response.text();
+function shouldRetryStatus(status: number): boolean {
+  return status === 429 || status === 502 || status === 503 || status === 504;
+}
+
+function shouldRetryError(err: unknown): boolean {
+  return err instanceof Error && (err.name === 'TimeoutError' || err.message.includes('fetch failed'));
+}
+
+async function retryWait(msg: string, attempt: number, maxRetries: number, ms: number): Promise<void> {
+  console.warn(`    [BACKOFF] ${msg} — waiting ${ms / 1000}s (retry ${attempt}/${maxRetries})...`);
+  await new Promise((r) => setTimeout(r, ms));
+}
+
+type FetchAttemptResult = { ok: true; text: string } | { ok: false; retry: boolean; status?: number; error?: unknown };
+
+async function attemptFetch(url: string, failure: (status: number) => string): Promise<FetchAttemptResult> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), headers: REQUEST_HEADERS });
+    if (res.ok) return { ok: true, text: await res.text() };
+    if (shouldRetryStatus(res.status)) return { ok: false, retry: true, status: res.status };
+    throw new Error(failure(res.status));
+  } catch (err: unknown) {
+    if (shouldRetryError(err)) return { ok: false, retry: true, error: err };
+    throw err;
+  }
+}
+
+async function fetchPage(url: string, failure: (status: number) => string, maxRetries = 2): Promise<string> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const result = await attemptFetch(url, failure);
+    if (result.ok) return result.text;
+    const msg = result.status ? `HTTP ${result.status} for ${url}` : String(result.error);
+    const ms = result.status === 429 ? attempt * 4000 : attempt * 2000;
+    await retryWait(msg, attempt, maxRetries, ms);
+  }
+  const finalResult = await attemptFetch(url, failure);
+  if (finalResult.ok) return finalResult.text;
+  throw new Error(`Failed to fetch ${url} after retries`);
 }
 
 /** The keyboard chart, or the guitar chart when the keyboard one cannot be read. */
@@ -442,6 +466,7 @@ async function main() {
     console.log(`${tag} Fetching chart: ${url}`);
     if (await importUrl(context, url)) counts.processed++;
     else counts.failed++;
+    await new Promise((resolve) => setTimeout(resolve, 300));
   }
 
   console.log(`\n================================================================`);

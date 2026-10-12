@@ -12,6 +12,6 @@
  */
 
 import { KeyCensus, keyCensus } from '@domain';
-import { COMPACT_SCORES } from './bundledSongs';
+import { COMPACT_SCORE_SUMMARIES } from './bundledSongs';
 
-export const LIBRARY_KEY_CENSUS: KeyCensus = keyCensus(COMPACT_SCORES);
+export const LIBRARY_KEY_CENSUS: KeyCensus = keyCensus(COMPACT_SCORE_SUMMARIES);

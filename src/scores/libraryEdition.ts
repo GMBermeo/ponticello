@@ -9,12 +9,15 @@ export interface LibraryEdition {
   detail: string;
   bundledCount: number;
   songCount: number;
+  /** Chord charts bundled with the build; every edition carries all of them. */
+  chartCount: number;
 }
 
 export const LIBRARY_EDITION: LibraryEdition = {
   "id": "free",
   "label": "Free library",
-  "detail": "18 bundled public-domain pieces and original etudes — free to share",
+  "detail": "18 bundled public-domain pieces and original etudes, and 2551 harmony maps",
   "bundledCount": 18,
-  "songCount": 0
+  "songCount": 0,
+  "chartCount": 2551
 };

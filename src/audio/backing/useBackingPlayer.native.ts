@@ -2,6 +2,7 @@ import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-aud
 import { Directory, File, Paths } from 'expo-file-system';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { Room } from '../room';
 import { renderProgramInto } from '../synth';
 import { encodeWavInto, wavByteLength, writeWavHeader } from '../wav';
 import { BackingProgram } from './program';
@@ -68,12 +69,14 @@ async function renderProgramWav(
 
   const sliceSamples = SLICE_SEC * SAMPLE_RATE;
   const slice = new Float32Array(sliceSamples);
+  // One room carried through the slices, so each begins with the tail of the last.
+  const room = new Room(SAMPLE_RATE);
 
   for (let from = 0; from < totalSamples; from += sliceSamples) {
     const length = Math.min(sliceSamples, totalSamples - from);
     const view = length === sliceSamples ? slice : slice.subarray(0, length);
 
-    renderProgramInto(view, program, from, SAMPLE_RATE);
+    renderProgramInto(view, program, from, SAMPLE_RATE, room);
     // Fade the very first and very last few milliseconds, or the loop point
     // clicks on every repeat.
     if (from === 0) fadeIn(view, SAMPLE_RATE);

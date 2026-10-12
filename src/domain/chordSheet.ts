@@ -1,5 +1,7 @@
 import { chroma } from '@tonaljs/note';
 import { getCelloChord } from './celloChords';
+import { dialectSymbols, identifyByKeyboard, simplifyByKeyboard, withoutExtension } from './chordDialect';
+import { toPitchClass } from './cello';
 import type { CelloChordStudy } from './chords';
 
 export interface SheetChord {
@@ -36,8 +38,55 @@ export interface ChordSheet {
   lines: SheetLine[];
 }
 
-/** Cifra's spelling is retained for display, a separate canonical name drives cello. */
+/** What the library needs to list a chart without opening it. */
+export interface ChordSheetSummary extends Pick<ChordSheet, 'id' | 'title' | 'artist' | 'key' | 'bpm'> {
+  /** Distinct chords in the chart, for the library row. */
+  chordCount: number;
+}
+
+export function summarizeChordSheet(sheet: ChordSheet): ChordSheetSummary {
+  return { id: sheet.id, title: sheet.title, artist: sheet.artist, key: sheet.key, bpm: sheet.bpm, chordCount: sheet.chords.length };
+}
+
+const UNMAPPED_NOTE = 'No verified cello diagram for this symbol. Source chord retained.';
+
+/** The dictionary reading of a chart symbol, or null when it names something the sheet's own diagram contradicts. */
+function verifiedName(name: string, keyboardPitchClasses: readonly number[]): string | null {
+  try {
+    const study = getCelloChord(name);
+    const allowed = study.tones.map((t) => t.pitchClass);
+    if (study.requestedBass) allowed.push(chroma(study.requestedBass)!);
+    // A power chord is the bare frame of a triad; charts draw it with the third on top.
+    if (study.type.id === '5') allowed.push(...[3, 4].map((third) => toPitchClass(allowed[0]! + third)));
+    return keyboardPitchClasses.some((n) => !allowed.includes(n)) ? null : name;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Cifra's spelling is retained for display, a separate canonical name drives
+ * cello. Readings are tried from the most literal to the most inferred, and the
+ * first one the sheet's keyboard diagram does not contradict wins.
+ */
 export function interpretSheetChord(symbol: string, keyboardPitchClasses: number[] = []): SheetChord {
+  const candidates = [literalReading(symbol, keyboardPitchClasses), ...dialectSymbols(symbol)];
+  let canonical = candidates.map((name) => verifiedName(name, keyboardPitchClasses)).find((name) => name !== null) ?? null;
+  canonical ??= verifiedName(identifyByKeyboard(symbol, keyboardPitchClasses) ?? '', keyboardPitchClasses);
+  if (canonical === null) return simplifiedChord(symbol, keyboardPitchClasses);
+  return { symbol, canonical, keyboardPitchClasses, interpretation: canonical === symbol ? null : `Keyboard interpretation: ${canonical}` };
+}
+
+/** A chord the dictionary lacks, played as the nearest chord inside the sheet's diagram, or unmapped. */
+function simplifiedChord(symbol: string, keyboardPitchClasses: number[]): SheetChord {
+  const simpler = simplifyByKeyboard(symbol, keyboardPitchClasses) ?? withoutExtension(symbol);
+  const canonical = simpler === null ? null : verifiedName(simpler, []);
+  if (canonical === null) return { symbol, canonical: null, keyboardPitchClasses, interpretation: UNMAPPED_NOTE };
+  return { symbol, canonical, keyboardPitchClasses, interpretation: `Simplified to ${canonical}: the notes the cello has no shape for are left out.` };
+}
+
+/** The chart symbol with only the spellings every chart shares normalised. */
+function literalReading(symbol: string, keyboardPitchClasses: readonly number[]): string {
   let canonical = symbol.replace(/7M/g, 'maj7').replace(/º/g, 'dim').replace(/°/g, 'dim');
   canonical = canonical.replace(/^([A-G][b#]?)4(?=\/|$)/, '$1sus4');
   const ninth = /^([A-G][b#]?)9(\/[A-G][b#]?)?$/.exec(canonical);
@@ -50,15 +99,7 @@ export function interpretSheetChord(symbol: string, keyboardPitchClasses: number
   }
   const fifth = /^([A-G][b#]?)5(\/[A-G][b#]?)$/.exec(canonical);
   if (fifth?.[1] && keyboardPitchClasses.includes((chroma(fifth[1])! + 4) % 12)) canonical = `${fifth[1]}${fifth[2]}`;
-  try {
-    const study = getCelloChord(canonical);
-    const allowed = study.tones.map((t) => t.pitchClass);
-    if (study.requestedBass) allowed.push(chroma(study.requestedBass)!);
-    if (keyboardPitchClasses.some((n) => !allowed.includes(n))) throw new Error('Keyboard diagram disagrees with chord name');
-    return { symbol, canonical, keyboardPitchClasses, interpretation: canonical === symbol ? null : `Keyboard interpretation: ${canonical}` };
-  } catch {
-    return { symbol, canonical: null, keyboardPitchClasses, interpretation: 'No verified cello diagram for this symbol. Source chord retained.' };
-  }
+  return canonical;
 }
 
 export function sheetChordStudy(chord: SheetChord): CelloChordStudy | null {

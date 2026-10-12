@@ -5,6 +5,7 @@ export * from './fft';
 export * from './flux';
 export * from './mpm';
 export * from './pitchTracker';
+export * from './room';
 export * from './sources';
 export * from './synth';
 export * from './useBacking';

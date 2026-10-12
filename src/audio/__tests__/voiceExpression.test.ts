@@ -122,7 +122,7 @@ describe('per-note variation', () => {
     const v = noteVariation(plain, noteSeed(50, 10));
     expect(v).toEqual({
       detuneCents: 0, velocityScale: 1, attackScale: 1,
-      vibratoPhase: 0, vibratoRateScale: 1, vibratoDepthScale: 1,
+      vibratoPhase: 0, vibratoRateScale: 1, vibratoDepthScale: 1, scoopScale: 1,
     });
   });
 });

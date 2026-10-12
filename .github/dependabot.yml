@@ -1,0 +1,8 @@
+# Keeps the GitHub Actions used by CI current. App dependencies are upgraded
+# deliberately, with `npx expo install --fix`, because Expo pins them per SDK.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

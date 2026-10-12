@@ -6,7 +6,9 @@ import {
 import {
   ARRANGEMENT_WEIGHTS, CelloState, RawNoteEvent, solveFingering,
 } from '../fingering';
-import { COMPACT_SCORES, LIBRARY_EDITION } from '@scores';
+import { allCompactScores, LIBRARY_EDITION } from '@scores';
+
+const COMPACT_SCORES = allCompactScores();
 
 /** Size thresholds describe the full library; the free edition ships a dozen pieces. */
 const FULL_LIBRARY = LIBRARY_EDITION.id === 'full';

@@ -30,8 +30,8 @@ export default function ChordSongScreen() {
     return (
       <Screen>
         <ScreenHeader backLabel="Library" />
-        <Title>Chord chart unavailable</Title>
-        <Body>Import a chart for this piece to read its chords.</Body>
+        <Title>Harmony map unavailable</Title>
+        <Body>Import a chart for this piece to see its harmony map.</Body>
       </Screen>
     );
   }
@@ -141,7 +141,7 @@ function ChordReader({ sheet }: { sheet: ChordSheet }) {
 
   return (
     <Screen scroll={false} padded={false}>
-      <ScreenHeader backLabel="Library" meta="Chords & lyrics">
+      <ScreenHeader backLabel="Library" meta="Harmony map & lyrics">
         {hasScore ? (
           <Button label="Score setup" tone="ghost" onPress={() => { pause(); push(`/song/${sheet.id}`); }} />
         ) : null}

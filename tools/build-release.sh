@@ -3,7 +3,9 @@
 # Builds one named release APK of Ponticello.
 #
 #   ./tools/build-release.sh full   # public domain + etudes + every song in _MIDIS/arranged
-#   ./tools/build-release.sh free   # public domain + etudes only — safe to share
+#   ./tools/build-release.sh free   # public domain + etudes, no arranged songs
+#
+# Both carry every harmony map (chord chart) in _CHORDS/.
 #
 # The two editions differ only in the bundled library, so this regenerates the
 # library for the edition, verifies it, builds the APK with tools/build-apk.sh,
@@ -39,6 +41,12 @@ SONGS="$(node -e "
   process.stdout.write(m ? m[1] : '0');
 ")"
 
+CHARTS="$(node -e "
+  const src = require('fs').readFileSync('src/scores/libraryEdition.ts', 'utf8');
+  const m = src.match(/\"chartCount\": (\d+)/);
+  process.stdout.write(m ? m[1] : '0');
+")"
+
 echo "› verifying"
 npm run typecheck
 npm test
@@ -46,9 +54,9 @@ npm test
 bash tools/build-apk.sh
 
 if [ "$EDITION" = "full" ]; then
-  NAME="Ponticello-v${VERSION}-build${VERSION_CODE}-FULL-LIBRARY-${COUNT}-pieces-${SONGS}-arranged-songs-PERSONAL-USE-release.apk"
+  NAME="Ponticello-v${VERSION}-build${VERSION_CODE}-FULL-LIBRARY-${COUNT}-pieces-${SONGS}-arranged-songs-${CHARTS}-harmony-maps-PERSONAL-USE-release.apk"
 else
-  NAME="Ponticello-v${VERSION}-build${VERSION_CODE}-FREE-LIBRARY-${COUNT}-public-domain-and-etudes-SHAREABLE-release.apk"
+  NAME="Ponticello-v${VERSION}-build${VERSION_CODE}-FREE-LIBRARY-${COUNT}-public-domain-and-etudes-${CHARTS}-harmony-maps-SHAREABLE-release.apk"
 fi
 
 mkdir -p "$ROOT/releases"

@@ -5,7 +5,9 @@ import {
   SIXTEENTHS_PER_BEAT,
 } from '../engrave';
 import { CelloNote, CelloSongScore } from '../schema';
-import { COMPACT_SCORES, inflateScore, BWV1007_PRELUDE } from '@scores';
+import { allCompactScores, inflateScore, BWV1007_PRELUDE } from '@scores';
+
+const COMPACT_SCORES = allCompactScores();
 
 /** A 4/4 score at 60 bpm, so one beat is 1000 ms and a sixteenth is 250 ms. */
 function scoreOf(notes: { midi: number; startMs: number; durMs: number }[]): CelloSongScore {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { CHORD_SHEETS, LIBRARY_ROWS, mergeChordLibrary, type LibraryRow } from '@scores';
+import { CHORD_SHEET_SUMMARIES, LIBRARY_ROWS, mergeChordLibrary, type LibraryRow } from '@scores';
 
 import {
   CUSTOM_PROGRESSION_ID, filterLibraryRows, routeForRow, type LibraryFilter,
@@ -56,7 +56,7 @@ describe('filterLibraryRows', () => {
   });
 
   it('drops chart-only rows when a level is chosen', () => {
-    const chartOnlyIds = new Set(CHORD_SHEETS.map((sheet) => sheet.id));
+    const chartOnlyIds = new Set(CHORD_SHEET_SUMMARIES.map((sheet) => sheet.id));
     const beginner = filtered({ difficulty: 'Beginner' });
     expect(beginner.every((row) => row.playable || !chartOnlyIds.has(row.id))).toBe(true);
   });
@@ -73,7 +73,7 @@ describe('routeForRow', () => {
   });
 
   it('opens a chart as a chord song on the Chords tab', () => {
-    const chart = CHORD_SHEETS[0];
+    const chart = CHORD_SHEET_SUMMARIES[0]!;
     const row = ALL_ROWS.find((candidate) => candidate.id === chart.id);
     expect(routeForRow(row, chart.id, 'chords')).toBe(`/chord-song/${chart.id}`);
   });

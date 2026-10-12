@@ -8,9 +8,21 @@ import {
 } from '@domain';
 import type { LibraryRow, CompactVariantDef, VariantLibraryData } from '@scores';
 import { BenchmarkRecord, parseVariantFolder } from './ollama/benchmarkCore';
+import { CHORD_BUNDLE, loadChordSources, writeChordBundle } from './chordBundle';
+import { writeLazyBundle, type LazyBundle } from './lazyBundle';
 
 
 type SongCategory = 'study' | 'classical' | 'song';
+
+/** Compact scores reach the app as one JSON file each; see tools/lazyBundle.ts. */
+const SONG_BUNDLE: LazyBundle = {
+  dir: 'src/scores/songs',
+  catalogFile: 'src/scores/songCatalog.generated.ts',
+  exportName: 'SONG_CATALOG',
+  summaryImport: "import type { CompactScoreSummary } from './bundledSongs';",
+  summaryType: 'CompactScoreSummary',
+  writtenBy: 'tools/build-library.ts',
+};
 
 interface SongInfo {
   id: string;
@@ -132,7 +144,7 @@ interface CompactScoreData {
 /**
  * Most notes kept per backing track.
  *
- * A ceiling exists because `bundledSongs.json` ships inside the app and is
+ * A ceiling exists because the song files under `src/scores/songs` ship inside the app and are
  * already tens of megabytes. What matters is that the ceiling is reached by
  * *thinning* rather than by cutting: 1800 notes spread over a five-minute song
  * is five events a second, which is ample for something you play over, whereas
@@ -499,40 +511,25 @@ if (edition === 'full' && arrangedIds) {
 writeFileSync('src/scores/benchmarkVariants.json', JSON.stringify(variantData));
 console.log(`Benchmark variants: ${variantData.variants.length}`);
 
-console.log(`Writing ${compactList.length} compact scores to src/scores/bundledSongs.json...`);
-writeFileSync('src/scores/bundledSongs.json', JSON.stringify(compactList));
+const songReport = writeLazyBundle(SONG_BUNDLE, compactList.map((entry) => ({
+  id: entry.id,
+  summary: { id: entry.id, key: entry.key, category: entry.category },
+  data: entry,
+})));
+console.log(`Songs: ${songReport.count} compact scores written to ${SONG_BUNDLE.dir}/ (${(songReport.bytes / 1e6).toFixed(1)} MB minified).`);
 
 // Only the data is generated. `src/scores/bundledSongs.ts`, which inflates it, is ordinary
 // source: it used to be rewritten from a copy of itself held in a template
 // string here, and the two drifted — a rebuild silently dropped a strict-mode
 // fallback and broke the typecheck.
-console.log('Done writing bundledSongs.json.');
 
-// ── Chord sheets by edition ──────────────────────────────────────────────────
-// In free edition, only original etudes & public domain chord sheets are bundled.
-// In full edition, personal imported chord sheets from _CHORDS/ are included.
-const baseChordsPath = 'src/scores/chordSheets.base.json';
-const baseChordSheets = existsSync(baseChordsPath) ? JSON.parse(readFileSync(baseChordsPath, 'utf8')) : [];
-let bundledChordSheets = [...baseChordSheets];
-
-if (edition === 'full') {
-  const customChordsFile = '_CHORDS/chordSheets.json';
-  if (existsSync(customChordsFile)) {
-    try {
-      const customSheets = JSON.parse(readFileSync(customChordsFile, 'utf8'));
-      const idMap = new Map(bundledChordSheets.map((s: { id: string }) => [s.id, s]));
-      for (const s of customSheets) {
-        idMap.set(s.id, s);
-      }
-      bundledChordSheets = [...idMap.values()].sort((a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id));
-    } catch (e) {
-      console.warn('Could not read _CHORDS/chordSheets.json:', e);
-    }
-  }
-}
-
-writeFileSync('src/scores/chordSheets.generated.json', `${JSON.stringify(bundledChordSheets, null, 2)}\n`);
-console.log(`Chord sheets (${edition}): ${bundledChordSheets.length} charts written to src/scores/chordSheets.generated.json.`);
+// ── Chord charts ─────────────────────────────────────────────────────────────
+// Both editions carry every chord chart: charts hold chords and lyrics, not
+// arrangements, so the free edition differs from the full one only in the
+// arranged songs. Each chart is its own file; see tools/chordBundle.ts.
+const chordSheets = loadChordSources();
+const chordReport = writeChordBundle(chordSheets);
+console.log(`Chord charts (${edition}): ${chordReport.count} written to ${CHORD_BUNDLE.dir}/ (${(chordReport.bytes / 1e6).toFixed(1)} MB minified).`);
 
 // ── Catalogue index and edition stamp ────────────────────────────────────────
 // The library screen lists rows from `catalogIndex.ts` so it never inflates
@@ -561,16 +558,19 @@ export interface LibraryEdition {
   detail: string;
   bundledCount: number;
   songCount: number;
+  /** Chord charts bundled with the build; every edition carries all of them. */
+  chartCount: number;
 }
 
 export const LIBRARY_EDITION: LibraryEdition = ${JSON.stringify({
     id: edition,
     label: edition === 'full' ? 'Full library' : 'Free library',
     detail: edition === 'full'
-      ? `${compactList.length} bundled pieces, including ${songCount} arranged songs for personal practice`
-      : `${compactList.length} bundled public-domain pieces and original etudes — free to share`,
+      ? `${compactList.length} bundled pieces, including ${songCount} arranged songs for personal practice, and ${chordReport.count} harmony maps`
+      : `${compactList.length} bundled public-domain pieces and original etudes, and ${chordReport.count} harmony maps`,
     bundledCount: compactList.length,
     songCount,
+    chartCount: chordReport.count,
   }, null, 2)};
 `);
 console.log(`Edition: ${edition} — ${compactList.length} pieces (${songCount} songs). Wrote catalogIndex.ts and libraryEdition.ts.`);

@@ -319,7 +319,6 @@ async function main() {
   const queue = [...targets];
   let currentIndex = 0;
 
-  const results: { file: string; id: string; spotifyUrl: string | null }[] = [];
 
   type Outcome = 'updated' | 'cached' | 'failed';
 
@@ -353,7 +352,6 @@ async function main() {
     const known = knownSpotifyUrl(songId, chart, cache, options.force);
     if (known) {
       if (known.source !== 'chart') writeChart(filePath, insertSpotifyUrl(chart, known.url));
-      results.push({ file: filename, id: songId, spotifyUrl: known.url });
       if (known.source === 'pinned') {
         remember(songId, chart, known.url);
         console.log(`${tag} ✓ ${title} by ${artist} -> ${known.url} (user default)`);
@@ -367,7 +365,6 @@ async function main() {
     const { href, query } = await findTrackHref(cdp, artist, title);
     if (!href) {
       console.warn(`${tag} ✗ No track found on Spotify for "${query}"`);
-      results.push({ file: filename, id: songId, spotifyUrl: null });
       return 'failed';
     }
     const trackId = trackIdOf(href);
@@ -375,7 +372,6 @@ async function main() {
     writeChart(filePath, insertSpotifyUrl(chart, spotifyUrl));
     remember(songId, chart, spotifyUrl);
     console.log(`${tag} ✓ ${title} by ${artist} -> ${spotifyUrl}`);
-    results.push({ file: filename, id: songId, spotifyUrl });
     return 'updated';
   };
 
@@ -397,7 +393,7 @@ async function main() {
   console.log(`- Cached / already present: ${cachedCount}`);
   console.log(`- Failed / Not found: ${failedCount}`);
 
-  // Sync to _CHORDS/chordSheets.json and src/scores/chordSheets.generated.json
+  // Sync to _CHORDS/chordSheets.json; `npm run build:library` bundles it into the app
   const bundleFile = resolve('_CHORDS/chordSheets.json');
   if (existsSync(bundleFile)) {
     console.log(`Syncing into ${bundleFile}...`);
@@ -413,28 +409,6 @@ async function main() {
       console.log(`Synced ${allCharts.length} charts to ${bundleFile}`);
     } catch (e) {
       console.error(`Failed to sync to ${bundleFile}:`, e);
-    }
-  }
-
-  const devBundle = resolve('src/scores/chordSheets.generated.json');
-  if (existsSync(devBundle)) {
-    console.log(`Syncing into ${devBundle}...`);
-    try {
-      const existing: Record<string, any>[] = JSON.parse(readFileSync(devBundle, 'utf8'));
-      const map = new Map(existing.map((s) => [s.id, s]));
-      for (const res of results) {
-        if (res.spotifyUrl && map.has(res.id)) {
-          const item = map.get(res.id)!;
-          map.set(res.id, insertSpotifyUrl(item, res.spotifyUrl));
-        }
-      }
-      const sorted = [...map.values()].sort((a, b) => a.id.localeCompare(b.id));
-      const tmp = `${devBundle}.tmp`;
-      writeFileSync(tmp, JSON.stringify(sorted, null, 2) + '\n');
-      renameSync(tmp, devBundle);
-      console.log(`Synced ${sorted.length} charts to ${devBundle}`);
-    } catch (e) {
-      console.error(`Failed to sync to ${devBundle}:`, e);
     }
   }
 }

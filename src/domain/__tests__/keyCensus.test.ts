@@ -5,7 +5,9 @@ import {
   keyDemand, openStringTonic, parseKeyName,
 } from '../keyCensus';
 import { keyName } from '../key';
-import { COMPACT_SCORES, LIBRARY_KEY_CENSUS } from '@scores';
+import { allCompactScores, LIBRARY_KEY_CENSUS } from '@scores';
+
+const COMPACT_SCORES = allCompactScores();
 
 describe('parseKeyName', () => {
   it('reads the spellings the library and the importers produce', () => {

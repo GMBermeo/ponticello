@@ -53,7 +53,7 @@ export default function ChordLibraryScreen() {
   }, []);
 
   return <Screen scroll={false} padded={false}>
-    <TabHeader title="Chords" subtitle="Shapes for the cello’s own tuning. Square = root." />
+    <TabHeader title="Harmony map" subtitle="Where each chord’s notes fall on the cello, to play melodies inside it. Square = root." />
     <FlatList ref={list} key={columns} numColumns={columns} data={rows} keyExtractor={(row) => row.id}
       keyboardShouldPersistTaps="handled" initialNumToRender={8} windowSize={5}
       contentContainerStyle={{ paddingHorizontal: theme.s(4), paddingTop: theme.s(16), paddingBottom: theme.s(24) }}
@@ -69,7 +69,7 @@ export default function ChordLibraryScreen() {
         <Toggle label="Show shapes only" hint="Hide chords available only as arpeggios in the neck-position model." value={gripsOnly} onChange={setGripsOnly} />
         <Toggle label="Tape colors" hint="Match finger markers to your saved tape positions." value={tapeColors} onChange={setTapeColors} />
         <Toggle label="All positions" hint="Mark every place the chord's notes fall, up to the octave — for improvising over it." value={allPositions} onChange={setAllPositions} />
-        <TextInput value={query} onChangeText={setQuery} accessibilityLabel="Search chord library" placeholder="Find a chord or type" placeholderTextColor={theme.chrome.dim}
+        <TextInput value={query} onChangeText={setQuery} accessibilityLabel="Search the harmony map" placeholder="Find a chord or type" placeholderTextColor={theme.chrome.dim}
           autoCapitalize="none" style={{ backgroundColor: theme.chrome.fill, borderRadius: RADIUS.pill, paddingHorizontal: theme.s(18), minHeight: theme.tap, ...FACE.regular, fontSize: theme.font(16), color: theme.chrome.ink }} />
         {study ? <View style={{ padding: theme.s(16), backgroundColor: theme.chrome.surface, ...theme.corners(RADIUS.lg), gap: theme.s(10) }}>
           <Row gap={12}><Title size={22} style={{ flex: 1 }}>{study.symbol}</Title>{active?.romanDegree ? <Title size={20} color={theme.chrome.dim}>{active.romanDegree}</Title> : null}<Button label="Close shape" tone="ghost" onPress={() => setSelectedId(null)} /></Row>

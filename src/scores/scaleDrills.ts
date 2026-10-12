@@ -743,7 +743,7 @@ const BUILDERS = [drillOne, drillTwo, drillThree] as const;
  *
  * Not a hand-maintained list, and it used to be one. Written down, it went
  * stale twice inside a single afternoon: the arranger was rebuilt,
- * `bundledSongs.json` was regenerated, and keys crossed the band boundaries
+ * the bundled songs were regenerated, and keys crossed the band boundaries
  * underneath a table that still said what yesterday's library needed. A list
  * of drill counts is a *derived* fact about a moving library, so it is derived:
  *

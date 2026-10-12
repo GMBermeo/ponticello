@@ -29,7 +29,8 @@
  * arrangements are wrong; where doctrine is silent, the output says so.
  */
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   ARRANGEMENT_LEVELS, ARRANGEMENT_PROFILES, arrangeScoreForLevel, BackingPart, isMinorKey,
   tonicPitchClass, midiToPitchName, OPEN_STRING_MIDI, difficultyOf, firstPositionFingering,
@@ -37,8 +38,10 @@ import {
   validateScore, type ArrangementLevel, bestTriad, overlapMs, weighPitchClasses, toPitchClass,
 } from '@domain';
 import {
-  COMPACT_SCORES, CORE_SCORES, getBassLine, getBundledBacking, getGuideLine, getScore,
+  allCompactScores, CORE_SCORES, getBassLine, getBundledBacking, getGuideLine, getScore,
 } from '@scores';
+
+const COMPACT_SCORES = allCompactScores();
 
 /** A level, or '-' for a check that belongs to the whole song. */
 type AuditLevel = ArrangementLevel | '-';
@@ -824,12 +827,19 @@ for (const score of CORE_SCORES) {
 // ─── Reporting ───────────────────────────────────────────────────────────────
 
 const md5 = (path: string) => createHash('md5').update(readFileSync(path)).digest('hex').slice(0, 12);
+const SONGS_DIR = 'src/scores/songs';
+/** One digest over every bundled song file, in name order. */
+const songsDigest = () => {
+  const hash = createHash('sha256');
+  readdirSync(SONGS_DIR).sort().forEach((name) => hash.update(readFileSync(join(SONGS_DIR, name))));
+  return hash.digest('hex').slice(0, 12);
+};
 /** A number nobody can pin to a population is not a measurement. */
 const provenance = {
   measuredAt: new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC',
   songs: COMPACT_SCORES.length,
   parts: COMPACT_SCORES.length * ARRANGEMENT_LEVELS.length,
-  library: md5('src/scores/bundledSongs.json'),
+  library: songsDigest(),
   arranger: md5('src/domain/arranger/pipeline.ts'),
   gate: md5('tools/audit-arrangements.ts'),
 };
@@ -935,7 +945,7 @@ const text = `# Cello arrangement audit
 |---|---|
 | Measured | ${provenance.measuredAt} |
 | Songs × levels | ${provenance.songs} × ${ARRANGEMENT_LEVELS.length} = ${provenance.parts} parts, plus ${CORE_SCORES.length} authored studies |
-| \`src/scores/bundledSongs.json\` | md5 \`${provenance.library}\` |
+| \`src/scores/songs/*.json\` | sha256 \`${provenance.library}\` |
 | \`src/domain/arranger/pipeline.ts\` | md5 \`${provenance.arranger}\` |
 | \`tools/audit-arrangements.ts\` | md5 \`${provenance.gate}\` |
 

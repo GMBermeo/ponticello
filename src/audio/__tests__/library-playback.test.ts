@@ -5,10 +5,12 @@ import {
   soloPartFromScore, clipToLoop, loopBudget, practiceLoop,
 } from '@domain';
 import {
-  getBassLine, getGuideLine, COMPACT_SCORES, inflateBacking, inflateScore, LIBRARY_EDITION,
+  getBassLine, getGuideLine, allCompactScores, inflateBacking, inflateScore, LIBRARY_EDITION,
 } from '@scores';
 import { buildProgram, estimatePeak } from '../backing/program';
 import { renderProgramInto } from '../synth';
+
+const COMPACT_SCORES = allCompactScores();
 
 /** Size thresholds describe the full library; the free edition ships a dozen pieces. */
 const FULL_LIBRARY = LIBRARY_EDITION.id === 'full';
@@ -106,7 +108,7 @@ describe('every bundled song plays its backing', () => {
 
   it('ships the songs this suite claims to cover', () => {
     // Every bundled song, whatever the count happens to be. `build:library`
-    // rebuilds `bundledSongs.json` from `_MIDIS/` and the total moves whenever
+    // rebuilds `src/scores/songs` from `_MIDIS/` and the total moves whenever
     // the user adds or deletes a file, so pinning a number here fails the suite
     // for a reason that has nothing to do with playback.
     expect(outcomes).toHaveLength(COMPACT_SCORES.length);

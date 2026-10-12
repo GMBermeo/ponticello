@@ -60,6 +60,51 @@ export interface VoiceSpec {
   unisonCents?: number;
   /** How much the per-note dynamic and attack wander, 0–1. */
   humanize?: number;
+
+  // ── What makes it sound like *this* instrument rather than a tone ─────────
+
+  /**
+   * The instrument's body: fixed resonances, in absolute Hz.
+   *
+   * A harmonic series is defined by harmonic number, but a body responds to
+   * frequency. The same note on a real cello has its second and third partials
+   * lifted by the wood when it is low, and is nearly a pure tone when it is high
+   * — the spectrum depends on *where the note sits*, not only on what it is.
+   * Shaping the series by these peaks per octave band is how one voice can
+   * sound woody in the bottom and singing at the top.
+   */
+  body?: readonly BodyResonance[];
+  /**
+   * The spectrum changes over the life of the note.
+   *
+   * A struck or plucked string is brightest in the first moments and settles
+   * toward a near-sine; a bowed one has a moment of bite as the bow catches and
+   * then a steadier tone. `start` and `end` tilt the stored series at the
+   * beginning and the end (each partial n scaled by `tilt^n`, 1 leaving it
+   * alone; below 1 is duller, above brighter) and `decayMs` is how long the
+   * change takes to fall by a factor of e.
+   */
+  morph?: { decayMs: number; start?: number; end: number };
+  /**
+   * The pitch is under for the first instant, then settles up — the string
+   * being drawn into a steady stick–slip, or the lip finding the note. Cents
+   * below the written pitch at the attack, and how long it takes to settle.
+   */
+  scoop?: { cents: number; ms: number };
+  /**
+   * Bow or breath texture that stays under the whole note, as a fraction of
+   * `bowNoise`. The scrape at the start is an articulation; this is the rosin.
+   */
+  grain?: number;
+}
+
+/** One resonance of an instrument's body: where it is, how sharp, how strong. */
+export interface BodyResonance {
+  hz: number;
+  /** Sharpness: centre frequency over bandwidth. */
+  q: number;
+  /** Height of the peak above the flat response, as a multiple of it. */
+  gain: number;
 }
 
 /**
@@ -77,12 +122,26 @@ export const VOICES: Record<InstrumentName, VoiceSpec> = {
     // Slow and shallow. A guide part that wobbles like a soloist is worse than
     // one that does not wobble at all — this is meant to be played over.
     vibrato: { rateHz: 5.1, depthCents: 13, onsetMs: 260 },
+    // The wood of the body: the air and top-plate modes lift the second to
+    // fourth partials of a low note; the bridge hill gives the singing top.
+    body: [
+      { hz: 110, q: 6, gain: 0.9 }, { hz: 190, q: 5, gain: 1.0 }, { hz: 280, q: 5, gain: 0.8 },
+      { hz: 500, q: 3, gain: 0.5 }, { hz: 1250, q: 2.5, gain: 0.7 },
+    ],
+    // The bow catching: a brief bite, gone before the note is in tune.
+    morph: { decayMs: 90, start: 1.1, end: 1 },
+    scoop: { cents: 9, ms: 38 },
+    grain: 0.1,
   },
   strings: {
     harmonics: [1, 0.5, 0.32, 0.2, 0.13, 0.09, 0.06, 0.04],
     attackMs: 95, decayMs: 200, sustain: 0.85, releaseMs: 320, gain: 0.7,
     brightness: 0.4, bowNoise: 0.1, detuneCents: 6, unisonCents: 11, humanize: 0.2,
     vibrato: { rateHz: 4.6, depthCents: 9, onsetMs: 380 },
+    body: [{ hz: 300, q: 2.5, gain: 0.9 }, { hz: 1800, q: 1.8, gain: 0.6 }],
+    morph: { decayMs: 140, start: 1.14, end: 1 },
+    scoop: { cents: 12, ms: 55 },
+    grain: 0.12,
   },
   // Slow in, slow out, never articulated — a reference tone, not a part.
   // No vibrato at all: a drone you tune against must not move.
@@ -97,11 +156,16 @@ export const VOICES: Record<InstrumentName, VoiceSpec> = {
     harmonics: [1, 0.58, 0.34, 0.2, 0.12, 0.075, 0.045, 0.03],
     attackMs: 4, decayMs: 850, sustain: 0.12, releaseMs: 260, gain: 0.8,
     brightness: 0.75, detuneCents: 2.5, unisonCents: 3.5, humanize: 0.14,
+    // Soundboard: broad, lifting the low-middle so a bass note has weight.
+    body: [{ hz: 260, q: 1.6, gain: 0.8 }, { hz: 900, q: 1.4, gain: 0.35 }],
+    // A hammer-struck string starts bright and rings down to a soft sine.
+    morph: { decayMs: 380, end: 0.5 },
   },
   mallet: {
     harmonics: [1, 0.7, 0.22, 0.16, 0.08, 0.045, 0.025],
     attackMs: 2, decayMs: 620, sustain: 0.025, releaseMs: 180, gain: 0.68,
     brightness: 0.5, detuneCents: 2, humanize: 0.12,
+    morph: { decayMs: 120, end: 0.3 },
   },
   // Electro-mechanical: the one voice that really is the same every time.
   organ: {
@@ -113,29 +177,42 @@ export const VOICES: Record<InstrumentName, VoiceSpec> = {
     harmonics: [1, 0.54, 0.3, 0.17, 0.1, 0.06, 0.035],
     attackMs: 3, decayMs: 430, sustain: 0.11, releaseMs: 180, gain: 0.72,
     brightness: 0.62, bowNoise: 0.1, detuneCents: 4, humanize: 0.16,
+    // Top plate and air resonance of a wooden box.
+    body: [{ hz: 100, q: 4, gain: 1.0 }, { hz: 200, q: 4, gain: 0.8 }, { hz: 420, q: 3, gain: 0.5 }],
+    morph: { decayMs: 210, end: 0.42 },
   },
   // Legacy generated accompaniment still uses this neutral plucked voice.
   pluck: {
     harmonics: [1, 0.48, 0.28, 0.15, 0.08, 0.04],
     attackMs: 2, decayMs: 340, sustain: 0.05, releaseMs: 140, gain: 0.75,
     brightness: 0.55, detuneCents: 3, humanize: 0.14,
+    morph: { decayMs: 180, end: 0.45 },
   },
   bass: {
     harmonics: [1, 0.44, 0.17, 0.07, 0.03],
     attackMs: 14, decayMs: 420, sustain: 0.48, releaseMs: 200, gain: 0.9,
     brightness: 0.45, detuneCents: 2.5, humanize: 0.12,
+    body: [{ hz: 85, q: 3, gain: 0.8 }, { hz: 260, q: 2, gain: 0.5 }],
+    morph: { decayMs: 260, end: 0.55 },
   },
   brass: {
     harmonics: [1, 0.76, 0.5, 0.33, 0.22, 0.14, 0.09, 0.055],
     attackMs: 38, decayMs: 170, sustain: 0.72, releaseMs: 210, gain: 0.54,
     brightness: 0.85, bowNoise: 0.12, detuneCents: 5, humanize: 0.2,
     vibrato: { rateHz: 5.4, depthCents: 8, onsetMs: 420 },
+    // The bell: a strong formant in the middle of the range.
+    body: [{ hz: 700, q: 1.8, gain: 1.3 }, { hz: 1500, q: 2, gain: 0.6 }],
+    scoop: { cents: 14, ms: 45 },
+    grain: 0.08,
   },
   reed: {
     harmonics: [1, 0.82, 0.38, 0.23, 0.13, 0.08, 0.05],
     attackMs: 24, decayMs: 120, sustain: 0.79, releaseMs: 170, gain: 0.55,
     brightness: 0.6, bowNoise: 0.18, detuneCents: 4, humanize: 0.18,
     vibrato: { rateHz: 5.6, depthCents: 10, onsetMs: 300 },
+    body: [{ hz: 1200, q: 2.2, gain: 1.4 }, { hz: 3000, q: 2.5, gain: 0.5 }],
+    scoop: { cents: 7, ms: 30 },
+    grain: 0.14,
   },
   synth: {
     harmonics: [1, 0.36, 0.24, 0.13, 0.09, 0.05],
@@ -242,6 +319,109 @@ export function spectrumForTier(spec: VoiceSpec, tier: number): number[] {
   return spectrumAt(spec, tierVelocity(tier));
 }
 
+// ─── Register ────────────────────────────────────────────────────────────────
+
+/**
+ * Notes are grouped into bands of six semitones, from MIDI 12, and every note in
+ * a band shares one spectrum.
+ *
+ * Half an octave is the coarsest grouping that still lets a body resonance
+ * sit under the right partial; an octave would put a resonance a fifth away
+ * from where the ear expects it for the upper half of the band.
+ */
+export const BAND_SEMITONES = 6;
+export const BAND_COUNT = 20;
+const LOWEST_BAND_MIDI = 12;
+
+/** Which band a pitch belongs to. */
+export function bandFor(midiNumber: number): number {
+  return Math.max(0, Math.min(BAND_COUNT - 1, Math.floor((midiNumber - LOWEST_BAND_MIDI) / BAND_SEMITONES)));
+}
+
+/** MIDI number of the lowest note in a band. */
+export function bandLowestMidi(band: number): number {
+  return LOWEST_BAND_MIDI + band * BAND_SEMITONES;
+}
+
+/** The pitch a band's spectrum is built for: the middle of its six semitones. */
+export function bandReferenceHz(band: number): number {
+  const midi = bandLowestMidi(band) + (BAND_SEMITONES - 1) / 2;
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+const BODY_FLOOR = 0.4;
+const BODY_CEILING = 2.6;
+
+/** How strongly a body passes `hz`, against a flat response of 1. */
+export function bodyGain(body: readonly BodyResonance[] | undefined, hz: number): number {
+  if (!body || body.length === 0) return 1;
+  let gain = 1;
+  for (const resonance of body) {
+    const offset = (hz - resonance.hz) / (resonance.hz / resonance.q);
+    gain += resonance.gain / (1 + offset * offset);
+  }
+  return Math.max(BODY_FLOOR, Math.min(BODY_CEILING, gain));
+}
+
+/** The stored series for a dynamic, with the body's response laid over it for a register. */
+function bodyShaped(spec: VoiceSpec, tier: number, band: number): number[] {
+  const series = spectrumForTier(spec, tier);
+  if (!spec.body || spec.body.length === 0) return series;
+  const fundamental = bandReferenceHz(band);
+  return series.map((amplitude, h) => amplitude * bodyGain(spec.body, fundamental * (h + 1)));
+}
+
+const tilted = (series: readonly number[], tilt: number): number[] =>
+  tilt === 1 ? [...series] : series.map((amplitude, h) => amplitude * Math.pow(tilt, h));
+
+/**
+ * The spectrum a note starts with, for one dynamic and one register.
+ *
+ * Both renderers build their tables from this and `settledSpectrum` and nothing
+ * else, which is what keeps the native wavetable and the browser's
+ * `PeriodicWave` the same sound.
+ */
+export function shapedSpectrum(spec: VoiceSpec, tier: number, band: number): number[] {
+  return tilted(bodyShaped(spec, tier, band), spec.morph?.start ?? 1);
+}
+
+/** What the spectrum settles to once the change over the note's life is done. */
+export function settledSpectrum(spec: VoiceSpec, tier: number, band: number): number[] {
+  return tilted(bodyShaped(spec, tier, band), spec.morph?.end ?? 1);
+}
+
+/**
+ * Seconds for a note's brightness to fall by a factor of e.
+ *
+ * Shorter for higher notes, as on a real string: a high piano key is bright for
+ * an instant and a low one rings its overtones for seconds.
+ */
+export function morphTimeSec(spec: VoiceSpec, midiNumber: number): number {
+  const morph = spec.morph;
+  if (!morph) return 0;
+  const hz = 440 * Math.pow(2, (midiNumber - 69) / 12);
+  const register = Math.max(0.5, Math.min(1.5, Math.pow(261.63 / hz, 0.35)));
+  return Math.max(0.005, (morph.decayMs / 1000) * register);
+}
+
+/** How much of the bright spectrum is left `elapsedSec` into a note. */
+export function morphWeight(timeSec: number, elapsedSec: number): number {
+  return timeSec <= 0 ? 0 : Math.exp(-Math.max(0, elapsedSec) / timeSec);
+}
+
+/**
+ * Pitch below the written note, in cents, `elapsedSec` into it.
+ *
+ * Exponential, so it is smooth at every scale and never overshoots; `ms` is the
+ * time constant, and the note is within a cent of true well before the vibrato
+ * has begun.
+ */
+export function scoopCents(spec: VoiceSpec, variation: NoteVariation, elapsedSec: number): number {
+  const scoop = spec.scoop;
+  if (!scoop || elapsedSec < 0) return 0;
+  return scoop.cents * variation.scoopScale * Math.exp(-elapsedSec / Math.max(1e-4, scoop.ms / 1000));
+}
+
 /**
  * Everything about one note that is *not* written in the score.
  *
@@ -264,11 +444,13 @@ export interface NoteVariation {
   vibratoPhase: number;
   vibratoRateScale: number;
   vibratoDepthScale: number;
+  /** Multiplies the pitch scoop, from the same wander as everything else. */
+  scoopScale: number;
 }
 
 const NEUTRAL: NoteVariation = {
   detuneCents: 0, velocityScale: 1, attackScale: 1,
-  vibratoPhase: 0, vibratoRateScale: 1, vibratoDepthScale: 1,
+  vibratoPhase: 0, vibratoRateScale: 1, vibratoDepthScale: 1, scoopScale: 1,
 };
 
 /** Stable seed for a note. Same pitch at the same instant is the same note. */
@@ -291,7 +473,7 @@ function randomFrom(seed: number): () => number {
 export function noteVariation(spec: VoiceSpec, seed: number): NoteVariation {
   const detune = spec.detuneCents ?? 0;
   const humanize = spec.humanize ?? 0;
-  const hasVibrato = spec.vibrato !== undefined;
+  const hasVibrato = spec.vibrato !== undefined || spec.scoop !== undefined;
   if (detune === 0 && humanize === 0 && !hasVibrato) return NEUTRAL;
 
   const next = randomFrom(seed);
@@ -304,6 +486,7 @@ export function noteVariation(spec: VoiceSpec, seed: number): NoteVariation {
     vibratoPhase: next() * Math.PI * 2,
     vibratoRateScale: 1 + bipolar() * 0.12,
     vibratoDepthScale: 1 + bipolar() * 0.3,
+    scoopScale: 1 + bipolar() * 0.4,
   };
 }
 
@@ -336,6 +519,26 @@ export function centsToRatio(cents: number): number {
   return cents === 0 ? 1 : Math.pow(2, cents / 1200);
 }
 
+/** Seconds the grain takes to fade in. */
+export const GRAIN_FADE_SEC = 0.06;
+
+/**
+ * Level of the texture that stays under a sustained note, `elapsedSec` in.
+ *
+ * Fades in over a few tens of milliseconds so it never clicks on, then holds:
+ * the rosin under a bowed line, the air in a reed. Zero for a voice with none.
+ */
+export function grainAt(spec: VoiceSpec, elapsedSec: number): number {
+  const amount = (spec.bowNoise ?? 0) * (spec.grain ?? 0);
+  if (amount <= 0 || elapsedSec < 0) return 0;
+  return amount * Math.min(1, elapsedSec / GRAIN_FADE_SEC);
+}
+
+/** How long the attack scrape lasts. */
+export function bowNoiseSpanSec(spec: VoiceSpec): number {
+  return Math.max(0.02, (spec.attackMs / 1000) * 1.8);
+}
+
 /**
  * Level of the attack noise `elapsedSec` into a note.
  *
@@ -345,7 +548,7 @@ export function centsToRatio(cents: number): number {
 export function bowNoiseAt(spec: VoiceSpec, elapsedSec: number): number {
   const amount = spec.bowNoise ?? 0;
   if (amount <= 0 || elapsedSec < 0) return 0;
-  const span = Math.max(0.02, (spec.attackMs / 1000) * 1.8);
+  const span = bowNoiseSpanSec(spec);
   if (elapsedSec >= span) return 0;
   const t = elapsedSec / span;
   // Rises fast, falls away — a scrape, not a swell.

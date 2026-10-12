@@ -16,14 +16,14 @@
 
 import { midiToFrequency, BackingNote, BackingPart, InstrumentName } from '@domain';
 import { BackingProgram } from './backing';
+import { Room, ROOM_SETTLE_SEC } from './room';
 import {
-  bowNoiseAt, brightnessTier, centsToRatio, envelopeAt, noteSeed, NoteVariation,
-  noteVariation, spectrumForTier, vibratoCents, VoiceSpec, VOICES,
+  bandFor, bandLowestMidi, bowNoiseAt, bowNoiseSpanSec, GRAIN_FADE_SEC, brightnessTier, centsToRatio, envelopeAt, grainAt, morphTimeSec,
+  noteSeed, NoteVariation, noteVariation, scoopCents, settledSpectrum, shapedSpectrum, spectrumForTier, vibratoCents,
+  VoiceSpec, VOICES, BAND_COUNT,
 } from './voices';
 
 const TABLE_SIZE = 2048;
-/** One wavetable per octave, from MIDI 12 upwards. */
-const BAND_COUNT = 10;
 
 /**
  * How often the vibrato curve is re-evaluated, in samples.
@@ -38,46 +38,77 @@ const VIBRATO_BLOCK = 32;
 /** d(ratio)/d(cents) near unity. Vibrato is small, so the tangent is exact enough. */
 const CENTS_SLOPE = Math.LN2 / 1200;
 
-/** Which band-limited table a pitch should read from. */
-function bandFor(midiNumber: number): number {
-  return Math.max(0, Math.min(BAND_COUNT - 1, Math.floor((midiNumber - 12) / 12)));
-}
+/**
+ * Below this share of bright spectrum left, a morphing voice reads only its
+ * settled table. The weight is rescaled to reach zero exactly here, so the
+ * bright table is dropped without a step.
+ */
+const MORPH_FLOOR = 0.03;
 
 /**
- * Builds one cycle per octave band, each dropping the harmonics that would
+ * Builds one cycle per half-octave band, each dropping the harmonics that would
  * alias for the *lowest* note in that band. Without this a high piano note
  * with eight harmonics folds partials back down the spectrum and rings
  * audibly out of tune.
+ *
+ * `settled` builds the spectrum a morphing voice decays to instead of the one
+ * it starts with. Both are shaped by the instrument's body for their band.
  */
-function buildTables(spec: VoiceSpec, sampleRate: number, tier: number): Float32Array[] {
+function buildTables(spec: VoiceSpec, sampleRate: number, tier: number, settled: boolean): Float32Array[] {
   const tables: Float32Array[] = [];
   const nyquist = sampleRate / 2;
-  const harmonics = spectrumForTier(spec, tier);
+  const plain = spectrumForTier(spec, tier);
 
   for (let band = 0; band < BAND_COUNT; band++) {
-    const table = new Float32Array(TABLE_SIZE);
-    const lowestHz = midiToFrequency(12 + band * 12);
-    const allowed = Math.max(1, Math.floor(nyquist / lowestHz));
-
-    let peak = 0;
-    for (let i = 0; i < TABLE_SIZE; i++) {
-      let sample = 0;
-      const phase = (2 * Math.PI * i) / TABLE_SIZE;
-      for (let h = 0; h < harmonics.length && h + 1 <= allowed; h++) {
-        sample += harmonics[h]! * Math.sin(phase * (h + 1));
-      }
-      table[i] = sample;
-      peak = Math.max(peak, Math.abs(sample));
-    }
-    if (peak > 0) for (let i = 0; i < TABLE_SIZE; i++) table[i]! /= peak;
+    const harmonics = settled ? settledSpectrum(spec, tier, band) : shapedSpectrum(spec, tier, band);
+    const allowed = Math.max(1, Math.floor(nyquist / midiToFrequency(bandLowestMidi(band))));
+    const table = singleCycle(harmonics, allowed);
+    // Shaping the spectrum must change the note's colour and not its level, or
+    // the low notes of a woody voice would come out quieter than its high ones.
+    matchLoudness(table, singleCycle(plain, allowed));
     tables.push(table);
   }
 
   return tables;
 }
 
+/** One cycle of a harmonic series, using at most `allowed` partials, scaled so its peak is 1. */
+function singleCycle(harmonics: readonly number[], allowed: number): Float32Array {
+  const table = new Float32Array(TABLE_SIZE);
+  let peak = 0;
+  for (let i = 0; i < TABLE_SIZE; i++) {
+    let sample = 0;
+    const phase = (2 * Math.PI * i) / TABLE_SIZE;
+    for (let h = 0; h < harmonics.length && h + 1 <= allowed; h++) {
+      sample += harmonics[h]! * Math.sin(phase * (h + 1));
+    }
+    table[i] = sample;
+    peak = Math.max(peak, Math.abs(sample));
+  }
+  if (peak > 0) for (let i = 0; i < TABLE_SIZE; i++) table[i]! /= peak;
+  return table;
+}
+
+/** The most a table may be turned up to match a reference, so its peak stays inside the limiter's reach. */
+const MAX_LOUDNESS_GAIN = 1.5;
+
+/** Scales `table` to the RMS level of `reference`, within {@link MAX_LOUDNESS_GAIN}. */
+function matchLoudness(table: Float32Array, reference: Float32Array): void {
+  const level = rms(table);
+  if (level <= 0) return;
+  const gain = Math.min(MAX_LOUDNESS_GAIN, rms(reference) / level);
+  for (let i = 0; i < table.length; i++) table[i]! *= gain;
+}
+
+function rms(samples: Float32Array): number {
+  let sum = 0;
+  for (const sample of samples) sum += sample * sample;
+  return Math.sqrt(sum / samples.length);
+}
+
 /**
- * Cached per instrument, sample rate *and* brightness tier.
+ * Cached per instrument, sample rate, brightness tier *and* whether it is the
+ * settled spectrum.
  *
  * Four tiers per voice is four times the tables and no extra work per sample:
  * the note reads whichever one its dynamic asks for. Building them is the only
@@ -87,15 +118,32 @@ function buildTables(spec: VoiceSpec, sampleRate: number, tier: number): Float32
 const tableCache = new Map<string, Float32Array[]>();
 
 function tablesFor(
-  instrument: InstrumentName, sampleRate: number, tier: number,
+  instrument: InstrumentName, sampleRate: number, tier: number, settled = false,
 ): Float32Array[] {
-  const key = `${instrument}@${sampleRate}@${tier}`;
+  const key = `${instrument}@${sampleRate}@${tier}@${settled ? 's' : 'b'}`;
   let tables = tableCache.get(key);
   if (!tables) {
-    tables = buildTables(VOICES[instrument], sampleRate, tier);
+    tables = buildTables(VOICES[instrument], sampleRate, tier, settled);
     tableCache.set(key, tables);
   }
   return tables;
+}
+
+/** Time constant of a note's fading brightness, in samples; irrelevant to a voice that does not morph. */
+function morphSamplesFor(spec: VoiceSpec, midiNumber: number, sampleRate: number): number {
+  return Math.max(1, morphTimeSec(spec, midiNumber) * sampleRate);
+}
+
+/** The bright table for a note and, when the voice morphs, the one it settles to. */
+function tablesForNote(
+  instrument: InstrumentName, sampleRate: number, velocity: number, midiNumber: number,
+): { table: Float32Array; settled: Float32Array | null } {
+  const tier = brightnessTier(velocity);
+  const band = bandFor(midiNumber);
+  return {
+    table: tablesFor(instrument, sampleRate, tier)[band]!,
+    settled: VOICES[instrument].morph ? tablesFor(instrument, sampleRate, tier, true)[band]! : null,
+  };
 }
 
 export interface RenderOptions {
@@ -118,23 +166,6 @@ function makeNoise(seed: number): () => number {
   };
 }
 
-/**
- * Adds one sounding voice into `out`.
- *
- * Shared by the whole-buffer renderer and the slice renderer, which is what
- * keeps them sounding identical. Everything here is a pure function of the
- * note-relative sample index `i` — phase included — so a note rendered in two
- * slices produces exactly the same samples as one rendered in a single pass.
- * That is not a nicety: the native player builds an eleven-minute song in
- * two-second pieces, and a note straddling a boundary that disagreed with
- * itself would click.
- *
- * Vibrato is applied as a *phase* offset rather than by stepping the
- * increment. Stepping would make the phase an accumulation, and an
- * accumulation cannot be resumed from the middle of a note. Modulating phase
- * by `sin` gives a frequency deviation proportional to `cos` — the same wobble,
- * a quarter-cycle over, and closed-form in `i`.
- */
 /** Everything one voice needs to render: the note, its sound, and which samples of it to write. */
 interface VoiceJob {
   /** Output index at which note-relative sample 0 sits. May be negative. */
@@ -143,6 +174,10 @@ interface VoiceJob {
   lastI: number;
   spec: VoiceSpec;
   table: Float32Array;
+  /** What a morphing voice's spectrum settles to; null for a voice whose spectrum stays put. */
+  settled: Float32Array | null;
+  /** Time constant of the brightness fading, in samples. */
+  morphSamples: number;
   baseIncrement: number;
   amplitude: number;
   envelope: Envelope;
@@ -181,26 +216,104 @@ function unisonIncrements(increment: number, halfSpread: number): { incrementA: 
   return { incrementA: increment * centsToRatio(halfSpread), incrementB: increment * centsToRatio(-halfSpread), unison: true };
 }
 
+/** A well-mixed 32-bit hash of an integer. */
+function hash32(value: number): number {
+  let x = value | 0;
+  x = Math.imul(x ^ (x >>> 16), 0x7feb352d);
+  x = Math.imul(x ^ (x >>> 15), 0x846ca68b);
+  return (x ^ (x >>> 16)) >>> 0;
+}
+
+/** Samples between the random points of the bow noise; it is smooth between them. */
+const NOISE_STEP = 6;
+
 /**
- * Bow noise runs on its own short envelope from the note's own zero, so it
- * has to be wound forward when a slice starts partway in. Null when the
- * voice has none, or the slice starts after it has died away.
+ * Band-limited noise that is a pure function of the sample index.
+ *
+ * A random value every few samples, joined by straight lines: white noise with
+ * its top taken off, which is what a bow on rosin or breath across a reed
+ * sounds like — a hiss is the giveaway of a synthesiser. Because it depends
+ * only on the index, a slice starting mid-note reads exactly what a single pass
+ * would have, with nothing to wind forward.
  */
-function bowNoiseSource(job: VoiceJob): { next: () => number; span: number } | null {
-  const { spec, sampleRate, firstI, seed } = job;
-  if ((spec.bowNoise ?? 0) <= 0) return null;
-  const span = Math.ceil(Math.max(0.02, (spec.attackMs / 1000) * 1.8) * sampleRate);
-  if (firstI >= span) return null;
-  const next = makeNoise(seed ^ 0x5bf03635);
-  for (let i = 0; i < firstI; i++) next();
-  return { next, span };
+class SmoothNoise {
+  private block = -1;
+  private from = 0;
+  private to = 0;
+
+  constructor(private readonly seed: number) {}
+
+  at(i: number): number {
+    const b = (i / NOISE_STEP) | 0;
+    if (b !== this.block) {
+      this.block = b;
+      this.from = this.pointAt(b);
+      this.to = this.pointAt(b + 1);
+    }
+    return this.from + (this.to - this.from) * ((i - b * NOISE_STEP) / NOISE_STEP);
+  }
+
+  private pointAt(block: number): number {
+    return (hash32(this.seed ^ Math.imul(block, 0x9e3779b1)) / 2147483648) - 1;
+  }
 }
 
 /**
- * Vibrato phase offset, interpolated across fixed blocks so the costly
- * `vibratoCents` runs once per block rather than once per sample.
+ * The bow or breath noise of one note: the smooth noise itself and the level
+ * it sounds at, which is re-evaluated once per block and interpolated for the
+ * same reason the pitch is.
  */
-class VibratoCursor {
+class NoiseBed {
+  private readonly noise: SmoothNoise;
+  private block = -1;
+  private from = 0;
+  private to = 0;
+  /** From this sample on the level is the sustained texture and no longer moves. */
+  private readonly steadyFrom: number;
+  private readonly steadyLevel: number;
+
+  constructor(private readonly spec: VoiceSpec, private readonly sampleRate: number, seed: number) {
+    this.noise = new SmoothNoise(seed ^ 0x5bf03635);
+    const settledAt = Math.max(bowNoiseSpanSec(spec), GRAIN_FADE_SEC);
+    this.steadyFrom = Math.ceil(settledAt * sampleRate / VIBRATO_BLOCK) * VIBRATO_BLOCK;
+    this.steadyLevel = grainAt(spec, settledAt);
+  }
+
+  at(i: number): number {
+    if (i >= this.steadyFrom) return this.steadyLevel > 0 ? this.noise.at(i) * this.steadyLevel : 0;
+    const b = (i / VIBRATO_BLOCK) | 0;
+    if (b !== this.block) {
+      this.block = b;
+      this.from = this.levelAtBlock(b);
+      this.to = this.levelAtBlock(b + 1);
+    }
+    const level = this.from + (this.to - this.from) * ((i - b * VIBRATO_BLOCK) / VIBRATO_BLOCK);
+    return level > 0 ? this.noise.at(i) * level : 0;
+  }
+
+  /** Attack scrape plus the texture that stays under the note. */
+  private levelAtBlock(block: number): number {
+    const seconds = (block * VIBRATO_BLOCK) / this.sampleRate;
+    return bowNoiseAt(this.spec, seconds) + grainAt(this.spec, seconds);
+  }
+}
+
+/** Bow or breath noise, when this voice has any. */
+function noiseBedFor(job: VoiceJob): Pick<NoiseBed, 'at'> {
+  return (job.spec.bowNoise ?? 0) > 0 ? new NoiseBed(job.spec, job.sampleRate, job.seed) : NO_NOISE;
+}
+
+/**
+ * Where the note's pitch is away from steady, as a phase offset in table
+ * units, interpolated across fixed blocks so the costly curves run once per
+ * block rather than once per sample.
+ *
+ * Two things move the pitch: vibrato, a wobble that starts after the note is
+ * down, and the scoop, a slide up from just under the note as the string
+ * catches. Both are closed-form in `i`, so they survive being rendered in
+ * slices.
+ */
+class PitchCursor {
   private block = -1;
   private from = 0;
   private to = 0;
@@ -209,30 +322,79 @@ class VibratoCursor {
     private readonly spec: VoiceSpec,
     private readonly variation: NoteVariation,
     private readonly sampleRate: number,
-    private readonly scale: number,
+    /** Phase units per unit of vibrato cents. */
+    private readonly vibratoScale: number,
+    /** Phase units per second per cent of scoop. */
+    private readonly scoopScale: number,
   ) {}
 
   offsetAt(i: number): number {
     const b = (i / VIBRATO_BLOCK) | 0;
     if (b !== this.block) {
       this.block = b;
-      this.from = this.centsAtBlock(b);
-      this.to = this.centsAtBlock(b + 1);
+      this.from = this.unitsAtBlock(b);
+      this.to = this.unitsAtBlock(b + 1);
     }
     const within = (i - b * VIBRATO_BLOCK) / VIBRATO_BLOCK;
     return this.from + (this.to - this.from) * within;
   }
 
-  private centsAtBlock(block: number): number {
-    return vibratoCents(this.spec, this.variation, (block * VIBRATO_BLOCK) / this.sampleRate) * this.scale;
+  private unitsAtBlock(block: number): number {
+    const seconds = (block * VIBRATO_BLOCK) / this.sampleRate;
+    return vibratoCents(this.spec, this.variation, seconds) * this.vibratoScale + this.scoopUnitsAt(seconds);
+  }
+
+  /**
+   * Phase behind a steady pitch after `seconds` of the scoop. The pitch is
+   * `cents·e^(−t/τ)` flat, so the phase lost is the integral of that: its
+   * total, minus what is still to come.
+   */
+  private scoopUnitsAt(seconds: number): number {
+    const scoop = this.spec.scoop;
+    if (!scoop) return 0;
+    const total = scoop.cents * this.variation.scoopScale;
+    const timeConstant = scoop.ms / 1000;
+    return -this.scoopScale * timeConstant * (total - scoopCents(this.spec, this.variation, seconds));
   }
 }
 
-function vibratoFor(job: VoiceJob, increment: number): VibratoCursor | null {
+/** The stand-ins a voice uses for the parts it does not have, so the sample loop need not ask. */
+const STEADY_PITCH = { offsetAt: (_i: number): number => 0 };
+const NO_NOISE = { at: (_i: number): number => 0 };
+const NO_MORPH = { next: (): number => 0 };
+
+function pitchCursorFor(job: VoiceJob, increment: number): Pick<PitchCursor, 'offsetAt'> {
   const rateHz = job.spec.vibrato?.rateHz ?? 0;
-  if (rateHz <= 0) return null;
-  const scale = (CENTS_SLOPE * increment * job.sampleRate) / (2 * Math.PI * rateHz);
-  return new VibratoCursor(job.spec, job.variation, job.sampleRate, scale);
+  if (rateHz <= 0 && !job.spec.scoop) return STEADY_PITCH;
+  const vibratoScale = rateHz > 0 ? (CENTS_SLOPE * increment * job.sampleRate) / (2 * Math.PI * rateHz) : 0;
+  const scoopScale = CENTS_SLOPE * increment * job.sampleRate;
+  return new PitchCursor(job.spec, job.variation, job.sampleRate, vibratoScale, scoopScale);
+}
+
+/**
+ * How much of a morphing voice's bright spectrum is left, sample by sample:
+ * 1 at the attack, falling exponentially toward the settled one, and 0 once it
+ * is too faint to hear so the bright table need no longer be read at all.
+ */
+class SpectralMorph {
+  private weight: number;
+  private readonly step: number;
+
+  constructor(morphSamples: number, firstI: number) {
+    this.step = Math.exp(-1 / morphSamples);
+    // Seeded from a closed form so a slice starting mid-note agrees with a full pass.
+    const seeded = Math.exp(-firstI / morphSamples);
+    this.weight = seeded < MORPH_FLOOR ? 0 : seeded;
+  }
+
+  /** The brightness for this sample, 0–1; call once per sample. */
+  next(): number {
+    const now = this.weight;
+    if (now === 0) return 0;
+    const after = now * this.step;
+    this.weight = after < MORPH_FLOOR ? 0 : after;
+    return (now - MORPH_FLOOR) / (1 - MORPH_FLOOR);
+  }
 }
 
 /**
@@ -253,14 +415,14 @@ function vibratoFor(job: VoiceJob, increment: number): VibratoCursor | null {
  * a quarter-cycle over, and closed-form in `i`.
  */
 function renderVoice(out: Float32Array, job: VoiceJob): void {
-  const { originIndex, firstI, lastI, spec, table, envelope, sampleRate } = job;
+  const { originIndex, firstI, lastI, spec, table, settled, envelope, sampleRate } = job;
   const increment = job.baseIncrement * centsToRatio(job.variation.detuneCents);
   const { incrementA, incrementB, unison } = unisonIncrements(increment, unisonHalfSpread(spec, envelope.heldSamples, sampleRate));
   const voiceGain = unison ? job.amplitude * 0.5 : job.amplitude;
-  const vibrato = vibratoFor(job, increment);
-  const noise = bowNoiseSource(job);
-  const readVoice = (phase: number, offset: number) =>
-    (vibrato ? readTable(table, phase + offset) : readAt(table, phase));
+  const pitch = pitchCursorFor(job, increment);
+  const noise = noiseBedFor(job);
+  const morph = settled ? new SpectralMorph(job.morphSamples, firstI) : NO_MORPH;
+  const wraps = pitch !== STEADY_PITCH;
 
   // Phase is accumulated within the slice but *seeded* from a closed form, so
   // a slice starting mid-note lands on the same phase a single pass would have
@@ -272,16 +434,31 @@ function renderVoice(out: Float32Array, job: VoiceJob): void {
 
   for (let i = firstI; i < lastIndex; i++) {
     const index = originIndex + i;
+    const brightness = morph.next();
     if (index >= 0) {
-      const offset = vibrato?.offsetAt(i) ?? 0;
-      let sample = readVoice(phaseA, offset);
-      if (unison) sample += readVoice(phaseB, offset);
-      if (noise && i < noise.span) sample += noise.next() * bowNoiseAt(spec, i / sampleRate);
-      out[index] += sample * voiceGain * envelopeGain(i, envelope);
+      const offset = pitch.offsetAt(i);
+      let sample = voiceSample(table, settled, wraps, phaseA + offset, brightness);
+      if (unison) sample += voiceSample(table, settled, wraps, phaseB + offset, brightness);
+      out[index] += (sample + noise.at(i)) * voiceGain * envelopeGain(i, envelope);
     }
     phaseA = advance(phaseA, incrementA);
     if (unison) phaseB = advance(phaseB, incrementB);
   }
+}
+
+/**
+ * One sample of a voice at a phase: the bright table blended toward the
+ * settled one by `brightness`. A phase that carries an offset can sit outside
+ * the table and is wrapped; one that does not is already inside it.
+ */
+function voiceSample(
+  table: Float32Array, settled: Float32Array | null, offset: boolean, phase: number, brightness: number,
+): number {
+  if (!settled) return offset ? readTable(table, phase) : readAt(table, phase);
+  const dark = offset ? readTable(settled, phase) : readAt(settled, phase);
+  if (brightness <= 0) return dark;
+  const bright = offset ? readTable(table, phase) : readAt(table, phase);
+  return dark + (bright - dark) * brightness;
 }
 
 /** Steps a phase already inside the table by one increment. */
@@ -342,11 +519,12 @@ function renderNote(
     return;
   }
 
-  const table = tablesFor(instrument, sampleRate, brightnessTier(velocity))[bandFor(note.midiNumber)]!;
+  const { table, settled } = tablesForNote(instrument, sampleRate, velocity, note.midiNumber);
   const increment = (midiToFrequency(note.midiNumber) / sampleRate) * TABLE_SIZE;
 
   renderVoice(out, {
-    originIndex: startSample, firstI: 0, lastI: totalSamples, spec, table, baseIncrement: increment, amplitude,
+    originIndex: startSample, firstI: 0, lastI: totalSamples, spec, table, settled,
+    morphSamples: morphSamplesFor(spec, note.midiNumber, sampleRate), baseIncrement: increment, amplitude,
     envelope: { attack, decay, sustain: spec.sustain, heldSamples, releaseSamples }, sampleRate, variation, seed,
   });
 }
@@ -421,16 +599,57 @@ export function fadeEdges(buffer: Float32Array, sampleRate: number, fadeMs = 8):
  * native player can synthesise an eleven-minute song in two-second pieces,
  * yielding to the event loop between each, and never block a frame.
  *
- * Nothing is carried between slices. A note that straddles a boundary is
+ * The voices carry nothing between slices. A note that straddles a boundary is
  * rendered twice — once as a tail, once as a head — and both halves land on
  * the same samples because phase and envelope are computed from the note's own
  * offset rather than accumulated. That is why `envelopeAt` is a pure function
  * of the sample index and why the phase below is derived with a modulo instead
  * of being stepped from zero.
+ *
+ * The room is the one thing that does remember, since a reverb tail is by
+ * nature the last few seconds of everything. A caller rendering consecutive
+ * slices hands the same `Room` to each and pays nothing extra. A caller that
+ * renders anywhere else — or none — gets the room warmed up first from the
+ * audio that leads into the slice, wrapping round the loop for the first one,
+ * so the result is the same either way.
  */
 export function renderProgramInto(
-  out: Float32Array, program: BackingProgram, fromSample: number, sampleRate: number,
+  out: Float32Array, program: BackingProgram, fromSample: number, sampleRate: number, room?: Room,
 ): void {
+  const inRoom = room ?? new Room(sampleRate);
+  if (inRoom.position !== fromSample) warmRoom(inRoom, program, fromSample, sampleRate);
+  renderProgramDry(out, program, fromSample, sampleRate);
+  inRoom.process(out);
+  limit(out);
+}
+
+/** Brings a room to the state it would be in at `fromSample` by playing it the audio that leads in. */
+function warmRoom(room: Room, program: BackingProgram, fromSample: number, sampleRate: number): void {
+  room.reset();
+  const total = Math.ceil(program.durationSec * sampleRate);
+  const lead = Math.min(Math.ceil(ROOM_SETTLE_SEC * sampleRate), total);
+  const start = fromSample - lead;
+  // The loop repeats, so what leads into its first bars is its own last ones.
+  if (start < 0 && total > 0) feedRoom(room, program, total + start, -start, sampleRate);
+  if (fromSample > 0) feedRoom(room, program, Math.max(0, start), fromSample - Math.max(0, start), sampleRate);
+  room.position = fromSample;
+}
+
+function feedRoom(room: Room, program: BackingProgram, from: number, length: number, sampleRate: number): void {
+  if (length <= 0) return;
+  const lead = new Float32Array(length);
+  renderProgramDry(lead, program, from, sampleRate);
+  room.process(lead);
+}
+
+/**
+ * Every voice of the program that sounds in `[fromSample, fromSample + out.length)`,
+ * before any room or limiting.
+ *
+ * What the voices alone do, and so what has to be identical however the song is
+ * cut into slices. Exported for the tests that hold it to that.
+ */
+export function renderProgramDry(out: Float32Array, program: BackingProgram, fromSample: number, sampleRate: number): void {
   out.fill(0);
   const toSample = fromSample + out.length;
 
@@ -450,38 +669,46 @@ export function renderProgramInto(
     const attack = Math.max(1, (spec.attackMs / 1000) * sampleRate * variation.attackScale);
     const decay = Math.max(1, (spec.decayMs / 1000) * sampleRate);
     const amplitude = note.amplitude * spec.gain * variation.velocityScale;
+    const envelope: Envelope = { attack, decay, sustain: spec.sustain, heldSamples, releaseSamples };
 
     /** Where in the note this slice begins, and where it ends. */
     const firstI = Math.max(0, fromSample - startSample);
     const lastI = Math.min(totalSamples, toSample - startSample);
 
     if (spec.noise) {
-      // Deterministic noise has to be wound forward to the slice, or a
-      // percussion hit split across a boundary would change timbre mid-hit.
-      // Percussion notes are short, so the cost is bounded.
-      const noise = makeNoise(seed);
-      for (let i = 0; i < firstI; i++) noise();
-      for (let i = firstI; i < lastI; i++) {
-        out[startSample + i - fromSample] +=
-          noise() * amplitude
-          * envelopeAt(i, attack, decay, spec.sustain, heldSamples, releaseSamples);
-      }
+      renderHit(out, startSample - fromSample, firstI, lastI, seed, amplitude, envelope, spec);
       continue;
     }
 
     // The dynamic the note was *played* at, not the level it is mixed at — a
     // quiet part is not a dull part. `velocity` is carried on the scheduled
     // note for exactly this.
-    const tier = brightnessTier(note.velocity * variation.velocityScale);
-    const table = tablesFor(note.instrument, sampleRate, tier)[bandFor(note.midiNumber)]!;
+    const { table, settled } = tablesForNote(note.instrument, sampleRate, note.velocity * variation.velocityScale, note.midiNumber);
     const increment = (midiToFrequency(note.midiNumber) / sampleRate) * TABLE_SIZE;
 
     renderVoice(out, {
-      originIndex: startSample - fromSample, firstI, lastI, spec, table, baseIncrement: increment, amplitude,
-      envelope: { attack, decay, sustain: spec.sustain, heldSamples, releaseSamples }, sampleRate, variation, seed,
+      originIndex: startSample - fromSample, firstI, lastI, spec, table, settled,
+      morphSamples: morphSamplesFor(spec, note.midiNumber, sampleRate), baseIncrement: increment, amplitude,
+      envelope, sampleRate, variation, seed,
     });
   }
-
-  limit(out);
 }
 
+/**
+ * A noise hit — the percussion voice.
+ *
+ * Deterministic noise has to be wound forward to the slice, or a hit split
+ * across a boundary would change timbre mid-hit. Percussion notes are short, so
+ * the cost is bounded.
+ */
+function renderHit(
+  out: Float32Array, originIndex: number, firstI: number, lastI: number, seed: number,
+  amplitude: number, envelope: Envelope, spec: VoiceSpec,
+): void {
+  const noise = makeNoise(seed);
+  for (let i = 0; i < firstI; i++) noise();
+  for (let i = firstI; i < lastI; i++) {
+    out[originIndex + i] += noise() * amplitude
+      * envelopeAt(i, envelope.attack, envelope.decay, spec.sustain, envelope.heldSamples, envelope.releaseSamples);
+  }
+}

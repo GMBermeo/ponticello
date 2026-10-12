@@ -4,12 +4,14 @@ import { ArrangementLevel, ARRANGEMENT_LEVELS, ARRANGEMENT_PROFILES } from '../a
 import { BackingNote, BackingPart, InstrumentName, PartRole } from '../backing';
 import { firstPositionFingering } from '../fingering';
 import { CelloNote, CelloSongScore, scoreDurationMs } from '../schema';
-import { getBundledBacking, getScore, COMPACT_SCORES, LIBRARY_EDITION } from '@scores';
+import { getBundledBacking, getScore, allCompactScores, LIBRARY_EDITION } from '@scores';
 import {
   celloLineFromPart, celloPartOptions, describeOctaveFit, findCelloPart,
   FIRST_POSITION_FLOOR, FIRST_POSITION_ROOF, nearestWorkableOctave, octaveChoices,
   partKind, partLabel, scoreFromPart, suggestedOctaves, writtenForCello, type CelloPartOption,
 } from '../trackPicker';
+
+const COMPACT_SCORES = allCompactScores();
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 

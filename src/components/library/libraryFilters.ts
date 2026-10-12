@@ -1,7 +1,7 @@
 import type { Href } from 'expo-router';
 
 import type { DifficultyTier } from '@domain';
-import { getChordSheet, type LibraryRow } from '@scores';
+import { hasChordSheet, type LibraryRow } from '@scores';
 
 import type { Segment } from '../ui';
 
@@ -12,7 +12,7 @@ export const CATEGORY_SEGMENTS: readonly Segment<CategoryFilter>[] = [
   { value: 'ALL', label: 'All' },
   { value: 'study', label: 'Studies' },
   { value: 'song', label: 'Songs' },
-  { value: 'chords', label: 'Chords' },
+  { value: 'chords', label: 'Harmony' },
   { value: 'imported', label: 'Imported' },
 ];
 
@@ -28,7 +28,7 @@ export const CUSTOM_PROGRESSION_ID = 'custom-chord-progression';
 
 const CUSTOM_PROGRESSION_SEARCH_TEXT = 'create chord progression interactive builder';
 
-/** The chord-progression builder, listed as a row at the head of the Chords tab. */
+/** The chord-progression builder, listed as a row at the head of the Harmony filter. */
 export const CUSTOM_PROGRESSION_ROW: LibraryRow = {
   id: CUSTOM_PROGRESSION_ID,
   title: 'Create chord progression',
@@ -55,7 +55,7 @@ export type LibraryFilter = {
 function matchesCategory(row: LibraryRow, filter: LibraryFilter): boolean {
   switch (filter.category) {
     case 'ALL': return true;
-    case 'chords': return !!getChordSheet(row.id);
+    case 'chords': return hasChordSheet(row.id);
     case 'imported': return filter.importedIds.has(row.id);
     case 'song': return row.category === 'song' || row.category === 'classical';
     case 'study': return row.category === 'study';
@@ -65,7 +65,7 @@ function matchesCategory(row: LibraryRow, filter: LibraryFilter): boolean {
 /** A chart-only row has no score, so it has no difficulty to filter on. */
 function matchesDifficulty(row: LibraryRow, difficulty: DifficultyFilter): boolean {
   if (difficulty === 'ALL') return true;
-  const chartOnly = !!getChordSheet(row.id) && !row.playable;
+  const chartOnly = hasChordSheet(row.id) && !row.playable;
   return !chartOnly && row.difficulty === difficulty;
 }
 
@@ -87,7 +87,7 @@ export function normalizeQuery(search: string): string {
   return foldForSearch(search.trim());
 }
 
-/** Rows shown for a filter, with the progression builder leading the Chords tab. */
+/** Rows shown for a filter, with the progression builder leading the Harmony filter. */
 export function filterLibraryRows(rows: readonly LibraryRow[], filter: LibraryFilter): LibraryRow[] {
   const query = normalizeQuery(filter.search);
   const filtered = rows.filter((row) =>
@@ -98,10 +98,9 @@ export function filterLibraryRows(rows: readonly LibraryRow[], filter: LibraryFi
   return showBuilder ? [CUSTOM_PROGRESSION_ROW, ...filtered] : filtered;
 }
 
-/** Route for a library row: chord charts open as charts unless a score exists and Chords is not the tab. */
+/** Route for a library row: harmony maps open as charts unless a score exists and Harmony is not the filter. */
 export function routeForRow(row: LibraryRow | undefined, id: string, category: CategoryFilter): Href {
   if (id === CUSTOM_PROGRESSION_ID) return '/chord-progression';
-  const chart = getChordSheet(id);
-  const opensAsChart = !!chart && (category === 'chords' || !row?.playable);
+  const opensAsChart = hasChordSheet(id) && (category === 'chords' || !row?.playable);
   return opensAsChart ? `/chord-song/${id}` : `/song/${id}`;
 }

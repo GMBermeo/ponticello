@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { createRoomImpulse } from '../room';
 import {
-  brightnessTier, envelopeAt, envelopeHeldLevel, noteSeed, noteVariation,
-  spectrumForTier, VOICES,
+  bandFor, brightnessTier, envelopeAt, envelopeHeldLevel, GRAIN_FADE_SEC, morphTimeSec, morphWeight, noteSeed,
+  noteVariation, NoteVariation, scoopCents, settledSpectrum, shapedSpectrum, VoiceSpec, VOICES,
 } from '../voices';
 import { BackingProgram, notesActiveAtOffset, ScheduledNote } from './program';
 import { BackingPlayer } from './types';
@@ -72,14 +73,16 @@ function scheduleVibrato(
 }
 
 /**
- * The scrape before the string speaks, on its own short envelope.
+ * The scrape before the string speaks, and the texture that stays under it.
  *
- * Gated on length because it is an articulation, not a texture: a run of
- * semiquavers would otherwise become a wash of noise.
+ * The scrape is an articulation, not a texture, so it is gated on length: a run
+ * of semiquavers would otherwise become a wash of noise. The texture is what a
+ * sustained note keeps — the rosin, the air — at a fraction of the scrape's
+ * level. Both go through a low-pass, because a bow is not a hiss.
  */
 function scheduleBowNoise(
   audio: AudioContext,
-  spec: { bowNoise?: number; attackMs: number },
+  spec: Pick<VoiceSpec, 'bowNoise' | 'grain' | 'attackMs'>,
   destination: GainNode,
   peak: number,
   at: number,
@@ -90,26 +93,39 @@ function scheduleBowNoise(
 ): void {
   const amount = spec.bowNoise ?? 0;
   if (amount <= 0 || holdSec < BOW_NOISE_MIN_HOLD_SEC) return;
+  const grain = amount * (spec.grain ?? 0);
   // A resumed note is long past its own attack; there is no scrape left.
-  if (elapsedSec > 0.02) return;
+  const scrape = elapsedSec <= 0.02;
+  if (!scrape && grain <= 0) return;
 
   const span = Math.max(0.02, (spec.attackMs / 1000) * 1.8);
   const source = audio.createBufferSource();
   source.buffer = noiseFor(audio);
   source.loop = true;
 
+  const softened = audio.createBiquadFilter();
+  softened.type = 'lowpass';
+  softened.frequency.value = BOW_NOISE_CUTOFF_HZ;
+
   const shaper = audio.createGain();
   const g = shaper.gain;
-  g.setValueAtTime(0, at);
-  // Three points is enough for a rise and a fall the ear reads as a scrape.
-  g.linearRampToValueAtTime(peak * amount, at + span * 0.18);
-  g.linearRampToValueAtTime(peak * amount * 0.25, at + span * 0.5);
-  g.linearRampToValueAtTime(0, at + span);
+  const texture = peak * grain;
+  if (scrape) {
+    g.setValueAtTime(0, at);
+    // Three points is enough for a rise and a fall the ear reads as a scrape.
+    g.linearRampToValueAtTime(peak * amount, at + span * 0.18);
+    g.linearRampToValueAtTime(peak * amount * 0.25, at + span * 0.5);
+    g.linearRampToValueAtTime(texture, at + Math.max(span, GRAIN_FADE_SEC));
+  } else {
+    g.setValueAtTime(0, at);
+    g.linearRampToValueAtTime(texture, at + GRAIN_FADE_SEC);
+  }
 
   shaper.connect(destination);
-  source.connect(shaper);
+  softened.connect(shaper);
+  source.connect(softened);
   source.start(at);
-  source.stop(at + span + 0.02);
+  source.stop(at + (grain > 0 ? Math.max(holdSec - elapsedSec, span) : span) + 0.02);
   extras.push(source);
 }
 
@@ -152,6 +168,8 @@ interface Voice {
 const VIBRATO_MIN_HOLD_SEC = 0.3;
 const UNISON_MIN_HOLD_SEC = 0.2;
 const BOW_NOISE_MIN_HOLD_SEC = 0.12;
+/** Where the bow's hiss is rolled off; the same shape as the native renderer's smoothed noise. */
+const BOW_NOISE_CUTOFF_HZ = 3200;
 
 /** An ADSR envelope in seconds, for a note already `elapsed` seconds in. */
 interface EnvelopeTiming {
@@ -183,6 +201,89 @@ function scheduleEnvelope(gain: AudioParam, envelope: EnvelopeTiming, at: number
   gain.linearRampToValueAtTime(peak * envelopeHeldLevel(hold, attack, decay, sustain), holdEnd);
   gain.linearRampToValueAtTime(0, holdEnd + release);
 }
+
+/** Everything the oscillators of one note share. */
+interface Tone {
+  audio: AudioContext;
+  spec: VoiceSpec;
+  variation: NoteVariation;
+  hz: number;
+  /** Audio-clock time the note sounds, and when its oscillators stop. */
+  at: number;
+  stopAt: number;
+  /** Seconds of the note already gone, for one resumed part-way through. */
+  elapsed: number;
+  bright: PeriodicWave;
+  /** The spectrum a morphing voice settles to; null for one whose spectrum stays put. */
+  settled: PeriodicWave | null;
+  /** Seconds for the brightness to fall by a factor of e. */
+  morphSec: number;
+}
+
+/**
+ * Starts one copy of a note's tone into `destination` and returns its
+ * oscillators.
+ *
+ * A voice whose spectrum changes over the note is two oscillators — the bright
+ * wave and the settled one — cross-faded exponentially, which is the same blend
+ * the native renderer reads from two wavetables. A voice with a scoop starts
+ * below the pitch and settles onto it, on the oscillator's `detune`.
+ */
+function startTone(tone: Tone, detune: number, destination: AudioNode): OscillatorNode[] {
+  const { audio, spec, variation, hz, at, stopAt, elapsed } = tone;
+  const oscillate = (wave: PeriodicWave, output: AudioNode): OscillatorNode => {
+    const osc = audio.createOscillator();
+    osc.setPeriodicWave(wave);
+    osc.frequency.setValueAtTime(hz, at);
+    if (spec.scoop) {
+      osc.detune.setValueAtTime(detune - scoopCents(spec, variation, elapsed), at);
+      osc.detune.setTargetAtTime(detune, at, spec.scoop.ms / 1000);
+    } else {
+      osc.detune.setValueAtTime(detune, at);
+    }
+    osc.connect(output);
+    osc.start(at);
+    osc.stop(stopAt);
+    return osc;
+  };
+
+  if (!tone.settled) return [oscillate(tone.bright, destination)];
+
+  const brightShare = morphWeight(tone.morphSec, elapsed);
+  const fade = (from: number, to: number): GainNode => {
+    const level = audio.createGain();
+    level.gain.setValueAtTime(from, at);
+    level.gain.setTargetAtTime(to, at, tone.morphSec);
+    level.connect(destination);
+    return level;
+  };
+  return [oscillate(tone.bright, fade(brightShare, 0)), oscillate(tone.settled, fade(1 - brightShare, 1))];
+}
+
+/**
+ * Puts the small room around the accompaniment: a send off the master, high-passed
+ * so the low end stays tight, through a convolver into the safety compressor.
+ * The native renderer runs the same room as a feedback network.
+ */
+function connectRoom(audio: AudioContext, master: GainNode, into: AudioNode): void {
+  const send = audio.createBiquadFilter();
+  send.type = 'highpass';
+  send.frequency.value = 180;
+  const convolver = audio.createConvolver();
+  const response = createRoomImpulse(audio.sampleRate);
+  const impulse = audio.createBuffer(1, response.length, audio.sampleRate);
+  impulse.copyToChannel(response, 0);
+  convolver.buffer = impulse;
+  const wet = audio.createGain();
+  wet.gain.value = ROOM_WET;
+  master.connect(send);
+  send.connect(convolver);
+  convolver.connect(wet);
+  wet.connect(into);
+}
+
+/** Level of the room against the dry signal; the convolver normalises its own response. */
+const ROOM_WET = 0.35;
 
 export function useBackingPlayer(enabled: boolean): BackingPlayer {
   const contextRef = useRef<AudioContext | null>(null);
@@ -229,6 +330,7 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
       safety.attack.value = 0.002;
       safety.release.value = 0.12;
       master.connect(safety);
+      connectRoom(created, master, safety);
       safety.connect(created.destination);
       contextRef.current = created;
       masterRef.current = master;
@@ -236,14 +338,19 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
     return contextRef.current;
   }, []);
 
-  /** The band-limited wave for an instrument at one dynamic, built once. */
+  /**
+   * The wave for an instrument at one dynamic and one register, built once.
+   * `settled` is the spectrum a morphing voice decays to instead of the one it
+   * starts with.
+   */
   const waveFor = useCallback((
-    audio: AudioContext, instrument: string, tier: number,
+    audio: AudioContext, instrument: string, tier: number, band: number, settled: boolean,
   ): PeriodicWave => {
-    const key = `${instrument}@${tier}`;
+    const key = `${instrument}@${tier}@${band}@${settled ? 's' : 'b'}`;
     const cached = wavesRef.current.get(key);
     if (cached) return cached;
-    const harmonics = spectrumForTier(VOICES[instrument as never], tier);
+    const spec = VOICES[instrument as never];
+    const harmonics = settled ? settledSpectrum(spec, tier, band) : shapedSpectrum(spec, tier, band);
     // Index 0 of a PeriodicWave is DC and must stay zero; harmonic n lives at
     // index n. Sine phase means the whole series goes in the imaginary part.
     const real = new Float32Array(harmonics.length + 1);
@@ -328,46 +435,36 @@ export function useBackingPlayer(enabled: boolean): BackingPlayer {
       // 440 · 2^((m−69)/12), inline rather than imported: `midiToFrequency`
       // lives in the domain layer and this is the audio thread's hot path.
       const hz = 440 * Math.pow(2, (note.midiNumber - 69) / 12);
-      const wave = waveFor(audio, note.instrument, brightnessTier(note.velocity * variation.velocityScale));
-
-      const osc = audio.createOscillator();
-      osc.setPeriodicWave(wave);
-      osc.frequency.setValueAtTime(hz, at);
-      osc.detune.setValueAtTime(variation.detuneCents, at);
-      source = osc;
+      const tier = brightnessTier(note.velocity * variation.velocityScale);
+      const band = bandFor(note.midiNumber);
+      const tone: Tone = {
+        audio, spec, variation, hz, at, elapsed,
+        stopAt: at + remaining + 0.02,
+        bright: waveFor(audio, note.instrument, tier, band, false),
+        settled: spec.morph ? waveFor(audio, note.instrument, tier, band, true) : null,
+        morphSec: morphTimeSec(spec, note.midiNumber),
+      };
 
       // A section rather than a soloist: a second copy a few cents away, half
       // level each. The beating between them is the sound of more than one
       // player, and it cannot be faked with a chorus on the master.
       const unison = spec.unisonCents ?? 0;
+      const oscillators: OscillatorNode[] = [];
       if (unison > 0 && hold >= UNISON_MIN_HOLD_SEC) {
-        const twin = audio.createOscillator();
-        twin.setPeriodicWave(wave);
-        twin.frequency.setValueAtTime(hz, at);
-        twin.detune.setValueAtTime(variation.detuneCents - unison, at);
-        osc.detune.setValueAtTime(variation.detuneCents + unison, at);
         const half = audio.createGain();
         half.gain.setValueAtTime(0.5, at);
         half.connect(gain);
-        twin.connect(half);
-        twin.start(at);
-        twin.stop(at + remaining + 0.02);
-        extras.push(twin);
-        // The first copy drops to half too, or the pair is twice as loud.
-        const firstHalf = audio.createGain();
-        firstHalf.gain.setValueAtTime(0.5, at);
-        firstHalf.connect(gain);
-        osc.connect(firstHalf);
-        osc.start(at);
-        osc.stop(at + remaining + 0.02);
-        scheduleVibrato(audio, spec, variation, [osc, twin], at, hold, elapsed, extras);
-        scheduleBowNoise(audio, spec, gain, peak, at, hold, elapsed, noiseFor, extras);
-        registerVoice(at + remaining + 0.05, osc, gain, extras);
-        return;
+        oscillators.push(...startTone(tone, variation.detuneCents + unison, half));
+        oscillators.push(...startTone(tone, variation.detuneCents - unison, half));
+      } else {
+        oscillators.push(...startTone(tone, variation.detuneCents, gain));
       }
-
-      scheduleVibrato(audio, spec, variation, [osc], at, hold, elapsed, extras);
+      const [lead, ...rest] = oscillators;
+      extras.push(...rest);
+      scheduleVibrato(audio, spec, variation, oscillators, at, hold, elapsed, extras);
       scheduleBowNoise(audio, spec, gain, peak, at, hold, elapsed, noiseFor, extras);
+      registerVoice(at + remaining + 0.05, lead!, gain, extras);
+      return;
     }
 
     source.connect(gain);

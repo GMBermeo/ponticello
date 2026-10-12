@@ -11,7 +11,7 @@ export const ARRANGEMENT_SEGMENTS: readonly Segment<ArrangementLevel>[] = [
   { value: 'Expert', label: 'Full', hint: 'The fullest melody arrangement, still lowered into a comfortable first-position range.' },
 ];
 
-/** What the sheet can show: one of the three score visions, or the chord chart. */
+/** What the sheet can show: one of the three score visions, or the harmony map. */
 export type SheetView = VisionName | 'chords';
 
 export const VISION_SEGMENTS: readonly Segment<VisionName>[] = [
@@ -20,7 +20,7 @@ export const VISION_SEGMENTS: readonly Segment<VisionName>[] = [
   { value: 'highway', label: 'Highway' },
 ];
 
-export const CHORDS_SEGMENT: Segment<SheetView> = { value: 'chords', label: 'Chords' };
+export const CHORDS_SEGMENT: Segment<SheetView> = { value: 'chords', label: 'Harmony' };
 
 export const VISION_BLURB: Record<VisionName, string> = {
   tab: 'Four string lines with finger numbers. A clear guide to where your hand goes.',
@@ -28,7 +28,7 @@ export const VISION_BLURB: Record<VisionName, string> = {
   highway: 'Follow the notes along four string lanes to practise rhythm and crossings.',
 };
 
-export const CHORDS_BLURB = 'Lyrics and chord changes, with cello shapes and adjustable auto-scroll. Phrasing is estimated.';
+export const CHORDS_BLURB = 'Lyrics and chord changes as a harmony map: cello shapes and every place a chord’s notes fall, with adjustable auto-scroll. Phrasing is estimated.';
 
 /**
  * Orientation, offered per vision rather than as one global axis.

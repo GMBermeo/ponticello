@@ -60,7 +60,7 @@ pieces instead of hand-styling:
   `onAccent`, `dim`…). The accent is indigo; blue, green, red and yellow are
   note and string colours and never chrome.
 - **Icons:** `Icon` by meaning (`back`, `play`, `tuner`…), an SF Symbol on iOS.
-- **Tabs:** Library, Practice, Tuner and Chords live in `src/app/(tabs)`.
+- **Tabs:** Library, Practice, Tuner and Harmony map live in `src/app/(tabs)` (the route file for the last is still `chords.tsx`, so URLs did not change).
   Tabs are mounted before they are shown, so anything with a side effect (the
   microphone) must follow `useIsFocused()`, not mount.
 - A `Screen` nested in another does not re-apply safe-area insets — nest
@@ -77,10 +77,21 @@ play screen root — leaves subscribe with `usePlayheadPosition`.
 
 `npm run build:library` (full: public domain + etudes + every song folder in
 `_MIDIS/arranged`) and `npm run build:library:free` (public domain + etudes
-only) regenerate `bundledSongs.json`, `catalogIndex.ts` and
-`libraryEdition.ts`. `npm run release:full` / `release:free` build a named APK
-into `releases/`. Tests that assert library *size* gate on
+only) regenerate `catalogIndex.ts`, `libraryEdition.ts` and the bundled data.
+Both editions carry every harmony map (chord chart) in `_CHORDS/`; they differ
+only in the arranged songs. `npm run release:full` / `release:free` build a
+named APK into `releases/`. Tests that assert library *size* gate on
 `LIBRARY_EDITION.id`; correctness checks run for both.
+
+**Bundled data is one JSON file per item, never one big file.** Songs live in
+`src/scores/songs/<id>.json` and harmony maps in `src/scores/chords/<id>.json`,
+each listed by a generated `*Catalog.generated.ts` of small summaries plus a
+`require` per file (`tools/lazyBundle.ts`). Metro evaluates a module only when
+it is required, so the app pays for the summaries at launch and for one item
+when it is opened. Ask "is there one?" with `hasChordSheet` / `hasCompactScore`
+and use `getChordSheet` / `getCompactScore` only when you need the data.
+`allCompactScores()` reads every song and is for tests and tools, never for a
+screen. Do not `import` a generated collection at module scope.
 
 ## Folders and imports
 
@@ -120,10 +131,18 @@ must report nothing. A justified exception gets an
 ## Before you commit
 
 ```
-npm run typecheck
-npm test
-npx eslint .
+npm run verify
 ```
+
+That is the shareability check, both type-checks, lint, the tests and the site
+check — the fast half of `.github/workflows/ci.yml`. CI also bundles every
+platform, regenerates the native projects and checks the scene-lifecycle
+plugin still applies, and re-derives the brand assets from the master icon; see
+"Continuous integration" in README.md for how to run those locally.
+
+Never commit the full library: `npm run build:library` writes copyrighted
+arrangements into `src/scores`. Run `npm run build:library:free` before
+committing — `check:shareable` fails the build otherwise.
 
 Tests are pure TypeScript and must stay that way — nothing in `src/domain`,
 `src/audio` (except the mic sources) or `tools` may import React Native.
