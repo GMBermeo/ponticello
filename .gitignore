@@ -58,8 +58,6 @@ _AUDITION/
 releases/
 
 # agent skills
-.agents/skills/*
-!.agents/skills/cello-scoring/
 .claude/
 .kiro/
 .idea
