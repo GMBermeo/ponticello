@@ -36,8 +36,8 @@ for (const [tag] of html.matchAll(/<video\b[^>]*>/g)) {
 }
 
 if (!/<title>[^<]+<\/title>/.test(html)) failures.push('the page has no <title>');
-if (!/<meta name="description" content="[^"]+"/.test(html)) failures.push('the page has no meta description');
-if (!/<meta property="og:image" content="[^"]+"/.test(html)) failures.push('the page has no og:image');
+if (!/<meta\b[^>]*\bname="description"[^>]*\bcontent="[^"]+"/s.test(html)) failures.push('the page has no meta description');
+if (!/<meta\b[^>]*\bproperty="og:image"[^>]*\bcontent="[^"]+"/s.test(html)) failures.push('the page has no og:image');
 
 if (failures.length) {
   console.error(`✗ ${PAGE}:\n  - ${failures.join('\n  - ')}`);
