@@ -9,6 +9,7 @@
     "@tonaljs/chord-type": "5.1.1",
     "@tonaljs/interval": "5.1.0",
     "@tonaljs/note": "4.12.1",
+    "@vercel/analytics": "^2.0.1",
     "expo": "~57.0.25",
     "expo-audio": "~57.0.5",
     "expo-constants": "~57.0.19",

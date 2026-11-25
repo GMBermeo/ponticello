@@ -8,6 +8,7 @@ import { useEffect } from 'react';
 import { Appearance, Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { Analytics } from '@vercel/analytics/react';
 
 import { DeviceCanvas } from '@components';
 import {
@@ -79,6 +80,7 @@ export default function RootLayout() {
         <SessionProvider>
           <ImportedLibraryProvider>
             <ThemedAppShell />
+            {Platform.OS === 'web' && <Analytics />}
           </ImportedLibraryProvider>
         </SessionProvider>
         </PracticeProvider>
