@@ -11,7 +11,8 @@
 </p>
 
 <p align="center">
-  <a href="docs/index.html">Product site</a> ·
+  <a href="https://ponticello.app/">Product site</a> ·
+  <a href="https://fork.ponticello.app/">Pontifork</a> ·
   <a href="#contributing">Contributing</a> ·
   <a href="#build-your-own-library">Build your own library</a> ·
   <a href="#rights">Rights</a>
@@ -47,16 +48,16 @@ npm run typecheck
 
 ## What is here
 
-| Screen             | What it does                                                                                                               |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| **Library**        | Everything you can play: the authored studies and public-domain works, your MIDI imports, and every harmony map.           |
-| **Harmony map**    | Where each chord's notes fall on the cello — a shape to hold, or every position — so a melody can stay inside the harmony. |
-| **Tutorial**       | Static. Explains the nut, the finger numbers, your own tape colours, and how to read each vision.                          |
-| **Practice sheet** | A/B loop by bar, tempo 40–120 %, fingering blackout, tape overlay, cue density.                                            |
-| **Play**           | Three visions — Tab, Score, Highway — over a fixed fingerboard panel and cents rail, with the backing sounding underneath. |
-| **Import**         | Bring your own MIDI; the app fingers the cello line and makes a backing from the rest.                                     |
-| **Tuner**          | Open strings, off the same pitch engine the play screens use.                                                              |
-| **My tapes**       | The tape colours and positions on _your_ fingerboard. Everything else follows them.                                        |
+| Screen             | What it does                                                                                                                                                   |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Library**        | Everything you can play: the authored studies and public-domain works, your MIDI imports, and every harmony map.                                               |
+| **Harmony map**    | Where each chord's notes fall on the cello — a shape to hold, or every position — so a melody can stay inside the harmony.                                     |
+| **Tutorial**       | Static. Explains the nut, the finger numbers, your own tape colours, and how to read each vision.                                                              |
+| **Practice sheet** | A/B loop by bar, tempo 40–120 %, fingering blackout, tape overlay, cue density.                                                                                |
+| **Play**           | Three visions — Tab, Score, Highway — over a fixed fingerboard panel and cents rail, with the backing sounding underneath.                                     |
+| **Import**         | Bring your own MIDI; the app fingers the cello line and makes a backing from the rest.                                                                         |
+| **Tuner**          | Open strings, off the same pitch engine the play screens use. (For guitar, bass, and alternate cello tunings, see [Pontifork](https://fork.ponticello.app/)). |
+| **My tapes**       | The tape colours and positions on _your_ fingerboard. Everything else follows them.                                                                            |
 
 ---
 
@@ -288,7 +289,7 @@ yarn ollama:benchmark            # every chat model on the Ollama server, one at
 yarn ollama:benchmark --dry-run  # list the models and the work, generate nothing
 ```
 
-`tools/ollama-benchmark.ts` arranges *Welcome Home*, *The Kill* and *Aerials* with
+`tools/ollama-benchmark.ts` arranges _Welcome Home_, _The Kill_ and _Aerials_ with
 every chat-capable model on `http://100.124.192.6:11434` (smallest first,
 strictly sequential: each model is loaded, runs both songs, and is unloaded
 before the next). Every model gets the same deterministic notes and chooses
@@ -334,14 +335,14 @@ downloaded.
 
 ### 2. Run the generators
 
-| Command | What it writes |
-| --- | --- |
-| `npm run build:library:free` | `catalogIndex.ts`, `libraryEdition.ts`, one JSON file per piece in `src/scores/songs/` and one per harmony map in `src/scores/chords/`, from the public-domain pieces, etudes and every chord chart |
-| `npm run build:library` | the same, plus every arranged song with a folder in `_MIDIS/arranged` |
-| `npm run convert -- path/to/piece.mid --title "…" --composer "…"` | one authored score module, for `CORE_SCORES` |
-| `npm run import:chords -- --url "<chord sheet URL>"` | a chord chart into `_CHORDS/charts/`, timed with a local Ollama model unless you pass `--no-ollama`; run `npm run build:library:free` afterwards to bundle it |
-| `npm run build:chords` | the cello chord-shape catalogue (`src/domain/chords/catalog.generated.json`) |
-| `npm run audit:arrangements` | `docs/cello-arrangement-audit.md` — every level of every song measured against the doctrine |
+| Command                                                           | What it writes                                                                                                                                                                                      |
+| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run build:library:free`                                      | `catalogIndex.ts`, `libraryEdition.ts`, one JSON file per piece in `src/scores/songs/` and one per harmony map in `src/scores/chords/`, from the public-domain pieces, etudes and every chord chart |
+| `npm run build:library`                                           | the same, plus every arranged song with a folder in `_MIDIS/arranged`                                                                                                                               |
+| `npm run convert -- path/to/piece.mid --title "…" --composer "…"` | one authored score module, for `CORE_SCORES`                                                                                                                                                        |
+| `npm run import:chords -- --url "<chord sheet URL>"`              | a chord chart into `_CHORDS/charts/`, timed with a local Ollama model unless you pass `--no-ollama`; run `npm run build:library:free` afterwards to bundle it                                       |
+| `npm run build:chords`                                            | the cello chord-shape catalogue (`src/domain/chords/catalog.generated.json`)                                                                                                                        |
+| `npm run audit:arrangements`                                      | `docs/cello-arrangement-audit.md` — every level of every song measured against the doctrine                                                                                                         |
 
 The arranger is deterministic: the same MIDI in gives the same fingering out,
 on your machine and on mine.
@@ -561,9 +562,9 @@ tools/                  library builder, converters, importers, audits, Ollama b
 ### Imports
 
 ```ts
-import { Button, Screen, ScreenHeader, Segmented } from '@components';
-import { practiceLoop, type ArrangementLevel } from '@domain';
-import { useTheme } from '@theme';
+import { Button, Screen, ScreenHeader, Segmented } from "@components";
+import { practiceLoop, type ArrangementLevel } from "@domain";
+import { useTheme } from "@theme";
 ```
 
 Across top-level folders, import through the alias. Inside a folder, import
@@ -611,12 +612,12 @@ Every push to `main` or a `release/**` branch, and every pull request, runs
 Ubuntu runner with nothing but what is committed, so a change that only works
 because of a file on your machine fails here first:
 
-| Job | What it proves | Run it locally |
-|---|---|---|
-| **Types, lint and tests** | The repository is shareable (free library, no `_MIDIS/`, `_CHORDS/` or release binaries tracked); it type-checks in both configs; lint reports nothing; all unit and catalogue tests pass | `npm run verify` |
-| **Bundles for web, iOS and Android** | Metro bundles every platform, and the web export renders every route to static HTML — so a screen that throws while rendering fails, not only one that fails to import; the product site's files and labels resolve | `npx expo export --platform web` · `npm run check:site` |
-| **Native projects** | `expo prebuild` generates both projects from scratch and the config plugins still apply: the UIScene adoption iOS 27 needs to launch the app, the Icon Composer icon and its layers, the microphone permission | `npx expo prebuild --no-install && npm run check:native` |
-| **Brand assets** | Every icon, splash and wordmark still derives from `assets/logo/ponticello-icon.svg` and passes its checks, and the derived vector files are committed and current | `python3 tools/make-icons.py && git status` |
+| Job                                  | What it proves                                                                                                                                                                                                      | Run it locally                                           |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| **Types, lint and tests**            | The repository is shareable (free library, no `_MIDIS/`, `_CHORDS/` or release binaries tracked); it type-checks in both configs; lint reports nothing; all unit and catalogue tests pass                           | `npm run verify`                                         |
+| **Bundles for web, iOS and Android** | Metro bundles every platform, and the web export renders every route to static HTML — so a screen that throws while rendering fails, not only one that fails to import; the product site's files and labels resolve | `npx expo export --platform web` · `npm run check:site`  |
+| **Native projects**                  | `expo prebuild` generates both projects from scratch and the config plugins still apply: the UIScene adoption iOS 27 needs to launch the app, the Icon Composer icon and its layers, the microphone permission      | `npx expo prebuild --no-install && npm run check:native` |
+| **Brand assets**                     | Every icon, splash and wordmark still derives from `assets/logo/ponticello-icon.svg` and passes its checks, and the derived vector files are committed and current                                                  | `python3 tools/make-icons.py && git status`              |
 
 The guards are tested against the failures they exist for: removing the scene
 plugin fails the native job with the reason, and a missing site asset or image
@@ -635,7 +636,9 @@ system face (SF Pro and SF Pro Rounded); on Android, the web and in the brand
 it is [Archivo](https://fonts.google.com/specimen/Archivo) by Omnibus-Type.
 Licensed under the MIT License — see [`LICENSE`](LICENSE).
 
-The product site in [`docs/`](docs/) is a static page ready to deploy on
+Sister project: [Pontifork](https://fork.ponticello.app/) — a free tuner and chord book for cello, guitar and bass with 58 tunings.
+
+The product site in [`docs/`](docs/) is published at [ponticello.app](https://ponticello.app) and ready to deploy on
 Vercel; set the root directory to `docs`.
 
 ## Tests

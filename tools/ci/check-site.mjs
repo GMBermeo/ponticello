@@ -16,12 +16,16 @@ const PAGE = process.argv[2] ?? 'docs/index.html';
 const html = readFileSync(PAGE, 'utf8');
 const failures = [];
 
+const CANONICAL_ORIGIN = 'https://ponticello.app/';
 const references = new Set();
 for (const [, attr, value] of html.matchAll(/\s(src|href|poster|srcset|content)="([^"]+)"/g)) {
   for (const candidate of attr === 'srcset' ? value.split(',').map((part) => part.trim().split(/\s+/)[0]) : [value]) {
-    if (!candidate || /^(https?:|mailto:|#|data:)/.test(candidate)) continue;
-    if (attr === 'content' && !candidate.startsWith('assets/')) continue;
-    references.add(candidate.split(/[?#]/)[0]);
+    const local = candidate.startsWith(CANONICAL_ORIGIN)
+      ? candidate.slice(CANONICAL_ORIGIN.length)
+      : candidate;
+    if (!local || /^(https?:|mailto:|#|data:)/.test(local)) continue;
+    if (attr === 'content' && !local.startsWith('assets/')) continue;
+    references.add(local.split(/[?#]/)[0]);
   }
 }
 for (const path of references) {
