@@ -1,6 +1,8 @@
 # Ponticello product site
 
-A static page — `index.html`, `styles.css` and `assets/` — with no build step.
+A static page — `index.html`, `styles.css` and `assets/` — with no build step,
+published at [ponticello.app](https://ponticello.app).
+See also [Pontifork](https://fork.ponticello.app/) for the companion tuner and chord book.
 
 ## Publish on Vercel
 
